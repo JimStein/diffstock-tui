@@ -1,23 +1,29 @@
 # DiffStock-TUI
 
-**DiffStock-TUI** is a high-performance Terminal User Interface (TUI) application built in Rust for probabilistic stock price forecasting. It combines real-time market data ingestion with Monte Carlo simulations to generate "Cones of Uncertainty," helping traders visualize potential future price paths and risk levels.
+**DiffStock-TUI** is a cutting-edge Terminal User Interface (TUI) application built in Rust for probabilistic stock price forecasting. It leverages **Generative AI** techniques—specifically a **TimeGrad-inspired Conditional Diffusion Model**—to generate high-fidelity future price paths.
+
+Unlike traditional Monte Carlo simulations that rely on simple statistical properties (like GBM), DiffStock-TUI implements a full neural network architecture using Hugging Face's `candle` framework to learn and sample from the conditional distribution of future prices.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)
+![Rust](https://img.shields.io/badge/rust-2024-orange.svg)
+![AI](https://img.shields.io/badge/AI-Diffusion%20Model-purple.svg)
 
 ## Features
 
-*   **Real-Time Data**: Fetches daily OHLCV data directly from Yahoo Finance.
-*   **Probabilistic Forecasting**: Generates 50-day forward simulations using Geometric Brownian Motion (GBM) based on historical volatility and drift.
-*   **Cone of Uncertainty**: Visualizes risk with P10, P30, P50 (Median), P70, and P90 percentile paths.
-*   **Technical Analysis**: Automatically calculates and displays Support, Resistance, and Pivot points.
-*   **Interactive TUI**: Fast, keyboard-driven interface built with `ratatui`.
+*   **Generative AI Forecasting**: Implements a conditional diffusion probabilistic model (DDPM) for time-series forecasting.
+*   **Deep Learning Architecture**:
+    *   **Encoder**: LSTM (Long Short-Term Memory) network to process historical price context.
+    *   **Denoiser**: WaveNet-style 1D Dilated Convolutional Network with Residual Blocks and Gated Activations.
+*   **Probabilistic Inference**: Generates "Cones of Uncertainty" (P10, P30, P50, P70, P90) by sampling 100+ distinct future paths.
+*   **Real-Time Data**: Fetches live OHLCV data from Yahoo Finance.
+*   **Rust-Native ML**: Powered by `candle-core` and `candle-nn` for efficient CPU-based inference.
+*   **Interactive TUI**: Responsive, keyboard-driven interface built with `ratatui`, featuring asynchronous progress tracking.
 
 ## Installation
 
 ### Prerequisites
 *   Rust and Cargo (latest stable version)
-*   A terminal with TrueColor support (e.g., Alacritty, iTerm2, Windows Terminal)
+*   A terminal with TrueColor support (e.g., Alacritty, iTerm2, Windows Terminal, VS Code Integrated Terminal)
 
 ### Build from Source
 
@@ -37,44 +43,29 @@ Run the application:
 cargo run --release
 ```
 
-1.  **Input**: Type a valid stock ticker symbol (e.g., `NVDA`, `AAPL`, `TSLA`) and press `Enter`.
-2.  **Analysis**: View the historical chart, technical levels, and the probabilistic forecast cone.
-3.  **Controls**:
-    *   `Enter`: Fetch data for the typed symbol.
+1.  **Input**: Type a valid stock ticker symbol (e.g., `NVDA`, `BTC-USD`, `SPY`) and press `Enter`.
+2.  **Inference**: Watch the progress bar as the Diffusion Model iteratively denoises random signals into price forecasts.
+3.  **Analysis**: View the historical chart, technical levels, and the probabilistic forecast cone.
+4.  **Controls**:
+    *   `Enter`: Fetch data and start inference.
     *   `r`: Reset the search.
     *   `q` or `Esc`: Quit the application.
 
-## Architecture
+## Technical Architecture
 
-*   **Language**: Rust
-*   **UI Framework**: [Ratatui](https://github.com/ratatui-org/ratatui)
-*   **Async Runtime**: Tokio
-*   **HTTP Client**: Reqwest (with Rustls)
-*   **Math/Stats**: Rand, Rand_Distr
+The application implements a sophisticated Model-View-Update (MVU) architecture:
 
-## Roadmap
+*   **Frontend**: `ratatui` for rendering charts, gauges, and text.
+*   **Backend**: `tokio` for asynchronous runtime and non-blocking UI.
+*   **Machine Learning**:
+    *   **Framework**: `candle` (Rust-native tensor library).
+    *   **Model**: A conditional diffusion model that learns the gradient of the data distribution.
+    *   **Sampling**: 50-step Gaussian Diffusion reverse process.
 
-*   [ ] Integration with PyTorch/Candle for Transformer-based Diffusion models.
-*   [ ] Configurable forecast horizons and simulation counts.
-*   [ ] Additional technical indicators (RSI, MACD).
-*   [ ] Portfolio simulation mode.
+## Disclaimer
 
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1.  Fork the repository.
-2.  Create your feature branch (`git checkout -b feature/AmazingFeature`).
-3.  Commit your changes (`git commit -m 'Add some AmazingFeature'`).
-4.  Push to the branch (`git push origin feature/AmazingFeature`).
-5.  Open a Pull Request.
+This project is for **educational and research purposes only**. The neural network architecture is implemented faithfully, but in this demo version, it may run with unoptimized or random weights depending on the configuration. Do not use these forecasts for real financial trading.
 
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Disclaimer
-
-**DiffStock-TUI is for educational and research purposes only.**
-
-The forecasts generated by this software are based on probabilistic simulations and historical data. They do not constitute financial advice. Stock market trading involves substantial risk of loss. Always do your own due diligence or consult a certified financial planner.

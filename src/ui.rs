@@ -3,7 +3,7 @@ use ratatui::{
     style::{Color, Style, Modifier},
     symbols,
     text::{Span, Line},
-    widgets::{Axis, Block, Borders, Chart, Dataset, GraphType, Paragraph},
+    widgets::{Axis, Block, Borders, Chart, Dataset, GraphType, Paragraph, Gauge},
     Frame,
 };
 use crate::app::{App, AppState};
@@ -12,9 +12,27 @@ pub fn render(f: &mut Frame, app: &App) {
     match app.state {
         AppState::Input => render_input(f, app),
         AppState::Loading => render_loading(f, "Fetching Data..."),
-        AppState::Forecasting => render_loading(f, "Running Inference..."),
+        AppState::Forecasting => render_progress(f, app),
         AppState::Dashboard => render_dashboard(f, app),
     }
+}
+
+fn render_progress(f: &mut Frame, app: &App) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(40),
+            Constraint::Length(3),
+            Constraint::Percentage(40),
+        ])
+        .split(f.area());
+
+    let gauge = Gauge::default()
+        .block(Block::default().title("Running Inference").borders(Borders::ALL))
+        .gauge_style(Style::default().fg(Color::Cyan))
+        .percent((app.progress * 100.0) as u16);
+
+    f.render_widget(gauge, chunks[1]);
 }
 
 fn render_input(f: &mut Frame, app: &App) {
@@ -51,10 +69,16 @@ fn render_loading(f: &mut Frame, msg: &str) {
 }
 
 fn render_dashboard(f: &mut Frame, app: &App) {
+    let constraints = if app.error_msg.is_some() {
+        vec![Constraint::Min(0), Constraint::Length(3)]
+    } else {
+        vec![Constraint::Percentage(100)]
+    };
+
     let main_chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(1)
-        .constraints([Constraint::Percentage(100)].as_ref())
+        .constraints(constraints)
         .split(f.area());
 
     if let Some(data) = &app.stock_data {
@@ -216,5 +240,12 @@ fn render_dashboard(f: &mut Frame, app: &App) {
             .style(Style::default().fg(Color::White));
         
         f.render_widget(info_block, dashboard_chunks[1]);
+    }
+
+    if let Some(err) = &app.error_msg {
+        let error = Paragraph::new(err.as_str())
+            .style(Style::default().fg(Color::Red))
+            .block(Block::default().borders(Borders::ALL).title("Error"));
+        f.render_widget(error, main_chunks[1]);
     }
 }

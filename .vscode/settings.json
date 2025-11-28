@@ -1,7 +1,14 @@
 {
     "cSpell.words": [
         "chrono",
+        "coeff",
+        "Conv",
+        "Denoising",
+        "LSTM",
+        "randn",
         "ratatui",
-        "reqwest"
+        "reqwest",
+        "silu",
+        "unsqueeze"
     ]
 }

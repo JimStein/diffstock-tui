@@ -1,6 +1,8 @@
 mod app;
 mod data;
+mod diffusion;
 mod inference;
+mod models;
 mod tui;
 mod ui;
 
