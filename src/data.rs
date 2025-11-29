@@ -56,7 +56,13 @@ pub async fn fetch_range(symbol: &str, range: &str) -> Result<StockData> {
         symbol, range
     );
     
-    let resp = reqwest::get(&url).await?.json::<YahooChartResponse>().await?;
+    let resp = reqwest::Client::new()
+        .get(&url)
+        .header("User-Agent", "Mozilla/5.0")
+        .send()
+        .await?
+        .json::<YahooChartResponse>()
+        .await?;
     let result = resp.chart.result.first().ok_or(anyhow::anyhow!("No data found"))?;
     
     let mut history = Vec::new();
