@@ -20,7 +20,7 @@ Unlike traditional Monte Carlo simulations that rely on simple statistical prope
 *   **Backtesting Utility**: Verify model performance against historical data.
 *   **Real-Time Data**: Fetches live OHLCV data from Yahoo Finance.
 *   **Rust-Native ML**: Powered by `candle-core` and `candle-nn` for efficient CPU-based inference.
-*   **Interactive TUI**: Responsive, keyboard-driven interface built with `ratatui`, featuring asynchronous progress tracking.
+*   **Interactive TUI & GUI**: Choose between a keyboard-driven terminal interface (`ratatui`) or a modern graphical user interface (`egui`) with interactive charts.
 
 ## Installation
 
@@ -49,20 +49,28 @@ cargo run --release -- --train
 *   **Output**: Saves trained weights to `model_weights.safetensors`.
 *   **Duration**: Depends on CPU, typically a few minutes for 100 epochs.
 
-### 2. Running the TUI (Inference)
-Once trained, run the application to visualize forecasts.
+### 2. Running the Application
+
+#### Terminal UI (Default)
+Run the application in your terminal to visualize forecasts with a keyboard-driven interface.
 
 ```bash
 cargo run --release
 ```
 
 1.  **Input**: Type a valid stock ticker symbol (e.g., `NVDA`, `BTC-USD`, `SPY`) and press `Enter`.
-2.  **Inference**: Watch the progress bar as the Diffusion Model iteratively denoises random signals into price forecasts using your trained weights.
-3.  **Analysis**: View the historical chart, technical levels, and the probabilistic forecast cone.
-4.  **Controls**:
-    *   `Enter`: Fetch data and start inference.
-    *   `r`: Reset the search.
-    *   `q` or `Esc`: Quit the application.
+2.  **Inference**: Watch the progress bar as the Diffusion Model iteratively denoises random signals into price forecasts.
+3.  **Controls**: `Enter` to fetch, `r` to reset, `q` or `Esc` to quit.
+
+#### Graphical UI (GUI)
+Launch the modern windowed interface for interactive charts and mouse support.
+
+```bash
+cargo run --release -- --gui
+```
+
+*   **Interactive Charts**: Zoom, pan, and hover over data points to see exact dates and prices.
+*   **Visual Forecasts**: Clear visualization of P10, P30, P50 (Median), P70, and P90 confidence intervals.
 
 ### 3. Backtesting
 Validate the model's performance on historical SPY data.
@@ -75,7 +83,9 @@ cargo run --release -- --backtest
 
 The application implements a sophisticated Model-View-Update (MVU) architecture:
 
-*   **Frontend**: `ratatui` for rendering charts, gauges, and text.
+*   **Frontend**:
+    *   **TUI**: `ratatui` for rendering terminal charts, gauges, and text.
+    *   **GUI**: `egui` and `eframe` for immediate-mode graphical rendering and interactive plotting.
 *   **Backend**: `tokio` for asynchronous runtime and non-blocking UI.
 *   **Machine Learning**:
     *   **Framework**: `candle` (Rust-native tensor library).
