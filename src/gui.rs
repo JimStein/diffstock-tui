@@ -140,16 +140,16 @@ impl eframe::App for GuiApp {
                                          .map(|dt| dt.format("%Y-%m-%d").to_string())
                                          .single()
                                          .unwrap_or_default();
-                                     ui.label(format!("Target (Median) (50day - {}): {:.2}", dt, p50_last));
+                                     ui.label(egui::RichText::new(format!("Target (Median) (50day - {}): {:.2}", dt, p50_last)).strong().color(egui::Color32::GREEN));
                                 }
                                 if let Some((_, p30_last)) = forecast.p30.last() {
                                      if let Some((_, p70_last)) = forecast.p70.last() {
-                                         ui.label(format!("Range (P30-P70): {:.2} - {:.2}", p30_last, p70_last));
+                                         ui.label(egui::RichText::new(format!("Range (P30-P70): {:.2} - {:.2}", p30_last, p70_last)).strong().color(egui::Color32::YELLOW));
                                      }
                                 }
                                  if let Some((_, p10_last)) = forecast.p10.last() {
                                      if let Some((_, p90_last)) = forecast.p90.last() {
-                                         ui.label(format!("Range (P10-P90): {:.2} - {:.2}", p10_last, p90_last));
+                                         ui.label(egui::RichText::new(format!("Range (P10-P90): {:.2} - {:.2}", p10_last, p90_last)).strong().color(egui::Color32::LIGHT_RED));
                                          ui.label("P10: Bearish / Conservative");
                                          ui.label("P90: Bullish / Optimistic");
                                      }
