@@ -16,7 +16,19 @@ pub async fn train_model() -> Result<()> {
     let device = Device::Cpu;
 
     // 1. Fetch Data
-    let symbols = vec!["SPY", "BTC-USD", "NVDA"];
+    // Expanded dataset covering Indexes, Sectors, Commodities, and Crypto
+    let symbols = vec![
+        // US Indexes
+        "SPY", "QQQ", "DIA", "IWM", 
+        // US Sectors
+        "XLK", "XLF", "XLV", "XLE", "XLY", "XLP", "XLI", "XLU", "XLB", "XLRE", "XLC",
+        // Commodities
+        "GLD", "SLV", "USO", "UNG", "DBC",
+        // Crypto
+        "BTC-USD", "ETH-USD",
+        // Volatility
+        "VIXY"
+    ];
     let mut all_features = Vec::new();
     let mut all_targets = Vec::new();
 

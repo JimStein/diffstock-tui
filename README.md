@@ -15,8 +15,8 @@ Unlike traditional Monte Carlo simulations that rely on simple statistical prope
     *   **Encoder**: LSTM (Long Short-Term Memory) network to process historical price context.
     *   **Denoiser**: WaveNet-style 1D Dilated Convolutional Network with Residual Blocks and Gated Activations.
     *   **Features**: Trains on Log Returns and Overnight Returns for robust pattern recognition.
-*   **Training Pipeline**: Built-in training mode to learn from 5 years of multi-asset history (SPY, BTC-USD, NVDA).
-*   **Probabilistic Inference**: Generates "Cones of Uncertainty" (P10, P30, P50, P70, P90) by sampling 100+ distinct future paths.
+*   **Training Pipeline**: Built-in training mode to learn from 5 years of diverse market history (US Indexes, Sectors, Commodities, Crypto, Volatility).
+*   **Probabilistic Inference**: Generates "Cones of Uncertainty" (P10, P30, P50, P70, P90) by sampling 500 distinct future paths.
 *   **Backtesting Utility**: Verify model performance against historical data.
 *   **Real-Time Data**: Fetches live OHLCV data from Yahoo Finance.
 *   **Rust-Native ML**: Powered by `candle-core` and `candle-nn` for efficient CPU-based inference.
@@ -41,7 +41,7 @@ The binary will be located in `target/release/diffstock-tui`.
 ## Usage
 
 ### 1. Training the Model
-Before running inference, you should train the model to learn market patterns. This downloads 5 years of data for SPY, BTC, and NVDA, and trains the diffusion model.
+Before running inference, you should train the model to learn market patterns. This downloads 5 years of data for a broad basket of assets (SPY, QQQ, Sector ETFs, Gold, Oil, BTC, etc.) and trains the diffusion model.
 
 ```bash
 cargo run --release -- --train

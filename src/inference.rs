@@ -156,7 +156,7 @@ pub async fn run_inference(
 pub async fn run_backtest(data: Arc<StockData>) -> Result<()> {
     println!("Running Backtest...");
     let horizon = 10;
-    let num_simulations = 100;
+    let num_simulations = 500;
     
     // Hide last 50 days (or just horizon?)
     // The prompt says "hides the last 50 days".

@@ -99,7 +99,7 @@ impl App {
                                                 
                                                 // Spawn Inference Task
                                                 tokio::spawn(async move {
-                                                    let res = inference::run_inference(data_clone, 50, 100, Some(prog_tx)).await;
+                                                    let res = inference::run_inference(data_clone, 50, 500, Some(prog_tx)).await;
                                                     let _ = res_tx.send(res).await;
                                                 });
                                             }
