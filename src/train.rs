@@ -4,11 +4,12 @@ use crate::models::time_grad::{EpsilonTheta, RNNEncoder};
 use anyhow::Result;
 use candle_core::{DType, Device, Tensor};
 use candle_nn::{VarBuilder, VarMap, Optimizer};
+use rand::seq::SliceRandom;
 
 const LOOKBACK: usize = 50;
 const FORECAST: usize = 10;
-const BATCH_SIZE: usize = 32;
-const EPOCHS: usize = 100;
+const BATCH_SIZE: usize = 64;
+const EPOCHS: usize = 200;
 const LEARNING_RATE: f64 = 1e-3;
 
 pub async fn train_model() -> Result<()> {
@@ -16,18 +17,10 @@ pub async fn train_model() -> Result<()> {
     let device = Device::Cpu;
 
     // 1. Fetch Data
-    // Expanded dataset covering Indexes, Sectors, Commodities, and Crypto
+    // Training on ARKK
     let symbols = vec![
-        // US Indexes
-        "SPY", "QQQ", "DIA", "IWM", 
-        // US Sectors
-        "XLK", "XLF", "XLV", "XLE", "XLY", "XLP", "XLI", "XLU", "XLB", "XLRE", "XLC",
-        // Commodities
-        "GLD", "SLV", "USO", "UNG", "DBC",
-        // Crypto
-        "BTC-USD", "ETH-USD",
-        // Volatility
-        "VIXY"
+        "SPY", "DIA", "QQQ", "XLK", "XLI", "XLF", "XLC", "XLY", "XLRE", "XLV", "XLU", "XLP", "XLE",
+        "XLB",
     ];
     let mut all_features = Vec::new();
     let mut all_targets = Vec::new();
@@ -54,11 +47,11 @@ pub async fn train_model() -> Result<()> {
     let varmap = VarMap::new();
     let vb = VarBuilder::from_varmap(&varmap, DType::F32, &device);
 
+    let _input_dim = 2; // Close Return, Overnight Return
     let input_dim = 2; // Close Return, Overnight Return
-    let hidden_dim = 32;
-    let num_layers = 2;
+    let hidden_dim = 64;
+    let num_layers = 3;
     let diff_steps = 100;
-
     let encoder = RNNEncoder::new(input_dim, hidden_dim, vb.pp("encoder"))?;
     let model = EpsilonTheta::new(1, hidden_dim, hidden_dim, num_layers, vb.pp("model"))?; // input_channels=1 (target is close return)
     let diffusion = GaussianDiffusion::new(diff_steps, &device)?;
@@ -74,7 +67,8 @@ pub async fn train_model() -> Result<()> {
         
         // Shuffle indices (simple shuffle)
         let indices: Vec<usize> = (0..num_samples).collect();
-        // rand::seq::SliceRandom::shuffle(&mut indices, &mut rand::thread_rng()); // Need rand dependency imported
+        let mut indices = indices;
+        indices.shuffle(&mut rand::thread_rng());
 
         for batch_idx in 0..num_batches {
             let start = batch_idx * BATCH_SIZE;
@@ -166,8 +160,13 @@ pub async fn train_model() -> Result<()> {
             opt.backward_step(&loss)?;
             total_loss += loss.to_scalar::<f32>()? as f64;
         }
-        
         println!("Epoch {}: Loss = {:.6}", epoch + 1, total_loss / num_batches as f64);
+
+        if (epoch + 1) % 50 == 0 {
+            let current_lr = opt.learning_rate();
+            opt.set_learning_rate(current_lr * 0.5);
+            println!("Decaying learning rate to {:.6}", current_lr * 0.5);
+        }
     }
 
     // 4. Save Weights
