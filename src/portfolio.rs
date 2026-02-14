@@ -1,11 +1,9 @@
 use crate::config::{get_device, DIFF_STEPS, HIDDEN_DIM, INPUT_DIM, NUM_LAYERS, TRAINING_SYMBOLS};
-use crate::data::StockData;
 use crate::diffusion::GaussianDiffusion;
 use crate::models::time_grad::{EpsilonTheta, RNNEncoder};
 use anyhow::Result;
 use candle_core::{DType, Tensor};
 use candle_nn::VarBuilder;
-use std::sync::Arc;
 use tracing::{info, warn, error};
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -45,6 +43,7 @@ pub const OPTIMIZER_SAMPLES: usize = 100_000;
 
 /// Per-asset forecast statistics derived from diffusion Monte Carlo paths.
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct AssetForecast {
     pub symbol: String,
     pub current_price: f64,
@@ -167,10 +166,10 @@ pub async fn generate_multi_asset_forecasts(
 
         let context_tensor = Tensor::from_slice(&normalized, (1, context_len, 2), &device)?;
 
-        // Asset ID
+        // Asset ID (case-insensitive match)
         let asset_id = TRAINING_SYMBOLS
             .iter()
-            .position(|&s| s == symbol.as_str())
+            .position(|&s| s.eq_ignore_ascii_case(symbol))
             .unwrap_or(0);
         let asset_id_tensor = Tensor::new(&[asset_id as u32], &device)?;
 
@@ -344,7 +343,7 @@ pub fn optimize_portfolio(forecasts: &[AssetForecast]) -> Result<PortfolioAlloca
     info!("Optimizing portfolio with {} assets, {} random samples...", n, OPTIMIZER_SAMPLES);
 
     // Log per-asset stats
-    for (i, f) in forecasts.iter().enumerate() {
+    for f in forecasts.iter() {
         info!(
             "  {}: E[r]={:.4}, σ={:.4}, Sharpe={:.2}, P10={:.2}, P50={:.2}, P90={:.2}",
             f.symbol, f.annual_return, f.annual_vol, f.sharpe, f.p10_price, f.p50_price, f.p90_price
@@ -352,7 +351,6 @@ pub fn optimize_portfolio(forecasts: &[AssetForecast]) -> Result<PortfolioAlloca
     }
 
     let mut rng = rand::thread_rng();
-    use rand::Rng;
 
     let mut best_sharpe = f64::NEG_INFINITY;
     let mut best_weights: Vec<f64> = vec![1.0 / n as f64; n]; // Equal weight fallback
@@ -392,7 +390,7 @@ pub fn optimize_portfolio(forecasts: &[AssetForecast]) -> Result<PortfolioAlloca
     let port_ret = portfolio_return(&refined_weights, &means) * periods_per_year;
     let port_var = portfolio_variance(&refined_weights, &cov) * periods_per_year;
     let port_vol = port_var.sqrt();
-    let sharpe = if port_vol > 1e-8 {
+    let _sharpe = if port_vol > 1e-8 {
         (port_ret - RISK_FREE_RATE) / port_vol
     } else {
         0.0
@@ -448,9 +446,6 @@ fn refine_weights(
     forecasts: &[AssetForecast],
     rng: &mut impl rand::Rng,
 ) -> Vec<f64> {
-    use rand::Rng;
-
-    let n = base.len();
     let periods_per_year = TRADING_DAYS / PORTFOLIO_HORIZON as f64;
 
     let base_ret = portfolio_return(base, means) * periods_per_year;
@@ -649,7 +644,6 @@ pub fn print_allocation(alloc: &PortfolioAllocation) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::StockData;
 
     fn mock_forecasts(n: usize) -> Vec<AssetForecast> {
         use rand::Rng;

@@ -111,7 +111,7 @@ pub async fn fetch_range(symbol: &str, range: &str) -> Result<StockData> {
     }
     
     Ok(StockData {
-        symbol: symbol.to_string(),
+        symbol: symbol.to_uppercase(),
         history,
     })
 }
@@ -207,7 +207,7 @@ impl StockData {
         }
 
         Ok(Self {
-            symbol: symbol.to_string(),
+            symbol: symbol.to_uppercase(),
             history,
         })
     }

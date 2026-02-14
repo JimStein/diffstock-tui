@@ -37,10 +37,12 @@ pub const PATIENCE: usize = 20;
 
 pub const TRAINING_SYMBOLS: &[&str] = &[
     "SPY", "DIA", "QQQ", "XLK", "XLI", "XLF", "XLC", "XLY", "XLRE", "XLV", "XLU", "XLP", "XLE",
-    "XLB", "ARKK", "NVDA", "QQQI", "RDVI",
+    "XLB", "ARKK", "NVDA", "QQQI", "RDVI", "AMZN", "META", "GOOGL", "AAPL","MSFT",
+    "IAU","SLV","ETN","TSLA","TLT","URA","COPX"
 ];
 
 /// Default symbols for portfolio optimization when none are specified.
+#[allow(dead_code)]
 pub const DEFAULT_PORTFOLIO_SYMBOLS: &[&str] = &[
     "NVDA", "MSFT", "AAPL", "GOOGL", "AMZN", "META", "QQQ", "SPY",
 ];

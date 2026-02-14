@@ -65,8 +65,9 @@ pub async fn run_inference(
     // [1, SeqLen, 2]
     let context_tensor = Tensor::from_slice(&normalized_features, (1, context_len, 2), &device)?;
 
-    // Determine Asset ID
-    let asset_id = TRAINING_SYMBOLS.iter().position(|&s| s == data.symbol).unwrap_or_else(|| {
+    // Determine Asset ID (case-insensitive match)
+    let symbol_upper = data.symbol.to_uppercase();
+    let asset_id = TRAINING_SYMBOLS.iter().position(|&s| s.eq_ignore_ascii_case(&symbol_upper)).unwrap_or_else(|| {
         warn!("Symbol {} not found in training set. Using default asset ID 0.", data.symbol);
         0
     });

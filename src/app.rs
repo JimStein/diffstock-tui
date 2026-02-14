@@ -110,7 +110,7 @@ impl App {
     pub fn trigger_fetch(&mut self) {
         if !self.input.is_empty() {
             self.state = AppState::Loading;
-            let symbol = self.input.clone();
+            let symbol = self.input.trim().to_uppercase();
             let (tx, rx) = mpsc::channel(1);
             self.data_rx = Some(rx);
             
