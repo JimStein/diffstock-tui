@@ -4,6 +4,7 @@ mod data;
 mod diffusion;
 mod inference;
 mod models;
+mod portfolio;
 mod train;
 mod tui;
 mod ui;
@@ -61,6 +62,10 @@ struct Args {
     #[arg(long)]
     patience: Option<usize>,
 
+    /// Run portfolio optimizer — provide comma-separated symbols (e.g., NVDA,MSFT,AAPL)
+    #[arg(long)]
+    portfolio: Option<String>,
+
     /// Use CUDA GPU acceleration (requires --features cuda at compile time)
     #[arg(long)]
     cuda: bool,
@@ -75,6 +80,23 @@ async fn main() -> io::Result<()> {
         match train::train_model(args.epochs, args.batch_size, args.learning_rate, args.patience, args.cuda).await {
             Ok(_) => info!("Training completed successfully."),
             Err(e) => error!("Training failed: {}", e),
+        }
+        return Ok(());
+    }
+
+    if let Some(ref symbols_str) = args.portfolio {
+        let symbols: Vec<String> = symbols_str
+            .split(',')
+            .map(|s| s.trim().to_uppercase())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if symbols.len() < 2 {
+            error!("Portfolio optimization requires at least 2 symbols. Example: --portfolio NVDA,MSFT,AAPL,QQQ");
+            return Ok(());
+        }
+        match portfolio::run_portfolio_optimization(&symbols, args.cuda).await {
+            Ok(_alloc) => info!("Portfolio optimization completed."),
+            Err(e) => error!("Portfolio optimization failed: {}", e),
         }
         return Ok(());
     }

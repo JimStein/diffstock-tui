@@ -39,3 +39,8 @@ pub const TRAINING_SYMBOLS: &[&str] = &[
     "SPY", "DIA", "QQQ", "XLK", "XLI", "XLF", "XLC", "XLY", "XLRE", "XLV", "XLU", "XLP", "XLE",
     "XLB", "ARKK", "NVDA", "QQQI", "RDVI",
 ];
+
+/// Default symbols for portfolio optimization when none are specified.
+pub const DEFAULT_PORTFOLIO_SYMBOLS: &[&str] = &[
+    "NVDA", "MSFT", "AAPL", "GOOGL", "AMZN", "META", "QQQ", "SPY",
+];

@@ -28,6 +28,9 @@ cargo run --release --features cuda -- --cuda
 # Backtest on SPY
 cargo run --release -- --backtest
 
+# Run portfolio optimizer (comma-separated symbols)
+cargo run --release -- --portfolio NVDA,MSFT,AAPL,GOOGL,AMZN,META,QQQ,SPY
+
 # Run all tests (must use --release due to candle integer overflow in debug)
 cargo test --release
 
@@ -36,6 +39,7 @@ cargo test --release data::tests
 cargo test --release diffusion::tests
 cargo test --release train::tests
 cargo test --release inference::tests
+cargo test --release portfolio::tests
 ```
 
 ## Architecture
@@ -55,6 +59,17 @@ Probabilistic stock forecasting app using a TimeGrad-inspired conditional diffus
 **Training** (`train.rs`) — Trains on multi-asset data. Samples random timesteps, adds noise, predicts noise (MSE loss). AdamW optimizer with LR decay (0.5x every 50 epochs). Checkpoints best model by validation loss to `model_weights.safetensors`. Early stopping halts training when validation loss plateaus (configurable via `--patience`, default 20 epochs).
 
 **Inference** (`inference.rs`) — Loads saved weights, runs autoregressive diffusion sampling over 500+ Monte Carlo paths, outputs P10/P30/P50/P70/P90 percentile price cones.
+
+### Portfolio Optimization
+
+**Portfolio** (`portfolio.rs`) — Multi-asset portfolio optimizer powered by diffusion model forecasts. Pipeline:
+1. Generates per-asset Monte Carlo return distributions via the trained diffusion model
+2. Estimates cross-asset covariance matrix from MC paths
+3. Optimizes weights via Monte Carlo random sampling + local refinement (Phase 1: max Sharpe, Phase 2: Sharpe–CVaR combined objective)
+4. Applies vol-targeting overlay (scales leverage so annualized vol ≈ 16%)
+5. Outputs weight allocation, share counts, risk metrics (Sharpe, CVaR), and price targets
+
+Key constants in `portfolio.rs`: `PORTFOLIO_MC_PATHS=500`, `PORTFOLIO_HORIZON=10`, `RISK_FREE_RATE=0.05`, `MAX_SINGLE_WEIGHT=0.40`, `TARGET_ANNUAL_VOL=0.16`, `OPTIMIZER_SAMPLES=100000`.
 
 ### App Layer
 

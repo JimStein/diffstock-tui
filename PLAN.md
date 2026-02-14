@@ -64,3 +64,19 @@
 - [x] Add `get_device(use_cuda)` helper in `config.rs` with automatic CPU fallback.
 - [x] Add `--cuda` CLI flag threaded through train, inference, app, and GUI.
 - [x] Fix GPU-hostile `to_vec1` roundtrip in training loop (replaced with `to_dtype(DType::U32)`).
+
+## 11. Portfolio Optimization & Position Sizing
+**Goal**: Automatically adjust portfolio weights across multiple assets using diffusion model forecasts.
+- [x] Create `portfolio.rs` module with full pipeline (forecast → optimize → allocate).
+- [x] Monte Carlo covariance estimation from diffusion model paths.
+- [x] Mean-variance optimization with Sharpe maximization + CVaR risk control.
+- [x] Constraint enforcement (max/min single-asset weight, sum-to-1).
+- [x] Vol-targeting overlay (leverage scaling to target annualized vol).
+- [x] `--portfolio NVDA,MSFT,...` CLI flag for running portfolio optimizer.
+- [x] Pretty-printed allocation report with share counts for given capital.
+- [x] Per-asset price targets (P10/P50/P90) from diffusion forecasts.
+- [x] Unit tests for covariance symmetry, weight generation, optimizer correctness.
+- [ ] Backtest portfolio strategy on historical data with rolling windows.
+- [ ] TUI/GUI screen for portfolio dashboard.
+- [ ] Transaction cost modeling (commissions, spread, slippage).
+- [ ] Black-Litterman overlay for incorporating analyst views.
