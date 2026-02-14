@@ -1,4 +1,4 @@
-use crate::config::{get_device, DIFF_STEPS, HIDDEN_DIM, INPUT_DIM, NUM_LAYERS, TRAINING_SYMBOLS};
+use crate::config::{get_device, DIFF_STEPS, DROPOUT_RATE, HIDDEN_DIM, INPUT_DIM, LOOKBACK, LSTM_LAYERS, NUM_LAYERS, TRAINING_SYMBOLS};
 use crate::diffusion::GaussianDiffusion;
 use crate::models::time_grad::{EpsilonTheta, RNNEncoder};
 use anyhow::Result;
@@ -95,7 +95,7 @@ pub async fn generate_multi_asset_forecasts(
     use_cuda: bool,
 ) -> Result<Vec<AssetForecast>> {
     let device = get_device(use_cuda);
-    let context_len = 50;
+    let context_len = LOOKBACK;
     let num_assets = TRAINING_SYMBOLS.len();
 
     // Load model weights once
@@ -113,8 +113,8 @@ pub async fn generate_multi_asset_forecasts(
         ));
     };
 
-    let encoder = RNNEncoder::new(INPUT_DIM, HIDDEN_DIM, vb.pp("encoder"))?;
-    let model = EpsilonTheta::new(1, HIDDEN_DIM, HIDDEN_DIM, NUM_LAYERS, num_assets, vb.pp("model"))?;
+    let encoder = RNNEncoder::new(INPUT_DIM, HIDDEN_DIM, LSTM_LAYERS, DROPOUT_RATE, vb.pp("encoder"))?;
+    let model = EpsilonTheta::new(1, HIDDEN_DIM, HIDDEN_DIM, NUM_LAYERS, num_assets, DROPOUT_RATE, vb.pp("model"))?;
     let diffusion = GaussianDiffusion::new(DIFF_STEPS, &device)?;
 
     let mut forecasts = Vec::with_capacity(symbols.len());
@@ -174,7 +174,7 @@ pub async fn generate_multi_asset_forecasts(
         let asset_id_tensor = Tensor::new(&[asset_id as u32], &device)?;
 
         // Encode
-        let hidden_state = encoder.forward(&context_tensor)?;
+        let hidden_state = encoder.forward(&context_tensor, false)?;
         let hidden_state = hidden_state.unsqueeze(2)?;
 
         // Monte Carlo sampling

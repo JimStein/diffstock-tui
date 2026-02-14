@@ -68,7 +68,7 @@ impl GaussianDiffusion {
             let time_tensor = Tensor::new(&[t as f32], device)?.unsqueeze(0)?; // [1, 1]
             
             // Predict noise
-            let epsilon_theta = model.forward(&x, &time_tensor, asset_ids, cond)?;
+            let epsilon_theta = model.forward(&x, &time_tensor, asset_ids, cond, false)?;
 
             // Compute mean
             // mu = 1/sqrt(alpha_t) * (x_t - beta_t/sqrt(1-alpha_bar_t) * epsilon)

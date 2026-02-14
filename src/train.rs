@@ -1,4 +1,4 @@
-use crate::config::{get_device, BATCH_SIZE, DIFF_STEPS, EPOCHS, FORECAST, HIDDEN_DIM, INPUT_DIM, LEARNING_RATE, LOOKBACK, NUM_LAYERS, PATIENCE, TRAINING_SYMBOLS};
+use crate::config::{get_device, AUGMENTATION_COPIES, AUGMENTATION_NOISE, BATCH_SIZE, DATA_RANGE, DIFF_STEPS, DROPOUT_RATE, EPOCHS, FORECAST, HIDDEN_DIM, INPUT_DIM, LEARNING_RATE, LOOKBACK, LSTM_LAYERS, NUM_LAYERS, PATIENCE, TRAINING_SYMBOLS, WEIGHT_DECAY};
 use crate::data::{StockData, TrainingDataset};
 use crate::diffusion::GaussianDiffusion;
 use crate::models::time_grad::{EpsilonTheta, RNNEncoder};
@@ -80,11 +80,16 @@ async fn train_loop_with_progress(
     let vb = VarBuilder::from_varmap(&varmap, DType::F32, &device);
     let num_assets = TRAINING_SYMBOLS.len();
 
-    let encoder = RNNEncoder::new(INPUT_DIM, HIDDEN_DIM, vb.pp("encoder"))?;
-    let model = EpsilonTheta::new(1, HIDDEN_DIM, HIDDEN_DIM, NUM_LAYERS, num_assets, vb.pp("model"))?;
+    let encoder = RNNEncoder::new(INPUT_DIM, HIDDEN_DIM, LSTM_LAYERS, DROPOUT_RATE, vb.pp("encoder"))?;
+    let model = EpsilonTheta::new(1, HIDDEN_DIM, HIDDEN_DIM, NUM_LAYERS, num_assets, DROPOUT_RATE, vb.pp("model"))?;
     let diffusion = GaussianDiffusion::new(DIFF_STEPS, &device)?;
 
-    let mut opt = candle_nn::AdamW::new_lr(varmap.all_vars(), learning_rate)?;
+    let params = candle_nn::ParamsAdamW {
+        lr: learning_rate,
+        weight_decay: WEIGHT_DECAY,
+        ..Default::default()
+    };
+    let mut opt = candle_nn::AdamW::new(varmap.all_vars(), params)?;
 
     let num_train_samples = train_data.features.len();
     let num_train_batches = num_train_samples / batch_size;
@@ -96,7 +101,7 @@ async fn train_loop_with_progress(
     let mut epochs_without_improvement: usize = 0;
 
     let _ = tx.send(TrainMessage::Log(format!(
-        "Model initialized. {} train batches, {} val batches per epoch.",
+        "Model initialized (~25M params). {} train batches, {} val batches per epoch.",
         num_train_batches, num_val_batches
     ))).await;
 
@@ -126,7 +131,7 @@ async fn train_loop_with_progress(
             let asset_ids = Tensor::new(batch_asset_ids.as_slice(), &device)?;
             let x_0 = x_0.permute((0, 2, 1))?;
 
-            let cond = encoder.forward(&x_hist)?;
+            let cond = encoder.forward(&x_hist, true)?;
             let cond = cond.unsqueeze(2)?;
 
             let t = Tensor::rand(0.0f32, DIFF_STEPS as f32, (batch_size,), &device)?
@@ -143,7 +148,7 @@ async fn train_loop_with_progress(
 
             let x_t = (x_0.broadcast_mul(&sqrt_alpha_bar_t)? + epsilon.broadcast_mul(&sqrt_one_minus_alpha_bar_t)?)?;
             let t_in = t.unsqueeze(1)?;
-            let epsilon_pred = model.forward(&x_t, &t_in, &asset_ids, &cond)?;
+            let epsilon_pred = model.forward(&x_t, &t_in, &asset_ids, &cond, true)?;
 
             let loss = (epsilon - epsilon_pred)?.sqr()?.mean_all()?;
             opt.backward_step(&loss)?;
@@ -173,7 +178,7 @@ async fn train_loop_with_progress(
                 let asset_ids = Tensor::new(batch_asset_ids.as_slice(), &device)?;
                 let x_0 = x_0.permute((0, 2, 1))?;
 
-                let cond = encoder.forward(&x_hist)?;
+                let cond = encoder.forward(&x_hist, false)?;
                 let cond = cond.unsqueeze(2)?;
 
                 let t = Tensor::rand(0.0f32, DIFF_STEPS as f32, (batch_size,), &device)?
@@ -190,7 +195,7 @@ async fn train_loop_with_progress(
 
                 let x_t = (x_0.broadcast_mul(&sqrt_alpha_bar_t)? + epsilon.broadcast_mul(&sqrt_one_minus_alpha_bar_t)?)?;
                 let t_in = t.unsqueeze(1)?;
-                let epsilon_pred = model.forward(&x_t, &t_in, &asset_ids, &cond)?;
+                let epsilon_pred = model.forward(&x_t, &t_in, &asset_ids, &cond, false)?;
 
                 let loss = (epsilon - epsilon_pred)?.sqr()?.mean_all()?;
                 total_val_loss += loss.to_scalar::<f32>()? as f64;
@@ -265,11 +270,16 @@ pub async fn train_model_with_data(
 
     let num_assets = TRAINING_SYMBOLS.len();
 
-    let encoder = RNNEncoder::new(INPUT_DIM, HIDDEN_DIM, vb.pp("encoder"))?;
-    let model = EpsilonTheta::new(1, HIDDEN_DIM, HIDDEN_DIM, NUM_LAYERS, num_assets, vb.pp("model"))?; // input_channels=1 (target is close return)
+    let encoder = RNNEncoder::new(INPUT_DIM, HIDDEN_DIM, LSTM_LAYERS, DROPOUT_RATE, vb.pp("encoder"))?;
+    let model = EpsilonTheta::new(1, HIDDEN_DIM, HIDDEN_DIM, NUM_LAYERS, num_assets, DROPOUT_RATE, vb.pp("model"))?;
     let diffusion = GaussianDiffusion::new(DIFF_STEPS, &device)?;
 
-    let mut opt = candle_nn::AdamW::new_lr(varmap.all_vars(), learning_rate)?;
+    let params = candle_nn::ParamsAdamW {
+        lr: learning_rate,
+        weight_decay: WEIGHT_DECAY,
+        ..Default::default()
+    };
+    let mut opt = candle_nn::AdamW::new(varmap.all_vars(), params)?;
 
     // 3. Training Loop
     let num_train_samples = train_data.features.len();
@@ -314,7 +324,7 @@ pub async fn train_model_with_data(
             let x_0 = x_0.permute((0, 2, 1))?; 
 
             // Encode History
-            let cond = encoder.forward(&x_hist)?; 
+            let cond = encoder.forward(&x_hist, true)?; 
             let cond = cond.unsqueeze(2)?; 
 
             // Sample t
@@ -336,7 +346,7 @@ pub async fn train_model_with_data(
             let x_t = (x_0.broadcast_mul(&sqrt_alpha_bar_t)? + epsilon.broadcast_mul(&sqrt_one_minus_alpha_bar_t)?)?;
             
             let t_in = t.unsqueeze(1)?;
-            let epsilon_pred = model.forward(&x_t, &t_in, &asset_ids, &cond)?;
+            let epsilon_pred = model.forward(&x_t, &t_in, &asset_ids, &cond, true)?;
             
             let loss = (epsilon - epsilon_pred)?.sqr()?.mean_all()?;
             
@@ -369,7 +379,7 @@ pub async fn train_model_with_data(
                 let asset_ids = Tensor::new(batch_asset_ids.as_slice(), &device)?;
                 let x_0 = x_0.permute((0, 2, 1))?;
 
-                let cond = encoder.forward(&x_hist)?;
+                let cond = encoder.forward(&x_hist, false)?;
                 let cond = cond.unsqueeze(2)?;
 
                 let t = Tensor::rand(0.0f32, DIFF_STEPS as f32, (batch_size,), &device)?
@@ -389,7 +399,7 @@ pub async fn train_model_with_data(
                 let x_t = (x_0.broadcast_mul(&sqrt_alpha_bar_t)? + epsilon.broadcast_mul(&sqrt_one_minus_alpha_bar_t)?)?;
 
                 let t_in = t.unsqueeze(1)?;
-                let epsilon_pred = model.forward(&x_t, &t_in, &asset_ids, &cond)?;
+                let epsilon_pred = model.forward(&x_t, &t_in, &asset_ids, &cond, false)?;
 
                 let loss = (epsilon - epsilon_pred)?.sqr()?.mean_all()?;
                 total_val_loss += loss.to_scalar::<f32>()? as f64;
@@ -434,7 +444,7 @@ async fn fetch_training_data() -> Result<(TrainingDataset, TrainingDataset)> {
 
     for (id, symbol) in symbols.iter().enumerate() {
         info!("Fetching data for {} (ID: {})...", symbol, id);
-        match StockData::fetch_range(symbol, "5y").await {
+        match StockData::fetch_range(symbol, DATA_RANGE).await {
             Ok(data) => {
                 let dataset = data.prepare_training_data(LOOKBACK, FORECAST, id);
                 all_features.extend(dataset.features);
@@ -444,6 +454,30 @@ async fn fetch_training_data() -> Result<(TrainingDataset, TrainingDataset)> {
             Err(e) => error!("Failed to fetch {}: {}", symbol, e),
         }
     }
+
+    info!("Original samples: {}", all_features.len());
+
+    // Data augmentation: add Gaussian noise copies
+    let original_len = all_features.len();
+    let mut rng = rand::thread_rng();
+    use rand::Rng;
+    for _ in 0..AUGMENTATION_COPIES {
+        for i in 0..original_len {
+            let aug_features: Vec<f64> = all_features[i]
+                .iter()
+                .map(|&v| v + rng.gen_range(-AUGMENTATION_NOISE..AUGMENTATION_NOISE))
+                .collect();
+            let aug_targets: Vec<f64> = all_targets[i]
+                .iter()
+                .map(|&v| v + rng.gen_range(-AUGMENTATION_NOISE * 0.5..AUGMENTATION_NOISE * 0.5))
+                .collect();
+            all_features.push(aug_features);
+            all_targets.push(aug_targets);
+            all_asset_ids.push(all_asset_ids[i]);
+        }
+    }
+
+    info!("After augmentation ({}x): {} samples", AUGMENTATION_COPIES + 1, all_features.len());
     
     let full_dataset = TrainingDataset {
         features: all_features,

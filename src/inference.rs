@@ -1,7 +1,7 @@
 use crate::data::StockData;
 use crate::diffusion::GaussianDiffusion;
 use crate::models::time_grad::{EpsilonTheta, RNNEncoder};
-use crate::config::{get_device, DIFF_STEPS, HIDDEN_DIM, INPUT_DIM, NUM_LAYERS, TRAINING_SYMBOLS};
+use crate::config::{get_device, DIFF_STEPS, DROPOUT_RATE, HIDDEN_DIM, INPUT_DIM, LOOKBACK, LSTM_LAYERS, NUM_LAYERS, TRAINING_SYMBOLS};
 use anyhow::Result;
 use candle_core::{DType, Tensor};
 use candle_nn::VarBuilder;
@@ -30,10 +30,10 @@ pub async fn run_inference(
     // 1. Setup Device and Data
     let device = get_device(use_cuda);
     
-    // Prepare Context Data (Last 50 days)
-    let context_len = 50;
+    // Prepare Context Data (Last LOOKBACK days)
+    let context_len = LOOKBACK;
     if data.history.len() < context_len + 1 {
-        return Err(anyhow::anyhow!("Not enough history data (need at least 51 days)"));
+        return Err(anyhow::anyhow!("Not enough history data (need at least {} days)", context_len + 1));
     }
 
     let start_idx = data.history.len() - context_len;
@@ -84,12 +84,12 @@ pub async fn run_inference(
         VarBuilder::zeros(DType::F32, &device)
     };
 
-    let encoder = RNNEncoder::new(INPUT_DIM, HIDDEN_DIM, vb.pp("encoder"))?;
-    let model = EpsilonTheta::new(1, HIDDEN_DIM, HIDDEN_DIM, NUM_LAYERS, num_assets, vb.pp("model"))?;
+    let encoder = RNNEncoder::new(INPUT_DIM, HIDDEN_DIM, LSTM_LAYERS, DROPOUT_RATE, vb.pp("encoder"))?;
+    let model = EpsilonTheta::new(1, HIDDEN_DIM, HIDDEN_DIM, NUM_LAYERS, num_assets, DROPOUT_RATE, vb.pp("model"))?;
     let diffusion = GaussianDiffusion::new(DIFF_STEPS, &device)?;
 
     // 3. Encode History
-    let hidden_state = encoder.forward(&context_tensor)?;
+    let hidden_state = encoder.forward(&context_tensor, false)?;
     let hidden_state = hidden_state.unsqueeze(2)?; // [1, 1, 1]
 
     // 4. Autoregressive Forecasting Loop
