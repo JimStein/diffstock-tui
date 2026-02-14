@@ -1,7 +1,7 @@
 use crate::data::StockData;
 use crate::diffusion::GaussianDiffusion;
 use crate::models::time_grad::{EpsilonTheta, RNNEncoder};
-use crate::config::{get_device, DIFF_STEPS, DROPOUT_RATE, HIDDEN_DIM, INPUT_DIM, LOOKBACK, LSTM_LAYERS, NUM_LAYERS, TRAINING_SYMBOLS};
+use crate::config::{get_device, DDIM_ETA, DDIM_INFERENCE_STEPS, DIFF_STEPS, DROPOUT_RATE, HIDDEN_DIM, INFERENCE_BATCH_SIZE, INPUT_DIM, LOOKBACK, LSTM_LAYERS, NUM_LAYERS, TRAINING_SYMBOLS};
 use anyhow::Result;
 use candle_core::{DType, Tensor};
 use candle_nn::VarBuilder;
@@ -71,7 +71,6 @@ pub async fn run_inference(
         warn!("Symbol {} not found in training set. Using default asset ID 0.", data.symbol);
         0
     });
-    let asset_id_tensor = Tensor::new(&[asset_id as u32], &device)?;
 
     // 2. Initialize Model
     let num_assets = TRAINING_SYMBOLS.len();
@@ -92,42 +91,49 @@ pub async fn run_inference(
     let hidden_state = encoder.forward(&context_tensor, false)?;
     let hidden_state = hidden_state.unsqueeze(2)?; // [1, 1, 1]
 
-    // 4. Autoregressive Forecasting Loop
+    // 4. Autoregressive Forecasting Loop (batched DDIM for speed)
     let mut all_paths = Vec::with_capacity(num_simulations);
     let start_date = data.history.last().unwrap().date;
-    let total_steps = num_simulations * horizon;
+    let total_horizon_batches = num_simulations.div_ceil(INFERENCE_BATCH_SIZE);
+    let total_steps = total_horizon_batches * horizon;
     let mut completed_steps = 0;
 
-    for _ in 0..num_simulations {
-        let mut current_path = Vec::with_capacity(horizon);
-        let current_hidden = hidden_state.clone();
-        let mut last_val = data.history.last().unwrap().close;
+    let mut remaining = num_simulations;
+    while remaining > 0 {
+        let batch = remaining.min(INFERENCE_BATCH_SIZE);
+        let mut batch_paths: Vec<Vec<f64>> = (0..batch).map(|_| Vec::with_capacity(horizon)).collect();
+        let mut last_vals: Vec<f64> = vec![data.history.last().unwrap().close; batch];
 
         for _ in 0..horizon {
-            // Sample next step (Close Return)
-            // Note: sample() calls model.forward(). We need to update sample() signature or model.forward() usage inside sample().
-            // Wait, diffusion.sample() calls model.forward().
-            // I need to update diffusion.sample() to accept asset_ids!
-            let sample = diffusion.sample(&model, &current_hidden, &asset_id_tensor, (1, 1, 1))?;
-            
-            let predicted_norm_ret = sample.squeeze(2)?.squeeze(1)?.get(0)?.to_scalar::<f32>()? as f64;
-            
-            // Denormalize
-            let predicted_ret = (predicted_norm_ret * std) + mean;
-            
-            let next_price = last_val * predicted_ret.exp();
-            
-            current_path.push(next_price);
-            last_val = next_price;
+            // Batched DDIM sampling: all MC paths in one forward pass
+            let samples = diffusion.sample_ddim_batched(
+                &model,
+                &hidden_state,
+                asset_id as u32,
+                batch,
+                DDIM_INFERENCE_STEPS,
+                DDIM_ETA,
+            )?;
+
+            // Extract predictions: samples is [batch, 1, 1]
+            let flat = samples.squeeze(2)?.squeeze(1)?;  // [batch]
+            let vals = flat.to_vec1::<f32>()?;
+
+            for (j, &predicted_norm_ret) in vals.iter().enumerate() {
+                let predicted_ret = (predicted_norm_ret as f64 * std) + mean;
+                let next_price = last_vals[j] * predicted_ret.exp();
+                batch_paths[j].push(next_price);
+                last_vals[j] = next_price;
+            }
 
             completed_steps += 1;
-            if completed_steps % 10 == 0 {
-                if let Some(tx) = &progress_tx {
-                    let _ = tx.send(completed_steps as f64 / total_steps as f64).await;
-                }
+            if let Some(tx) = &progress_tx {
+                let _ = tx.send(completed_steps as f64 / total_steps as f64).await;
             }
         }
-        all_paths.push(current_path);
+
+        all_paths.extend(batch_paths);
+        remaining -= batch;
     }
 
     // 5. Calculate Percentiles

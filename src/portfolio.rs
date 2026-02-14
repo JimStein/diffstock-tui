@@ -1,4 +1,4 @@
-use crate::config::{get_device, DIFF_STEPS, DROPOUT_RATE, HIDDEN_DIM, INPUT_DIM, LOOKBACK, LSTM_LAYERS, NUM_LAYERS, TRAINING_SYMBOLS};
+use crate::config::{get_device, DDIM_ETA, DDIM_INFERENCE_STEPS, DIFF_STEPS, DROPOUT_RATE, HIDDEN_DIM, INFERENCE_BATCH_SIZE, INPUT_DIM, LOOKBACK, LSTM_LAYERS, NUM_LAYERS, TRAINING_SYMBOLS};
 use crate::diffusion::GaussianDiffusion;
 use crate::models::time_grad::{EpsilonTheta, RNNEncoder};
 use anyhow::Result;
@@ -171,31 +171,45 @@ pub async fn generate_multi_asset_forecasts(
             .iter()
             .position(|&s| s.eq_ignore_ascii_case(symbol))
             .unwrap_or(0);
-        let asset_id_tensor = Tensor::new(&[asset_id as u32], &device)?;
 
         // Encode
         let hidden_state = encoder.forward(&context_tensor, false)?;
         let hidden_state = hidden_state.unsqueeze(2)?;
 
-        // Monte Carlo sampling
+        // Monte Carlo sampling (batched DDIM for speed)
         let mut period_returns = Vec::with_capacity(num_simulations);
 
-        for _ in 0..num_simulations {
-            let mut cumulative_log_ret = 0.0;
-            let current_hidden = hidden_state.clone();
-            let mut last_val = current_price;
+        let mut remaining = num_simulations;
+        while remaining > 0 {
+            let batch = remaining.min(INFERENCE_BATCH_SIZE);
+
+            // Run all horizon steps for this batch
+            let mut batch_log_rets = vec![0.0f64; batch];
+            let mut batch_last_vals = vec![current_price; batch];
 
             for _ in 0..horizon {
-                let sample =
-                    diffusion.sample(&model, &current_hidden, &asset_id_tensor, (1, 1, 1))?;
-                let predicted_norm_ret =
-                    sample.squeeze(2)?.squeeze(1)?.get(0)?.to_scalar::<f32>()? as f64;
-                let predicted_ret = (predicted_norm_ret * std) + mean;
-                cumulative_log_ret += predicted_ret;
-                let next_price = last_val * predicted_ret.exp();
-                last_val = next_price;
+                let samples = diffusion.sample_ddim_batched(
+                    &model,
+                    &hidden_state,
+                    asset_id as u32,
+                    batch,
+                    DDIM_INFERENCE_STEPS,
+                    DDIM_ETA,
+                )?;
+
+                let flat = samples.squeeze(2)?.squeeze(1)?;
+                let vals = flat.to_vec1::<f32>()?;
+
+                for (j, &predicted_norm_ret) in vals.iter().enumerate() {
+                    let predicted_ret = (predicted_norm_ret as f64 * std) + mean;
+                    batch_log_rets[j] += predicted_ret;
+                    let next_price = batch_last_vals[j] * predicted_ret.exp();
+                    batch_last_vals[j] = next_price;
+                }
             }
-            period_returns.push(cumulative_log_ret);
+
+            period_returns.extend(batch_log_rets);
+            remaining -= batch;
         }
 
         // Statistics

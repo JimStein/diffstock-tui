@@ -5,10 +5,14 @@ use crate::models::time_grad::EpsilonTheta;
 /// Implements the forward diffusion (adding noise) and reverse diffusion (denoising) steps.
 pub struct GaussianDiffusion {
     pub num_steps: usize,
+    #[allow(dead_code)]
     pub beta: Tensor,
+    #[allow(dead_code)]
     pub alpha: Tensor,
     pub alpha_bar: Tensor,
+    #[allow(dead_code)]
     pub sigma: Tensor,
+    #[allow(dead_code)]
     pub sqrt_one_minus_alpha_bar: Tensor,
 }
 
@@ -46,13 +50,14 @@ impl GaussianDiffusion {
         })
     }
 
-    /// Samples from the model by iteratively denoising random noise.
+    /// Samples from the model by iteratively denoising random noise (DDPM — used in training).
     ///
     /// # Arguments
     /// * `model` - The trained epsilon-theta model.
     /// * `cond` - Conditional context (encoded history).
     /// * `asset_ids` - Asset ID tensor [batch].
     /// * `shape` - Shape of the output tensor [batch, channels, time].
+    #[allow(dead_code)]
     pub fn sample(
         &self,
         model: &EpsilonTheta,
@@ -90,6 +95,116 @@ impl GaussianDiffusion {
         }
 
         Ok(x)
+    }
+
+    /// DDIM (Denoising Diffusion Implicit Models) fast sampler.
+    /// Uses a subset of diffusion steps for much faster inference with minimal quality loss.
+    ///
+    /// # Arguments
+    /// * `model` - The trained epsilon-theta model.
+    /// * `cond` - Conditional context [batch, cond_dim, 1].
+    /// * `asset_ids` - Asset ID tensor [batch].
+    /// * `shape` - Shape of the output tensor [batch, channels, time].
+    /// * `ddim_steps` - Number of DDIM steps (e.g., 25 instead of 200).
+    /// * `eta` - Stochasticity: 0.0 = deterministic DDIM, 1.0 = DDPM equivalent.
+    pub fn sample_ddim(
+        &self,
+        model: &EpsilonTheta,
+        cond: &Tensor,
+        asset_ids: &Tensor,
+        shape: (usize, usize, usize),
+        ddim_steps: usize,
+        eta: f64,
+    ) -> Result<Tensor> {
+        let device = cond.device();
+        let mut x = Tensor::randn(0.0f32, 1.0f32, shape, device)?;
+
+        // Create evenly-spaced timestep subsequence
+        let step_size = self.num_steps / ddim_steps;
+        let timesteps: Vec<usize> = (0..ddim_steps).map(|i| i * step_size).rev().collect();
+
+        let alpha_bar_vec = self.alpha_bar.to_vec1::<f32>()?;
+
+        for (i, &t) in timesteps.iter().enumerate() {
+            let time_tensor = Tensor::new(&[t as f32], device)?
+                .unsqueeze(0)?
+                .broadcast_as((shape.0, 1))?
+                .contiguous()?;
+
+            // Predict noise
+            let epsilon_pred = model.forward(&x, &time_tensor, asset_ids, cond, false)?;
+
+            let alpha_bar_t = alpha_bar_vec[t] as f64;
+            let sqrt_alpha_bar_t = alpha_bar_t.sqrt();
+            let sqrt_one_minus_alpha_bar_t = (1.0 - alpha_bar_t).sqrt();
+
+            // Predicted x_0 = (x_t - sqrt(1-ᾱ_t) * ε) / sqrt(ᾱ_t)
+            let pred_x0 = ((&x - epsilon_pred.affine(sqrt_one_minus_alpha_bar_t, 0.0))?
+                .affine(1.0 / sqrt_alpha_bar_t, 0.0))?;
+
+            // Clamp predicted x0 for stability
+            let pred_x0 = pred_x0.clamp(-3.0f32, 3.0f32)?;
+
+            if i < timesteps.len() - 1 {
+                let t_prev = timesteps[i + 1];
+                let alpha_bar_t_prev = alpha_bar_vec[t_prev] as f64;
+
+                // DDIM variance
+                let sigma = if eta > 0.0 {
+                    let sigma_sq = eta * eta * (1.0 - alpha_bar_t_prev) / (1.0 - alpha_bar_t)
+                        * (1.0 - alpha_bar_t / alpha_bar_t_prev);
+                    sigma_sq.max(0.0).sqrt()
+                } else {
+                    0.0
+                };
+
+                let sqrt_alpha_bar_prev = alpha_bar_t_prev.sqrt();
+                let dir_coeff = ((1.0 - alpha_bar_t_prev - sigma * sigma).max(0.0)).sqrt();
+
+                // x_{t-1} = sqrt(ᾱ_{t-1}) * pred_x0 + dir_coeff * ε_pred + σ * noise
+                x = (pred_x0.affine(sqrt_alpha_bar_prev, 0.0)?
+                    + epsilon_pred.affine(dir_coeff, 0.0)?)?;
+
+                if sigma > 1e-8 {
+                    let noise = Tensor::randn(0.0f32, 1.0f32, shape, device)?;
+                    x = (x + noise.affine(sigma, 0.0)?)?;
+                }
+            } else {
+                // Last step: just return predicted x_0
+                x = pred_x0;
+            }
+        }
+
+        Ok(x)
+    }
+
+    /// Batched DDIM sampling: runs multiple MC simulations in a single batch.
+    /// This is the primary optimization for CPU inference — amortizes overhead.
+    ///
+    /// # Arguments
+    /// * `model` - The trained epsilon-theta model.
+    /// * `cond` - Single conditional context [1, cond_dim, 1] — will be broadcast.
+    /// * `asset_id` - Single asset ID (u32).
+    /// * `batch_size` - Number of parallel MC samples.
+    /// * `ddim_steps` - Number of DDIM denoising steps.
+    /// * `eta` - DDIM stochasticity parameter.
+    pub fn sample_ddim_batched(
+        &self,
+        model: &EpsilonTheta,
+        cond: &Tensor,  // [1, cond_dim, 1]
+        asset_id: u32,
+        batch_size: usize,
+        ddim_steps: usize,
+        eta: f64,
+    ) -> Result<Tensor> {
+        let device = cond.device();
+
+        // Broadcast conditioning to batch
+        let cond_batched = cond.broadcast_as((batch_size, cond.dim(1)?, cond.dim(2)?))?
+            .contiguous()?;
+        let asset_ids = Tensor::from_vec(vec![asset_id; batch_size], (batch_size,), device)?;
+
+        self.sample_ddim(model, &cond_batched, &asset_ids, (batch_size, 1, 1), ddim_steps, eta)
     }
 }
 

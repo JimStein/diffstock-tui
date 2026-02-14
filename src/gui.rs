@@ -5,6 +5,7 @@ use crate::portfolio::{self, PortfolioAllocation};
 use crate::train;
 use chrono::TimeZone;
 use tokio::sync::mpsc;
+use std::time::Instant;
 
 // 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 // Color Palette 鈥?Professional dark financial terminal
@@ -85,6 +86,10 @@ pub struct GuiApp {
     train_log: Vec<TrainLogEntry>,
     train_log_messages: Vec<String>,
     train_rx: Option<mpsc::Receiver<TrainMessage>>,
+    // Timing / ETA
+    train_start_time: Option<Instant>,
+    forecast_start_time: Option<Instant>,
+    portfolio_start_time: Option<Instant>,
 }
 
 impl GuiApp {
@@ -104,6 +109,9 @@ impl GuiApp {
             train_log: Vec::new(),
             train_log_messages: Vec::new(),
             train_rx: None,
+            train_start_time: None,
+            forecast_start_time: None,
+            portfolio_start_time: None,
         }
     }
 
@@ -248,16 +256,24 @@ impl eframe::App for GuiApp {
 impl GuiApp {
     fn render_forecast_tab(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         match self.app.state {
-            AppState::Input => self.render_input_screen(ui),
+            AppState::Input => {
+                self.forecast_start_time = None;
+                self.render_input_screen(ui);
+            }
             AppState::Loading => {
-                self.render_centered_status(ui, "Fetching Market Data...", None);
+                self.render_centered_status(ui, "Fetching Market Data...", None, None);
                 ctx.request_repaint();
             }
             AppState::Forecasting => {
+                if self.forecast_start_time.is_none() {
+                    self.forecast_start_time = Some(Instant::now());
+                }
+                let eta_text = self.compute_eta_text(self.forecast_start_time, self.app.progress);
                 self.render_centered_status(
                     ui,
                     "Running Diffusion Inference...",
                     Some(self.app.progress as f32),
+                    eta_text.as_deref(),
                 );
                 ctx.request_repaint();
             }
@@ -350,6 +366,7 @@ impl GuiApp {
         ui: &mut egui::Ui,
         message: &str,
         progress: Option<f32>,
+        time_info: Option<&str>,
     ) {
         let available = ui.available_size();
         ui.vertical_centered(|ui| {
@@ -376,7 +393,31 @@ impl GuiApp {
                 ui.add_space(12.0);
                 ui.spinner();
             }
+
+            if let Some(info) = time_info {
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new(info)
+                        .size(12.0)
+                        .color(ACCENT_YELLOW),
+                );
+            }
         });
+    }
+
+    fn compute_eta_text(&self, start_time: Option<Instant>, progress: f64) -> Option<String> {
+        let start = start_time?;
+        let elapsed = start.elapsed();
+        let elapsed_secs = elapsed.as_secs();
+        let elapsed_str = format_duration(elapsed_secs);
+        if progress > 0.01 && progress < 1.0 {
+            let total_estimated = elapsed_secs as f64 / progress;
+            let remaining = (total_estimated - elapsed_secs as f64).max(0.0) as u64;
+            let eta_str = format_duration(remaining);
+            Some(format!("Elapsed: {}  |  ETA: ~{}", elapsed_str, eta_str))
+        } else {
+            Some(format!("Elapsed: {}", elapsed_str))
+        }
     }
 
     fn render_dashboard(&mut self, ui: &mut egui::Ui) {
@@ -682,7 +723,15 @@ impl GuiApp {
 impl GuiApp {
     fn render_portfolio_tab(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         if self.portfolio_state == PortfolioState::Running {
-            self.render_centered_status(ui, "Optimizing Portfolio...\nForecasting all assets via Diffusion Model", None);
+            let elapsed_text = self.portfolio_start_time.map(|t| {
+                format!("Elapsed: {}", format_duration(t.elapsed().as_secs()))
+            });
+            self.render_centered_status(
+                ui,
+                "Optimizing Portfolio...\nForecasting all assets via Diffusion Model",
+                None,
+                elapsed_text.as_deref(),
+            );
             ctx.request_repaint();
             return;
         }
@@ -734,6 +783,7 @@ impl GuiApp {
                             );
                         } else {
                             self.portfolio_state = PortfolioState::Running;
+                            self.portfolio_start_time = Some(Instant::now());
                             let (tx, rx) = mpsc::channel(1);
                             self.portfolio_rx = Some(rx);
                             let use_cuda = self.app.use_cuda;
@@ -1159,6 +1209,7 @@ impl GuiApp {
         self.train_state = TrainState::Running;
         self.train_log.clear();
         self.train_log_messages.clear();
+        self.train_start_time = Some(Instant::now());
 
         let (tx, rx) = mpsc::channel(256);
         self.train_rx = Some(rx);
@@ -1274,6 +1325,23 @@ impl GuiApp {
                     ui.add(egui::ProgressBar::new(progress.min(1.0))
                         .fill(ACCENT_BLUE)
                         .animate(self.train_state == TrainState::Running));
+
+                    // ETA display
+                    if let Some(start) = self.train_start_time {
+                        let elapsed = start.elapsed();
+                        let elapsed_secs = elapsed.as_secs();
+                        let elapsed_str = format_duration(elapsed_secs);
+                        if last.epoch > 0 && self.train_state == TrainState::Running {
+                            let secs_per_epoch = elapsed_secs as f64 / last.epoch as f64;
+                            let remaining = total_epochs.saturating_sub(last.epoch);
+                            let eta_secs = (secs_per_epoch * remaining as f64) as u64;
+                            let eta_str = format_duration(eta_secs);
+                            stat_row(ui, "Elapsed", &elapsed_str, TEXT_SECONDARY);
+                            stat_row(ui, "ETA", &eta_str, ACCENT_YELLOW);
+                        } else {
+                            stat_row(ui, "Elapsed", &elapsed_str, TEXT_SECONDARY);
+                        }
+                    }
                 } else {
                     ui.label(egui::RichText::new("Waiting for first epoch...")
                         .size(12.0)
@@ -1356,4 +1424,17 @@ fn summary_card(ui: &mut egui::Ui, label: &str, value: &str, color: egui::Color3
                     .color(color));
             });
         });
+}
+
+fn format_duration(secs: u64) -> String {
+    let h = secs / 3600;
+    let m = (secs % 3600) / 60;
+    let s = secs % 60;
+    if h > 0 {
+        format!("{}h {:02}m {:02}s", h, m, s)
+    } else if m > 0 {
+        format!("{}m {:02}s", m, s)
+    } else {
+        format!("{}s", s)
+    }
 }

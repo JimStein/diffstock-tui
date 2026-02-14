@@ -20,7 +20,16 @@ pub fn get_device(use_cuda: bool) -> Device {
             warn!("--cuda flag set but binary was compiled without the 'cuda' feature. Falling back to CPU.");
         }
     }
-    info!("Using CPU device");
+
+    #[cfg(feature = "mkl")]
+    info!("Using CPU device with Intel MKL BLAS acceleration");
+
+    #[cfg(not(feature = "mkl"))]
+    info!("Using CPU device (tip: compile with --features mkl for 3-5x faster matrix ops)");
+
+    let num_threads = num_cpus::get();
+    info!("CPU threads available: {}", num_threads);
+
     Device::Cpu
 }
 
@@ -43,6 +52,16 @@ pub const DATA_RANGE: &str = "10y";
 pub const AUGMENTATION_NOISE: f64 = 0.02;
 /// Number of augmented copies per original sample
 pub const AUGMENTATION_COPIES: usize = 3;
+
+// ── Inference Performance Settings ──────────────────────────────────────────
+/// Number of DDIM steps for fast inference (vs DIFF_STEPS for training)
+/// 25 steps provides ~8x speedup over 200 steps with minimal quality loss
+pub const DDIM_INFERENCE_STEPS: usize = 100;
+/// Batch size for Monte Carlo simulations during inference/portfolio
+/// Higher = faster on CPU with large RAM (64GB can handle 256 easily)
+pub const INFERENCE_BATCH_SIZE: usize = 256;
+/// DDIM eta parameter: 0.0 = deterministic, 1.0 = same as DDPM
+pub const DDIM_ETA: f64 = 0.0;
 
 pub const TRAINING_SYMBOLS: &[&str] = &[
     "SPY", "DIA", "QQQ", "XLK", "XLI", "XLF", "XLC", "XLY", "XLRE", "XLV", "XLU", "XLP", "XLE",

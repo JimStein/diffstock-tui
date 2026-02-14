@@ -9,6 +9,7 @@ use candle_nn::{VarBuilder, VarMap, Optimizer};
 use rand::seq::SliceRandom;
 use tracing::{info, error};
 use tokio::sync::mpsc;
+use rayon::prelude::*;
 
 pub async fn train_model(
     epochs: Option<usize>,
@@ -438,43 +439,80 @@ pub async fn train_model_with_data(
 
 async fn fetch_training_data() -> Result<(TrainingDataset, TrainingDataset)> {
     let symbols = TRAINING_SYMBOLS.to_vec();
+    
+    // Parallel data fetching — download all symbols concurrently
+    info!("Fetching {} symbols in parallel...", symbols.len());
+    let mut handles = Vec::with_capacity(symbols.len());
+    for (id, symbol) in symbols.iter().enumerate() {
+        let sym = symbol.to_string();
+        handles.push(tokio::spawn(async move {
+            info!("Fetching {} (ID: {})...", sym, id);
+            match StockData::fetch_range(&sym, DATA_RANGE).await {
+                Ok(data) => {
+                    let dataset = data.prepare_training_data(LOOKBACK, FORECAST, id);
+                    Ok((id, sym, dataset))
+                }
+                Err(e) => Err((sym, e))
+            }
+        }));
+    }
+
     let mut all_features = Vec::new();
     let mut all_targets = Vec::new();
     let mut all_asset_ids = Vec::new();
 
-    for (id, symbol) in symbols.iter().enumerate() {
-        info!("Fetching data for {} (ID: {})...", symbol, id);
-        match StockData::fetch_range(symbol, DATA_RANGE).await {
-            Ok(data) => {
-                let dataset = data.prepare_training_data(LOOKBACK, FORECAST, id);
+    // Collect results
+    let mut results: Vec<_> = Vec::with_capacity(handles.len());
+    for handle in handles {
+        results.push(handle.await?);
+    }
+    // Sort by asset ID to ensure deterministic ordering
+    results.sort_by_key(|r| match r {
+        Ok((id, _, _)) => *id,
+        Err(_) => usize::MAX,
+    });
+
+    for result in results {
+        match result {
+            Ok((_id, sym, dataset)) => {
+                info!("{}: {} samples", sym, dataset.features.len());
                 all_features.extend(dataset.features);
                 all_targets.extend(dataset.targets);
                 all_asset_ids.extend(dataset.asset_ids);
             }
-            Err(e) => error!("Failed to fetch {}: {}", symbol, e),
+            Err((sym, e)) => error!("Failed to fetch {}: {}", sym, e),
         }
     }
 
     info!("Original samples: {}", all_features.len());
 
-    // Data augmentation: add Gaussian noise copies
+    // Data augmentation: add Gaussian noise copies (parallelized with rayon)
     let original_len = all_features.len();
-    let mut rng = rand::thread_rng();
-    use rand::Rng;
-    for _ in 0..AUGMENTATION_COPIES {
-        for i in 0..original_len {
-            let aug_features: Vec<f64> = all_features[i]
-                .iter()
-                .map(|&v| v + rng.gen_range(-AUGMENTATION_NOISE..AUGMENTATION_NOISE))
-                .collect();
-            let aug_targets: Vec<f64> = all_targets[i]
-                .iter()
-                .map(|&v| v + rng.gen_range(-AUGMENTATION_NOISE * 0.5..AUGMENTATION_NOISE * 0.5))
-                .collect();
-            all_features.push(aug_features);
-            all_targets.push(aug_targets);
-            all_asset_ids.push(all_asset_ids[i]);
-        }
+    let augmented: Vec<(Vec<f64>, Vec<f64>, usize)> = (0..AUGMENTATION_COPIES)
+        .into_par_iter()
+        .flat_map(|_| {
+            use rand::Rng;
+            let mut rng = rand::thread_rng();
+            let mut batch = Vec::with_capacity(original_len);
+            for i in 0..original_len {
+                let aug_features: Vec<f64> = all_features[i]
+                    .iter()
+                    .map(|&v| v + rng.gen_range(-AUGMENTATION_NOISE..AUGMENTATION_NOISE))
+                    .collect();
+                let aug_targets: Vec<f64> = all_targets[i]
+                    .iter()
+                    .map(|&v| v + rng.gen_range(-AUGMENTATION_NOISE * 0.5..AUGMENTATION_NOISE * 0.5))
+                    .collect();
+                batch.push((aug_features, aug_targets, all_asset_ids[i]));
+            }
+            batch
+        })
+        .collect();
+
+    for (feat, tgt, aid) in augmented {
+        all_features.push(feat);
+        all_targets.push(tgt);
+        all_asset_ids.push(aid);
     }
 
     info!("After augmentation ({}x): {} samples", AUGMENTATION_COPIES + 1, all_features.len());
