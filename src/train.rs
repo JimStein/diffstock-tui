@@ -1,4 +1,4 @@
-use crate::config::{get_device, AUGMENTATION_COPIES, AUGMENTATION_NOISE, BATCH_SIZE, DATA_RANGE, DIFF_STEPS, DROPOUT_RATE, EPOCHS, FORECAST, HIDDEN_DIM, INPUT_DIM, LEARNING_RATE, LOOKBACK, LSTM_LAYERS, NUM_LAYERS, PATIENCE, TRAINING_SYMBOLS, WEIGHT_DECAY};
+use crate::config::{get_device, AUGMENTATION_COPIES, AUGMENTATION_NOISE, BATCH_SIZE, CUDA_BATCH_SIZE, DATA_RANGE, DIFF_STEPS, DROPOUT_RATE, EPOCHS, FORECAST, HIDDEN_DIM, INPUT_DIM, LEARNING_RATE, LOOKBACK, LSTM_LAYERS, NUM_LAYERS, PATIENCE, TRAIN_LOG_INTERVAL_BATCHES, TRAINING_SYMBOLS, WEIGHT_DECAY};
 use crate::data::{StockData, TrainingDataset};
 use crate::diffusion::GaussianDiffusion;
 use crate::models::time_grad::{EpsilonTheta, RNNEncoder};
@@ -10,6 +10,7 @@ use rand::seq::SliceRandom;
 use tracing::{info, error};
 use tokio::sync::mpsc;
 use rayon::prelude::*;
+use std::time::Instant;
 
 pub async fn train_model(
     epochs: Option<usize>,
@@ -74,7 +75,8 @@ async fn train_loop_with_progress(
 ) -> Result<()> {
     let device = get_device(use_cuda);
     let epochs = epochs.unwrap_or(EPOCHS);
-    let batch_size = batch_size.unwrap_or(BATCH_SIZE);
+    let default_batch_size = if use_cuda { CUDA_BATCH_SIZE } else { BATCH_SIZE };
+    let batch_size = batch_size.unwrap_or(default_batch_size);
     let learning_rate = learning_rate.unwrap_or(LEARNING_RATE);
 
     let varmap = VarMap::new();
@@ -107,6 +109,7 @@ async fn train_loop_with_progress(
     ))).await;
 
     for epoch in 0..epochs {
+        let epoch_start = Instant::now();
         let mut total_train_loss = 0.0;
 
         let mut indices: Vec<usize> = (0..num_train_samples).collect();
@@ -154,6 +157,21 @@ async fn train_loop_with_progress(
             let loss = (epsilon - epsilon_pred)?.sqr()?.mean_all()?;
             opt.backward_step(&loss)?;
             total_train_loss += loss.to_scalar::<f32>()? as f64;
+
+            let batch_no = batch_idx + 1;
+            let should_log = batch_no % TRAIN_LOG_INTERVAL_BATCHES == 0 || batch_no == num_train_batches;
+            if should_log {
+                let progress = (batch_no as f64 / num_train_batches.max(1) as f64) * 100.0;
+                let _ = tx.send(TrainMessage::Log(format!(
+                    "Epoch {}/{} progress: {}/{} batches ({:.1}%), elapsed: {:.1}s",
+                    epoch + 1,
+                    epochs,
+                    batch_no,
+                    num_train_batches,
+                    progress,
+                    epoch_start.elapsed().as_secs_f64()
+                ))).await;
+            }
         }
 
         let avg_train_loss = total_train_loss / num_train_batches.max(1) as f64;
@@ -259,7 +277,8 @@ pub async fn train_model_with_data(
     let device = get_device(use_cuda);
 
     let epochs = epochs.unwrap_or(EPOCHS);
-    let batch_size = batch_size.unwrap_or(BATCH_SIZE);
+    let default_batch_size = if use_cuda { CUDA_BATCH_SIZE } else { BATCH_SIZE };
+    let batch_size = batch_size.unwrap_or(default_batch_size);
     let learning_rate = learning_rate.unwrap_or(LEARNING_RATE);
 
     info!("Training Set: {} samples", train_data.features.len());
@@ -293,7 +312,16 @@ pub async fn train_model_with_data(
     let patience = patience.unwrap_or(PATIENCE);
     let mut epochs_without_improvement: usize = 0;
 
+    info!(
+        "Training on {} with batch_size={}, epochs={}, lr={:.6}",
+        if use_cuda { "CUDA" } else { "CPU" },
+        batch_size,
+        epochs,
+        learning_rate
+    );
+
     for epoch in 0..epochs {
+        let epoch_start = Instant::now();
         let mut total_train_loss = 0.0;
         
         // --- Training Phase ---
@@ -353,9 +381,24 @@ pub async fn train_model_with_data(
             
             opt.backward_step(&loss)?;
             total_train_loss += loss.to_scalar::<f32>()? as f64;
+
+            let batch_no = batch_idx + 1;
+            let should_log = batch_no % TRAIN_LOG_INTERVAL_BATCHES == 0 || batch_no == num_train_batches;
+            if should_log {
+                let progress = (batch_no as f64 / num_train_batches.max(1) as f64) * 100.0;
+                info!(
+                    "Epoch {}/{} progress: {}/{} batches ({:.1}%), elapsed: {:.1}s",
+                    epoch + 1,
+                    epochs,
+                    batch_no,
+                    num_train_batches,
+                    progress,
+                    epoch_start.elapsed().as_secs_f64()
+                );
+            }
         }
         
-        let avg_train_loss = total_train_loss / num_train_batches as f64;
+        let avg_train_loss = total_train_loss / num_train_batches.max(1) as f64;
 
         // --- Validation Phase ---
         let mut total_val_loss = 0.0;

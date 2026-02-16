@@ -1,7 +1,7 @@
 use crate::data::StockData;
 use crate::diffusion::GaussianDiffusion;
 use crate::models::time_grad::{EpsilonTheta, RNNEncoder};
-use crate::config::{get_device, DDIM_ETA, DDIM_INFERENCE_STEPS, DIFF_STEPS, DROPOUT_RATE, HIDDEN_DIM, INFERENCE_BATCH_SIZE, INPUT_DIM, LOOKBACK, LSTM_LAYERS, NUM_LAYERS, TRAINING_SYMBOLS};
+use crate::config::{get_device, CUDA_INFERENCE_BATCH_SIZE, DDIM_ETA, DDIM_INFERENCE_STEPS, DIFF_STEPS, DROPOUT_RATE, HIDDEN_DIM, INFERENCE_BATCH_SIZE, INPUT_DIM, LOOKBACK, LSTM_LAYERS, NUM_LAYERS, TRAINING_SYMBOLS};
 use anyhow::Result;
 use candle_core::{DType, Tensor};
 use candle_nn::VarBuilder;
@@ -94,13 +94,19 @@ pub async fn run_inference(
     // 4. Autoregressive Forecasting Loop (batched DDIM for speed)
     let mut all_paths = Vec::with_capacity(num_simulations);
     let start_date = data.history.last().unwrap().date;
-    let total_horizon_batches = num_simulations.div_ceil(INFERENCE_BATCH_SIZE);
+    let inference_batch_size = if use_cuda {
+        CUDA_INFERENCE_BATCH_SIZE
+    } else {
+        INFERENCE_BATCH_SIZE
+    };
+
+    let total_horizon_batches = num_simulations.div_ceil(inference_batch_size);
     let total_steps = total_horizon_batches * horizon;
     let mut completed_steps = 0;
 
     let mut remaining = num_simulations;
     while remaining > 0 {
-        let batch = remaining.min(INFERENCE_BATCH_SIZE);
+        let batch = remaining.min(inference_batch_size);
         let mut batch_paths: Vec<Vec<f64>> = (0..batch).map(|_| Vec::with_capacity(horizon)).collect();
         let mut last_vals: Vec<f64> = vec![data.history.last().unwrap().close; batch];
 

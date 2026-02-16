@@ -36,6 +36,7 @@ pub fn get_device(use_cuda: bool) -> Device {
 pub const LOOKBACK: usize = 60;
 pub const FORECAST: usize = 10;
 pub const BATCH_SIZE: usize = 128;
+pub const CUDA_BATCH_SIZE: usize = 256;
 pub const EPOCHS: usize = 500;
 pub const LEARNING_RATE: f64 = 5e-4;
 pub const INPUT_DIM: usize = 2;
@@ -60,6 +61,10 @@ pub const DDIM_INFERENCE_STEPS: usize = 100;
 /// Batch size for Monte Carlo simulations during inference/portfolio
 /// Higher = faster on CPU with large RAM (64GB can handle 256 easily)
 pub const INFERENCE_BATCH_SIZE: usize = 256;
+/// Higher inference batch size for modern GPUs like RTX 3090.
+pub const CUDA_INFERENCE_BATCH_SIZE: usize = 512;
+/// Emit training progress every N batches (CLI/GPU visibility).
+pub const TRAIN_LOG_INTERVAL_BATCHES: usize = 20;
 /// DDIM eta parameter: 0.0 = deterministic, 1.0 = same as DDPM
 pub const DDIM_ETA: f64 = 0.0;
 
