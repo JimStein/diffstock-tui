@@ -1,0 +1,53 @@
+{
+  "run_type": "cli",
+  "started_at": "2026-02-16T13:29:02.701616+00:00",
+  "finished_at": "2026-02-16T13:29:26.468565400+00:00",
+  "use_cuda": false,
+  "data_range": "10y",
+  "symbols": [
+    "SPY",
+    "DIA",
+    "QQQ",
+    "XLK",
+    "XLI",
+    "XLF",
+    "XLC",
+    "XLY",
+    "XLRE",
+    "XLV",
+    "XLU",
+    "XLP",
+    "XLE",
+    "XLB",
+    "ARKK",
+    "NVDA",
+    "QQQI",
+    "RDVI",
+    "AMZN",
+    "META",
+    "GOOGL",
+    "AAPL",
+    "MSFT",
+    "IAU",
+    "SLV",
+    "ETN",
+    "TSLA",
+    "TLT",
+    "URA",
+    "COPX"
+  ],
+  "epochs_requested": 1,
+  "epochs_completed": 1,
+  "batch_size": 16,
+  "learning_rate": 0.001,
+  "patience": 100,
+  "best_val_loss": 0.7202462553977966,
+  "stop_reason": null,
+  "epoch_metrics": [
+    {
+      "epoch": 1,
+      "train_loss": 23.604273080825806,
+      "val_loss": 0.7202462553977966
+    }
+  ]
+}

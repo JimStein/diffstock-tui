@@ -1,4 +1,4 @@
-use crate::config::{get_device, DDIM_ETA, DDIM_INFERENCE_STEPS, DIFF_STEPS, DROPOUT_RATE, HIDDEN_DIM, INFERENCE_BATCH_SIZE, INPUT_DIM, LOOKBACK, LSTM_LAYERS, NUM_LAYERS, TRAINING_SYMBOLS};
+use crate::config::{get_device, DATA_RANGE, DDIM_ETA, DDIM_INFERENCE_STEPS, DIFF_STEPS, DROPOUT_RATE, HIDDEN_DIM, INFERENCE_BATCH_SIZE, INPUT_DIM, LOOKBACK, LSTM_LAYERS, NUM_LAYERS, TRAINING_SYMBOLS};
 use crate::diffusion::GaussianDiffusion;
 use crate::models::time_grad::{EpsilonTheta, RNNEncoder};
 use anyhow::Result;
@@ -123,7 +123,7 @@ pub async fn generate_multi_asset_forecasts(
         info!("Forecasting {}...", symbol);
 
         // Fetch recent data
-        let data = match crate::data::fetch_range(symbol, "1y").await {
+        let data = match crate::data::fetch_range(symbol, DATA_RANGE).await {
             Ok(d) => d,
             Err(e) => {
                 error!("Failed to fetch {}: {}. Skipping.", symbol, e);

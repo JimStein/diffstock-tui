@@ -6,11 +6,58 @@ use crate::gui::TrainMessage;
 use anyhow::Result;
 use candle_core::{DType, Tensor};
 use candle_nn::{VarBuilder, VarMap, Optimizer};
+use chrono::Utc;
 use rand::seq::SliceRandom;
-use tracing::{info, error};
+use serde::Serialize;
+use tracing::{info, error, warn};
 use tokio::sync::mpsc;
 use rayon::prelude::*;
 use std::time::Instant;
+
+#[derive(Serialize)]
+struct EpochLogEntry {
+    epoch: usize,
+    train_loss: f64,
+    val_loss: f64,
+}
+
+#[derive(Serialize)]
+struct TrainingRunLog {
+    run_type: String,
+    started_at: String,
+    finished_at: String,
+    use_cuda: bool,
+    data_range: String,
+    symbols: Vec<String>,
+    epochs_requested: usize,
+    epochs_completed: usize,
+    batch_size: usize,
+    learning_rate: f64,
+    patience: usize,
+    best_val_loss: f64,
+    stop_reason: Option<String>,
+    epoch_metrics: Vec<EpochLogEntry>,
+}
+
+fn persist_training_log(run_log: &TrainingRunLog) -> Result<std::path::PathBuf> {
+    let log_dir = std::path::Path::new("log");
+    if !log_dir.exists() {
+        std::fs::create_dir_all(log_dir)?;
+    }
+
+    let file_name = format!(
+        "training_{}_{}.json",
+        Utc::now().format("%Y%m%d_%H%M%S"),
+        std::process::id()
+    );
+    let file_path = log_dir.join(file_name);
+
+    let file = std::fs::File::create(&file_path)?;
+    let writer = std::io::BufWriter::new(file);
+    serde_json::to_writer_pretty(writer, run_log)?;
+
+    Ok(file_path)
+}
 
 pub async fn train_model(
     epochs: Option<usize>,
@@ -73,6 +120,7 @@ async fn train_loop_with_progress(
     use_cuda: bool,
     tx: mpsc::Sender<TrainMessage>,
 ) -> Result<()> {
+    let started_at = Utc::now();
     let device = get_device(use_cuda);
     let epochs = epochs.unwrap_or(EPOCHS);
     let default_batch_size = if use_cuda { CUDA_BATCH_SIZE } else { BATCH_SIZE };
@@ -102,6 +150,8 @@ async fn train_loop_with_progress(
     let mut best_val_loss = f64::INFINITY;
     let patience = patience.unwrap_or(PATIENCE);
     let mut epochs_without_improvement: usize = 0;
+    let mut epoch_metrics: Vec<EpochLogEntry> = Vec::with_capacity(epochs);
+    let mut stop_reason: Option<String> = None;
 
     let _ = tx.send(TrainMessage::Log(format!(
         "Model initialized (~25M params). {} train batches, {} val batches per epoch.",
@@ -222,6 +272,11 @@ async fn train_loop_with_progress(
         }
 
         let avg_val_loss = if num_val_batches > 0 { total_val_loss / num_val_batches as f64 } else { 0.0 };
+        epoch_metrics.push(EpochLogEntry {
+            epoch: epoch + 1,
+            train_loss: avg_train_loss,
+            val_loss: avg_val_loss,
+        });
 
         // Send epoch result to GUI
         let _ = tx.send(TrainMessage::Epoch {
@@ -245,6 +300,10 @@ async fn train_loop_with_progress(
                     "Early stopping at epoch {}. Best val loss: {:.6}",
                     epoch + 1, best_val_loss
                 ))).await;
+                stop_reason = Some(format!(
+                    "early_stopping_after_{}_epochs_without_improvement",
+                    patience
+                ));
                 break;
             }
         }
@@ -262,6 +321,38 @@ async fn train_loop_with_progress(
         "Training complete. Best val loss: {:.6}", best_val_loss
     ))).await;
 
+    let run_log = TrainingRunLog {
+        run_type: "gui_progress".to_string(),
+        started_at: started_at.to_rfc3339(),
+        finished_at: Utc::now().to_rfc3339(),
+        use_cuda,
+        data_range: DATA_RANGE.to_string(),
+        symbols: TRAINING_SYMBOLS.iter().map(|s| s.to_string()).collect(),
+        epochs_requested: epochs,
+        epochs_completed: epoch_metrics.len(),
+        batch_size,
+        learning_rate,
+        patience,
+        best_val_loss,
+        stop_reason,
+        epoch_metrics,
+    };
+
+    match persist_training_log(&run_log) {
+        Ok(path) => {
+            let _ = tx.send(TrainMessage::Log(format!(
+                "Training JSON log saved: {}",
+                path.display()
+            ))).await;
+        }
+        Err(e) => {
+            let _ = tx.send(TrainMessage::Log(format!(
+                "Failed to save training JSON log: {}",
+                e
+            ))).await;
+        }
+    }
+
     Ok(())
 }
 
@@ -274,6 +365,7 @@ pub async fn train_model_with_data(
     patience: Option<usize>,
     use_cuda: bool,
 ) -> Result<()> {
+    let started_at = Utc::now();
     let device = get_device(use_cuda);
 
     let epochs = epochs.unwrap_or(EPOCHS);
@@ -311,6 +403,8 @@ pub async fn train_model_with_data(
     let mut best_val_loss = f64::INFINITY;
     let patience = patience.unwrap_or(PATIENCE);
     let mut epochs_without_improvement: usize = 0;
+    let mut epoch_metrics: Vec<EpochLogEntry> = Vec::with_capacity(epochs);
+    let mut stop_reason: Option<String> = None;
 
     info!(
         "Training on {} with batch_size={}, epochs={}, lr={:.6}",
@@ -451,6 +545,11 @@ pub async fn train_model_with_data(
         }
         
         let avg_val_loss = if num_val_batches > 0 { total_val_loss / num_val_batches as f64 } else { 0.0 };
+        epoch_metrics.push(EpochLogEntry {
+            epoch: epoch + 1,
+            train_loss: avg_train_loss,
+            val_loss: avg_val_loss,
+        });
 
         info!("Epoch {}: Train Loss = {:.6}, Val Loss = {:.6}", epoch + 1, avg_train_loss, avg_val_loss);
 
@@ -464,6 +563,10 @@ pub async fn train_model_with_data(
             epochs_without_improvement += 1;
             if epochs_without_improvement >= patience {
                 info!("Early stopping: no improvement for {} epochs. Best val loss: {:.6}", patience, best_val_loss);
+                stop_reason = Some(format!(
+                    "early_stopping_after_{}_epochs_without_improvement",
+                    patience
+                ));
                 break;
             }
         }
@@ -476,6 +579,28 @@ pub async fn train_model_with_data(
     }
 
     info!("Training finished. Best Validation Loss: {:.6}", best_val_loss);
+
+    let run_log = TrainingRunLog {
+        run_type: "cli".to_string(),
+        started_at: started_at.to_rfc3339(),
+        finished_at: Utc::now().to_rfc3339(),
+        use_cuda,
+        data_range: DATA_RANGE.to_string(),
+        symbols: TRAINING_SYMBOLS.iter().map(|s| s.to_string()).collect(),
+        epochs_requested: epochs,
+        epochs_completed: epoch_metrics.len(),
+        batch_size,
+        learning_rate,
+        patience,
+        best_val_loss,
+        stop_reason,
+        epoch_metrics,
+    };
+
+    match persist_training_log(&run_log) {
+        Ok(path) => info!("Training JSON log saved: {}", path.display()),
+        Err(e) => warn!("Failed to save training JSON log: {}", e),
+    }
 
     Ok(())
 }
