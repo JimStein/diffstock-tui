@@ -76,6 +76,13 @@ async fn main() -> io::Result<()> {
     tracing_subscriber::fmt::init();
     let args = Args::parse();
 
+    if args.cuda && !cfg!(feature = "cuda") {
+        error!(
+            "--cuda was requested, but this binary was compiled without CUDA support. Re-run with: cargo run --release --features cuda -- --train --cuda"
+        );
+        return Ok(());
+    }
+
     if args.train {
         match train::train_model(args.epochs, args.batch_size, args.learning_rate, args.patience, args.cuda).await {
             Ok(_) => info!("Training completed successfully."),

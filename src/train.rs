@@ -406,9 +406,14 @@ pub async fn train_model_with_data(
     let mut epoch_metrics: Vec<EpochLogEntry> = Vec::with_capacity(epochs);
     let mut stop_reason: Option<String> = None;
 
+    let device_label = if use_cuda && cfg!(feature = "cuda") {
+        "CUDA"
+    } else {
+        "CPU"
+    };
     info!(
         "Training on {} with batch_size={}, epochs={}, lr={:.6}",
-        if use_cuda { "CUDA" } else { "CPU" },
+        device_label,
         batch_size,
         epochs,
         learning_rate
