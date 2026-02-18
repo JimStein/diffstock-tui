@@ -38,21 +38,21 @@ pub const FORECAST: usize = 10;
 pub const BATCH_SIZE: usize = 128;
 pub const CUDA_BATCH_SIZE: usize = 256;
 pub const EPOCHS: usize = 500;
-pub const LEARNING_RATE: f64 = 5e-4;
+pub const LEARNING_RATE: f64 = 1.5e-4;
 pub const INPUT_DIM: usize = 2;
 pub const HIDDEN_DIM: usize = 512;
 pub const NUM_LAYERS: usize = 8;
 pub const DIFF_STEPS: usize = 200;
-pub const PATIENCE: usize = 100;
+pub const PATIENCE: usize = 120;
 pub const LSTM_LAYERS: usize = 2;
-pub const DROPOUT_RATE: f64 = 0.15;
+pub const DROPOUT_RATE: f64 = 0.10;
 pub const WEIGHT_DECAY: f64 = 0.01;
 /// Range of historical data to fetch for training (e.g., "5y", "10y", "max")
 pub const DATA_RANGE: &str = "10y";
 /// Gaussian noise stddev for data augmentation on normalized returns
-pub const AUGMENTATION_NOISE: f64 = 0.02;
+pub const AUGMENTATION_NOISE: f64 = 0.01;
 /// Number of augmented copies per original sample
-pub const AUGMENTATION_COPIES: usize = 3;
+pub const AUGMENTATION_COPIES: usize = 1;
 
 // ── Inference Performance Settings ──────────────────────────────────────────
 /// Number of DDIM steps for fast inference (vs DIFF_STEPS for training)

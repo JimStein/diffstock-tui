@@ -12,6 +12,7 @@ use serde::Serialize;
 use tracing::{info, error, warn};
 use tokio::sync::mpsc;
 use rayon::prelude::*;
+use std::io::Write;
 use std::time::Instant;
 
 #[derive(Serialize)]
@@ -37,6 +38,56 @@ struct TrainingRunLog {
     best_val_loss: f64,
     stop_reason: Option<String>,
     epoch_metrics: Vec<EpochLogEntry>,
+}
+
+#[derive(Serialize)]
+struct RealtimeLogEvent {
+    event: String,
+    timestamp: String,
+    run_type: String,
+    epoch: Option<usize>,
+    train_loss: Option<f64>,
+    val_loss: Option<f64>,
+    best_val_loss: Option<f64>,
+    message: Option<String>,
+}
+
+fn create_realtime_log_file(run_type: &str) -> Result<std::path::PathBuf> {
+    let log_dir = std::path::Path::new("log");
+    if !log_dir.exists() {
+        std::fs::create_dir_all(log_dir)?;
+    }
+
+    let file_name = format!(
+        "training_live_{}_{}_{}.jsonl",
+        run_type,
+        Utc::now().format("%Y%m%d_%H%M%S"),
+        std::process::id()
+    );
+    let file_path = log_dir.join(file_name);
+    std::fs::File::create(&file_path)?;
+    Ok(file_path)
+}
+
+fn append_realtime_event(log_path: &std::path::Path, event: &RealtimeLogEvent) -> Result<()> {
+    let mut f = std::fs::OpenOptions::new()
+        .append(true)
+        .open(log_path)?;
+    let line = serde_json::to_string(event)?;
+    writeln!(f, "{}", line)?;
+    Ok(())
+}
+
+fn compute_window_trend(epoch_metrics: &[EpochLogEntry], window: usize) -> Option<(f64, f64, f64, f64)> {
+    if epoch_metrics.len() < window || window < 2 {
+        return None;
+    }
+    let slice = &epoch_metrics[epoch_metrics.len() - window..];
+    let train_avg = slice.iter().map(|e| e.train_loss).sum::<f64>() / window as f64;
+    let val_avg = slice.iter().map(|e| e.val_loss).sum::<f64>() / window as f64;
+    let train_slope = (slice[window - 1].train_loss - slice[0].train_loss) / (window as f64 - 1.0);
+    let val_slope = (slice[window - 1].val_loss - slice[0].val_loss) / (window as f64 - 1.0);
+    Some((train_avg, val_avg, train_slope, val_slope))
 }
 
 fn persist_training_log(run_log: &TrainingRunLog) -> Result<std::path::PathBuf> {
@@ -121,6 +172,21 @@ async fn train_loop_with_progress(
     tx: mpsc::Sender<TrainMessage>,
 ) -> Result<()> {
     let started_at = Utc::now();
+    let live_log_path = create_realtime_log_file("gui_progress").ok();
+    if let Some(path) = &live_log_path {
+        let _ = tx.send(TrainMessage::Log(format!("Realtime training log: {}", path.display()))).await;
+        let start_event = RealtimeLogEvent {
+            event: "start".to_string(),
+            timestamp: Utc::now().to_rfc3339(),
+            run_type: "gui_progress".to_string(),
+            epoch: None,
+            train_loss: None,
+            val_loss: None,
+            best_val_loss: None,
+            message: Some("training_started".to_string()),
+        };
+        let _ = append_realtime_event(path, &start_event);
+    }
     let device = get_device(use_cuda);
     let epochs = epochs.unwrap_or(EPOCHS);
     let default_batch_size = if use_cuda { CUDA_BATCH_SIZE } else { BATCH_SIZE };
@@ -285,6 +351,54 @@ async fn train_loop_with_progress(
             val_loss: avg_val_loss,
         }).await;
 
+        if let Some(path) = &live_log_path {
+            let epoch_event = RealtimeLogEvent {
+                event: "epoch".to_string(),
+                timestamp: Utc::now().to_rfc3339(),
+                run_type: "gui_progress".to_string(),
+                epoch: Some(epoch + 1),
+                train_loss: Some(avg_train_loss),
+                val_loss: Some(avg_val_loss),
+                best_val_loss: Some(best_val_loss.min(avg_val_loss)),
+                message: None,
+            };
+            if let Err(e) = append_realtime_event(path, &epoch_event) {
+                let _ = tx.send(TrainMessage::Log(format!("Failed to append realtime log: {}", e))).await;
+            }
+        }
+
+        if (epoch + 1) % 10 == 0 {
+            if let Some((train_avg, val_avg, train_slope, val_slope)) = compute_window_trend(&epoch_metrics, 10) {
+                let trend_msg = format!(
+                    "Trend@{} (last 10): train_avg={:.6}, val_avg={:.6}, train_slope={:+.6}/epoch, val_slope={:+.6}/epoch",
+                    epoch + 1,
+                    train_avg,
+                    val_avg,
+                    train_slope,
+                    val_slope
+                );
+                let _ = tx.send(TrainMessage::Log(trend_msg.clone())).await;
+
+                if let Some(path) = &live_log_path {
+                    let trend_event = RealtimeLogEvent {
+                        event: "trend".to_string(),
+                        timestamp: Utc::now().to_rfc3339(),
+                        run_type: "gui_progress".to_string(),
+                        epoch: Some(epoch + 1),
+                        train_loss: Some(train_avg),
+                        val_loss: Some(val_avg),
+                        best_val_loss: Some(best_val_loss.min(avg_val_loss)),
+                        message: Some(format!(
+                            "window=10,train_slope={:+.6},val_slope={:+.6}",
+                            train_slope,
+                            val_slope
+                        )),
+                    };
+                    let _ = append_realtime_event(path, &trend_event);
+                }
+            }
+        }
+
         if avg_val_loss < best_val_loss {
             best_val_loss = avg_val_loss;
             epochs_without_improvement = 0;
@@ -320,6 +434,20 @@ async fn train_loop_with_progress(
     let _ = tx.send(TrainMessage::Log(format!(
         "Training complete. Best val loss: {:.6}", best_val_loss
     ))).await;
+
+    if let Some(path) = &live_log_path {
+        let end_event = RealtimeLogEvent {
+            event: "end".to_string(),
+            timestamp: Utc::now().to_rfc3339(),
+            run_type: "gui_progress".to_string(),
+            epoch: Some(epoch_metrics.len()),
+            train_loss: epoch_metrics.last().map(|e| e.train_loss),
+            val_loss: epoch_metrics.last().map(|e| e.val_loss),
+            best_val_loss: Some(best_val_loss),
+            message: Some(stop_reason.clone().unwrap_or_else(|| "finished".to_string())),
+        };
+        let _ = append_realtime_event(path, &end_event);
+    }
 
     let run_log = TrainingRunLog {
         run_type: "gui_progress".to_string(),
@@ -366,6 +494,21 @@ pub async fn train_model_with_data(
     use_cuda: bool,
 ) -> Result<()> {
     let started_at = Utc::now();
+    let live_log_path = create_realtime_log_file("cli").ok();
+    if let Some(path) = &live_log_path {
+        let start_event = RealtimeLogEvent {
+            event: "start".to_string(),
+            timestamp: Utc::now().to_rfc3339(),
+            run_type: "cli".to_string(),
+            epoch: None,
+            train_loss: None,
+            val_loss: None,
+            best_val_loss: None,
+            message: Some("training_started".to_string()),
+        };
+        let _ = append_realtime_event(path, &start_event);
+        info!("Realtime training log: {}", path.display());
+    }
     let device = get_device(use_cuda);
 
     let epochs = epochs.unwrap_or(EPOCHS);
@@ -556,6 +699,53 @@ pub async fn train_model_with_data(
             val_loss: avg_val_loss,
         });
 
+        if let Some(path) = &live_log_path {
+            let epoch_event = RealtimeLogEvent {
+                event: "epoch".to_string(),
+                timestamp: Utc::now().to_rfc3339(),
+                run_type: "cli".to_string(),
+                epoch: Some(epoch + 1),
+                train_loss: Some(avg_train_loss),
+                val_loss: Some(avg_val_loss),
+                best_val_loss: Some(best_val_loss.min(avg_val_loss)),
+                message: None,
+            };
+            if let Err(e) = append_realtime_event(path, &epoch_event) {
+                warn!("Failed to append realtime log: {}", e);
+            }
+        }
+
+        if (epoch + 1) % 10 == 0 {
+            if let Some((train_avg, val_avg, train_slope, val_slope)) = compute_window_trend(&epoch_metrics, 10) {
+                info!(
+                    "Trend@{} (last 10): train_avg={:.6}, val_avg={:.6}, train_slope={:+.6}/epoch, val_slope={:+.6}/epoch",
+                    epoch + 1,
+                    train_avg,
+                    val_avg,
+                    train_slope,
+                    val_slope
+                );
+
+                if let Some(path) = &live_log_path {
+                    let trend_event = RealtimeLogEvent {
+                        event: "trend".to_string(),
+                        timestamp: Utc::now().to_rfc3339(),
+                        run_type: "cli".to_string(),
+                        epoch: Some(epoch + 1),
+                        train_loss: Some(train_avg),
+                        val_loss: Some(val_avg),
+                        best_val_loss: Some(best_val_loss.min(avg_val_loss)),
+                        message: Some(format!(
+                            "window=10,train_slope={:+.6},val_slope={:+.6}",
+                            train_slope,
+                            val_slope
+                        )),
+                    };
+                    let _ = append_realtime_event(path, &trend_event);
+                }
+            }
+        }
+
         info!("Epoch {}: Train Loss = {:.6}, Val Loss = {:.6}", epoch + 1, avg_train_loss, avg_val_loss);
 
         // Checkpoint
@@ -584,6 +774,20 @@ pub async fn train_model_with_data(
     }
 
     info!("Training finished. Best Validation Loss: {:.6}", best_val_loss);
+
+    if let Some(path) = &live_log_path {
+        let end_event = RealtimeLogEvent {
+            event: "end".to_string(),
+            timestamp: Utc::now().to_rfc3339(),
+            run_type: "cli".to_string(),
+            epoch: Some(epoch_metrics.len()),
+            train_loss: epoch_metrics.last().map(|e| e.train_loss),
+            val_loss: epoch_metrics.last().map(|e| e.val_loss),
+            best_val_loss: Some(best_val_loss),
+            message: Some(stop_reason.clone().unwrap_or_else(|| "finished".to_string())),
+        };
+        let _ = append_realtime_event(path, &end_event);
+    }
 
     let run_log = TrainingRunLog {
         run_type: "cli".to_string(),
