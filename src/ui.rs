@@ -1,74 +1,166 @@
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Alignment},
+    layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Style, Modifier},
     symbols,
     text::{Span, Line},
-    widgets::{Axis, Block, Borders, Chart, Dataset, GraphType, Paragraph, Gauge},
+    widgets::{Axis, Block, Borders, Chart, Dataset, Gauge, GraphType, Paragraph},
     Frame,
 };
 use crate::app::{App, AppState};
 
 pub fn render(f: &mut Frame, app: &App) {
-    match app.state {
-        AppState::Input => render_input(f, app),
-        AppState::Loading => render_loading(f, "Fetching Data..."),
-        AppState::Forecasting => render_progress(f, app),
-        AppState::Dashboard => render_dashboard(f, app),
-    }
-}
-
-fn render_progress(f: &mut Frame, app: &App) {
-    let chunks = Layout::default()
+    let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Percentage(40),
             Constraint::Length(3),
-            Constraint::Percentage(40),
+            Constraint::Min(0),
+            Constraint::Length(2),
         ])
         .split(f.area());
 
+    render_header(f, app, layout[0]);
+
+    match app.state {
+        AppState::Input => render_input(f, app, layout[1]),
+        AppState::Loading => render_loading(f, "Fetching market data...", layout[1]),
+        AppState::Forecasting => render_progress(f, app, layout[1]),
+        AppState::Dashboard => render_dashboard(f, app, layout[1]),
+    }
+
+    render_footer(f, app, layout[2]);
+}
+
+fn render_header(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let mut spans = vec![
+        Span::styled(" DiffStock TUI ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::raw(" | "),
+        Span::styled(
+            match app.state {
+                AppState::Input => "Input",
+                AppState::Loading => "Loading",
+                AppState::Forecasting => "Forecasting",
+                AppState::Dashboard => "Dashboard",
+            },
+            Style::default().fg(Color::Yellow),
+        ),
+    ];
+
+    if let Some(data) = &app.stock_data {
+        if let Some(last) = data.history.last() {
+            spans.push(Span::raw(" | "));
+            spans.push(Span::styled(
+                format!("{} ${:.2}", data.symbol, last.close),
+                Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+            ));
+
+            if data.history.len() >= 2 {
+                let prev = data.history[data.history.len() - 2].close;
+                let delta = last.close - prev;
+                let pct = delta / prev * 100.0;
+                let color = if delta >= 0.0 { Color::Green } else { Color::Red };
+                spans.push(Span::raw(" "));
+                spans.push(Span::styled(
+                    format!("({:+.2}, {:+.2}%)", delta, pct),
+                    Style::default().fg(color),
+                ));
+            }
+        }
+    }
+
+    let header = Paragraph::new(Line::from(spans)).block(Block::default().borders(Borders::ALL));
+    f.render_widget(header, area);
+}
+
+fn render_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let hint = match app.state {
+        AppState::Input => "Enter: predict | Esc: quit",
+        AppState::Loading => "Loading...",
+        AppState::Forecasting => "Esc: quit",
+        AppState::Dashboard => "r: reset | q/Esc: quit",
+    };
+
+    let footer = Paragraph::new(Line::from(vec![
+        Span::styled(" Controls: ", Style::default().fg(Color::Gray)),
+        Span::styled(hint, Style::default().fg(Color::White)),
+    ]))
+    .block(Block::default().borders(Borders::ALL));
+
+    f.render_widget(footer, area);
+}
+
+fn render_progress(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(35),
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Percentage(40),
+        ])
+        .split(area);
+
     let gauge = Gauge::default()
-        .block(Block::default().title("Running Inference").borders(Borders::ALL))
+        .block(Block::default().title(" Diffusion Inference Progress ").borders(Borders::ALL))
         .gauge_style(Style::default().fg(Color::Cyan))
         .percent((app.progress * 100.0) as u16);
 
     f.render_widget(gauge, chunks[1]);
+
+    let progress_text = Paragraph::new(Line::from(vec![
+        Span::styled("Progress: ", Style::default().fg(Color::Gray)),
+        Span::styled(format!("{:.1}%", app.progress * 100.0), Style::default().fg(Color::Yellow)),
+    ]))
+    .alignment(Alignment::Center)
+    .block(Block::default().borders(Borders::ALL));
+
+    f.render_widget(progress_text, chunks[2]);
 }
 
-fn render_input(f: &mut Frame, app: &App) {
+fn render_input(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Percentage(40),
+            Constraint::Percentage(30),
             Constraint::Length(3),
             Constraint::Length(3),
+            Constraint::Length(4),
             Constraint::Percentage(40),
         ])
-        .split(f.area());
+        .split(area);
+
+    let title = Paragraph::new(Line::from(vec![
+        Span::styled("Probabilistic Forecasting", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::raw("  |  "),
+        Span::styled("Input ticker like NVDA / SPY / QQQ", Style::default().fg(Color::Gray)),
+    ]))
+    .alignment(Alignment::Center)
+    .block(Block::default().borders(Borders::ALL).title(" DiffStock "));
+
+    f.render_widget(title, chunks[1]);
 
     let input = Paragraph::new(app.input.as_str())
         .style(Style::default().fg(Color::Yellow))
-        .block(Block::default().borders(Borders::ALL).title("Enter Stock Symbol"));
+        .block(Block::default().borders(Borders::ALL).title(" Enter Stock Symbol "));
     
-    f.render_widget(input, chunks[1]);
+    f.render_widget(input, chunks[2]);
 
     if let Some(err) = &app.error_msg {
         let error = Paragraph::new(err.as_str())
             .style(Style::default().fg(Color::Red))
-            .block(Block::default().borders(Borders::ALL).title("Error"));
-        f.render_widget(error, chunks[2]);
+            .block(Block::default().borders(Borders::ALL).title(" Error "));
+        f.render_widget(error, chunks[3]);
     }
 }
 
-fn render_loading(f: &mut Frame, msg: &str) {
+fn render_loading(f: &mut Frame, msg: &str, area: ratatui::layout::Rect) {
     let block = Block::default().borders(Borders::ALL);
     let text = Paragraph::new(msg)
         .alignment(Alignment::Center)
         .block(block);
-    f.render_widget(text, f.area());
+    f.render_widget(text, area);
 }
 
-fn render_dashboard(f: &mut Frame, app: &App) {
+fn render_dashboard(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let constraints = if app.error_msg.is_some() {
         vec![Constraint::Min(0), Constraint::Length(3)]
     } else {
@@ -79,7 +171,7 @@ fn render_dashboard(f: &mut Frame, app: &App) {
         .direction(Direction::Vertical)
         .margin(1)
         .constraints(constraints)
-        .split(f.area());
+        .split(area);
 
     if let Some(data) = &app.stock_data {
         // Split into Chart (Left) and Info (Right)
@@ -97,7 +189,8 @@ fn render_dashboard(f: &mut Frame, app: &App) {
 
         let analysis = data.analyze();
         let x_len = points.len() as f64;
-        let x_max = x_len + if app.forecast.is_some() { 50.0 } else { 0.0 };
+        let forecast_horizon = app.forecast.as_ref().map(|f| f.p50.len()).unwrap_or(0) as f64;
+        let x_max = x_len + forecast_horizon + 1.0;
 
         let mut datasets = vec![Dataset::default()
             .name(data.symbol.as_str())
@@ -105,6 +198,12 @@ fn render_dashboard(f: &mut Frame, app: &App) {
             .graph_type(GraphType::Line)
             .style(Style::default().fg(Color::Cyan))
             .data(&points)];
+
+        let mut p50_points: Vec<(f64, f64)> = Vec::new();
+        let mut p90_points: Vec<(f64, f64)> = Vec::new();
+        let mut p70_points: Vec<(f64, f64)> = Vec::new();
+        let mut p30_points: Vec<(f64, f64)> = Vec::new();
+        let mut p10_points: Vec<(f64, f64)> = Vec::new();
 
         // Add Technical Levels
         let support_line = vec![(0.0, analysis.support), (x_max, analysis.support)];
@@ -134,40 +233,77 @@ fn render_dashboard(f: &mut Frame, app: &App) {
 
         // Add Forecast Lines if available
         if let Some(forecast) = &app.forecast {
+            let forecast_start = x_len;
+            p50_points.extend(
+                forecast
+                    .p50
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, (_, price))| (forecast_start + idx as f64 + 1.0, *price)),
+            );
+            p90_points.extend(
+                forecast
+                    .p90
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, (_, price))| (forecast_start + idx as f64 + 1.0, *price)),
+            );
+            p70_points.extend(
+                forecast
+                    .p70
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, (_, price))| (forecast_start + idx as f64 + 1.0, *price)),
+            );
+            p30_points.extend(
+                forecast
+                    .p30
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, (_, price))| (forecast_start + idx as f64 + 1.0, *price)),
+            );
+            p10_points.extend(
+                forecast
+                    .p10
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, (_, price))| (forecast_start + idx as f64 + 1.0, *price)),
+            );
+
             datasets.push(Dataset::default()
                 .name("P50 Forecast")
                 .marker(symbols::Marker::Braille)
                 .graph_type(GraphType::Line)
                 .style(Style::default().fg(Color::Yellow))
-                .data(&forecast.p50));
+                .data(&p50_points));
             
             datasets.push(Dataset::default()
                 .name("P90 Upper")
                 .marker(symbols::Marker::Braille)
                 .graph_type(GraphType::Line)
                 .style(Style::default().fg(Color::DarkGray))
-                .data(&forecast.p90));
+                .data(&p90_points));
 
             datasets.push(Dataset::default()
                 .name("P70 Upper")
                 .marker(symbols::Marker::Braille)
                 .graph_type(GraphType::Line)
                 .style(Style::default().fg(Color::Gray))
-                .data(&forecast.p70));
+                .data(&p70_points));
 
             datasets.push(Dataset::default()
                 .name("P30 Lower")
                 .marker(symbols::Marker::Braille)
                 .graph_type(GraphType::Line)
                 .style(Style::default().fg(Color::Gray))
-                .data(&forecast.p30));
+                .data(&p30_points));
 
             datasets.push(Dataset::default()
                 .name("P10 Lower")
                 .marker(symbols::Marker::Braille)
                 .graph_type(GraphType::Line)
                 .style(Style::default().fg(Color::DarkGray))
-                .data(&forecast.p10));
+                .data(&p10_points));
         }
 
         let min_price = data.history.iter().map(|c| c.close).fold(f64::INFINITY, |a, b| a.min(b));
@@ -212,7 +348,7 @@ fn render_dashboard(f: &mut Frame, app: &App) {
 
         // Render Info Panel
         let mut info_text = vec![
-            Line::from(Span::styled("Analysis", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled("Technical Levels", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
             Line::from(format!("Current: {:.2}", analysis.current_price)),
             Line::from(Span::styled(format!("Resist:  {:.2}", analysis.resistance), Style::default().fg(Color::Red))),
             Line::from(Span::styled(format!("Support: {:.2}", analysis.support), Style::default().fg(Color::Green))),
@@ -226,13 +362,29 @@ fn render_dashboard(f: &mut Frame, app: &App) {
             let last_p50 = forecast.p50.last().map(|x| x.1).unwrap_or(0.0);
             let last_p70 = forecast.p70.last().map(|x| x.1).unwrap_or(0.0);
             let last_p90 = forecast.p90.last().map(|x| x.1).unwrap_or(0.0);
+            let spread = if last_p10 > 0.0 {
+                (last_p90 / last_p10 - 1.0) * 100.0
+            } else {
+                0.0
+            };
+            let confidence = if spread < 10.0 {
+                ("High", Color::Green)
+            } else if spread < 25.0 {
+                ("Moderate", Color::Yellow)
+            } else {
+                ("Wide", Color::Red)
+            };
 
-            info_text.push(Line::from(Span::styled("Forecast (50d)", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))));
+            info_text.push(Line::from(Span::styled("Forecast Targets", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))));
             info_text.push(Line::from(Span::styled(format!("P90: {:.2}", last_p90), Style::default().fg(Color::Green))));
             info_text.push(Line::from(Span::styled(format!("P70: {:.2}", last_p70), Style::default().fg(Color::LightGreen))));
             info_text.push(Line::from(Span::styled(format!("P50: {:.2}", last_p50), Style::default().fg(Color::Yellow))));
             info_text.push(Line::from(Span::styled(format!("P30: {:.2}", last_p30), Style::default().fg(Color::LightRed))));
             info_text.push(Line::from(Span::styled(format!("P10: {:.2}", last_p10), Style::default().fg(Color::Red))));
+            info_text.push(Line::from(""));
+            info_text.push(Line::from(Span::styled("Forecast Spread", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))));
+            info_text.push(Line::from(format!("P90/P10: {:.1}%", spread)));
+            info_text.push(Line::from(Span::styled(format!("Confidence: {}", confidence.0), Style::default().fg(confidence.1))));
         }
 
         let info_block = Paragraph::new(info_text)

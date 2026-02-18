@@ -163,6 +163,44 @@ async fn fetch_from_api(symbol: &str, range: &str, cache_path: &std::path::Path)
     }
 }
 
+/// Fetches the latest 1-minute close price from Yahoo Finance.
+///
+/// Uses `interval=1m` and `range=1d`, then returns the most recent non-null close.
+pub async fn fetch_latest_price_1m(symbol: &str) -> Result<f64> {
+    let url = format!(
+        "https://query1.finance.yahoo.com/v8/finance/chart/{}?interval=1m&range=1d",
+        symbol
+    );
+
+    let response = reqwest::Client::new()
+        .get(&url)
+        .header("User-Agent", "Mozilla/5.0")
+        .send()
+        .await?
+        .json::<YahooChartResponse>()
+        .await?;
+
+    let result = response
+        .chart
+        .result
+        .first()
+        .ok_or(anyhow::anyhow!("No chart result for {}", symbol))?;
+    let quote = result
+        .indicators
+        .quote
+        .first()
+        .ok_or(anyhow::anyhow!("No quote result for {}", symbol))?;
+
+    let latest = quote
+        .close
+        .iter()
+        .rev()
+        .find_map(|value| *value)
+        .ok_or(anyhow::anyhow!("No valid 1m close for {}", symbol))?;
+
+    Ok(latest)
+}
+
 impl StockData {
     pub async fn fetch(symbol: &str) -> Result<Self> {
         Self::fetch_range(symbol, "1y").await

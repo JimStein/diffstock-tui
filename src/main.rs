@@ -5,6 +5,7 @@ mod diffusion;
 mod inference;
 mod models;
 mod portfolio;
+mod paper_trading;
 mod train;
 mod tui;
 mod ui;

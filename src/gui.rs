@@ -1,9 +1,11 @@
 ﻿use eframe::egui;
 use egui_plot::{Line, Plot, PlotPoints, PlotUi};
 use crate::app::{App, AppState};
+use crate::paper_trading::{self, AnalysisRecord, MinutePortfolioSnapshot, PaperCommand, PaperEvent};
 use crate::portfolio::{self, PortfolioAllocation};
 use crate::train;
-use chrono::TimeZone;
+use chrono::{DateTime, Duration as ChronoDuration, TimeZone};
+use std::path::Path;
 use tokio::sync::mpsc;
 use std::time::Instant;
 
@@ -53,6 +55,25 @@ enum TrainState {
     Error(String),
 }
 
+#[derive(PartialEq)]
+enum PaperState {
+    Idle,
+    Running,
+    Paused,
+    Error(String),
+}
+
+#[derive(PartialEq, Clone, Copy)]
+enum CurveRangePreset {
+    D1,
+    D7,
+    M1,
+    M3,
+    Y1,
+    Y2,
+    Manual,
+}
+
 /// A single training epoch log entry.
 #[derive(Clone)]
 struct TrainLogEntry {
@@ -77,6 +98,23 @@ pub struct GuiApp {
     portfolio_state: PortfolioState,
     portfolio_result: Option<PortfolioAllocation>,
     portfolio_rx: Option<mpsc::Receiver<Result<PortfolioAllocation, String>>>,
+    paper_state: PaperState,
+    paper_rx: Option<mpsc::Receiver<PaperEvent>>,
+    paper_cmd_tx: Option<mpsc::Sender<PaperCommand>>,
+    paper_snapshots: Vec<MinutePortfolioSnapshot>,
+    paper_last_analysis: Option<AnalysisRecord>,
+    paper_log_messages: Vec<String>,
+    paper_strategy_file: Option<String>,
+    paper_runtime_file: Option<String>,
+    paper_target_weights: Option<Vec<(String, f64)>>,
+    paper_start_time: Option<Instant>,
+    paper_initial_capital_input: String,
+    paper_time1_input: String,
+    paper_time2_input: String,
+    paper_history_path_input: String,
+    paper_curve_preset: CurveRangePreset,
+    paper_curve_manual_days_input: String,
+    paper_force_repaint: bool,
     // Train
     train_state: TrainState,
     train_epochs: String,
@@ -101,6 +139,23 @@ impl GuiApp {
             portfolio_state: PortfolioState::Idle,
             portfolio_result: None,
             portfolio_rx: None,
+            paper_state: PaperState::Idle,
+            paper_rx: None,
+            paper_cmd_tx: None,
+            paper_snapshots: Vec::new(),
+            paper_last_analysis: None,
+            paper_log_messages: Vec::new(),
+            paper_strategy_file: None,
+            paper_runtime_file: None,
+            paper_target_weights: None,
+            paper_start_time: None,
+            paper_initial_capital_input: String::from("80000"),
+            paper_time1_input: String::from("09:30"),
+            paper_time2_input: String::from("15:00"),
+            paper_history_path_input: String::new(),
+            paper_curve_preset: CurveRangePreset::D7,
+            paper_curve_manual_days_input: String::from("30"),
+            paper_force_repaint: false,
             train_state: TrainState::Idle,
             train_epochs: String::from("200"),
             train_batch_size: String::from("64"),
@@ -196,6 +251,55 @@ impl eframe::App for GuiApp {
             }
         }
 
+        // Check paper trading channel
+        if let Some(rx) = &mut self.paper_rx {
+            loop {
+                match rx.try_recv() {
+                    Ok(PaperEvent::Started {
+                        strategy_file,
+                        runtime_file,
+                    }) => {
+                        self.paper_strategy_file = Some(strategy_file.clone());
+                        self.paper_runtime_file = Some(runtime_file.clone());
+                        self.paper_log_messages
+                            .push(format!("Paper trading started. strategy={}, runtime={}", strategy_file, runtime_file));
+                    }
+                    Ok(PaperEvent::Info(message)) => {
+                        self.paper_log_messages.push(message);
+                    }
+                    Ok(PaperEvent::Analysis(analysis)) => {
+                        self.paper_last_analysis = Some(analysis.clone());
+                        self.paper_log_messages.push(format!(
+                            "Analysis {} trades={} value_after=${:.2}",
+                            analysis.timestamp,
+                            analysis.trades.len(),
+                            analysis.portfolio_value_after
+                        ));
+                    }
+                    Ok(PaperEvent::Minute(snapshot)) => {
+                        self.paper_snapshots.push(snapshot);
+                        if self.paper_snapshots.len() > 5000 {
+                            self.paper_snapshots.remove(0);
+                        }
+                    }
+                    Ok(PaperEvent::Error(message)) => {
+                        self.paper_state = PaperState::Error(message.clone());
+                        self.paper_log_messages.push(format!("Error: {}", message));
+                    }
+                    Err(_) => break,
+                }
+            }
+        }
+
+        if self.paper_state == PaperState::Running || self.paper_state == PaperState::Paused {
+            ctx.request_repaint();
+        }
+
+        if self.paper_force_repaint {
+            ctx.request_repaint();
+            self.paper_force_repaint = false;
+        }
+
         // 鈹€鈹€ Top Bar 鈹€鈹€
         egui::TopBottomPanel::top("top_bar").show(ctx, |ui| {
             ui.add_space(4.0);
@@ -211,6 +315,14 @@ impl eframe::App for GuiApp {
                     .color(TEXT_SECONDARY));
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let mode_label = match self.active_tab {
+                        GuiTab::Forecast => "Forecast",
+                        GuiTab::Portfolio => "Portfolio",
+                        GuiTab::Train => "Train",
+                    };
+                    small_chip(ui, mode_label, ACCENT_PURPLE);
+                    small_chip(ui, if self.app.use_cuda { "CUDA" } else { "CPU" }, ACCENT_CYAN);
+
                     ui.add_space(8.0);
                     let train_btn = ui.selectable_label(
                         self.active_tab == GuiTab::Train,
@@ -604,7 +716,7 @@ impl GuiApp {
         }
     }
 
-    fn render_side_panel(&self, ui: &mut egui::Ui) {
+    fn render_side_panel(&mut self, ui: &mut egui::Ui) {
         egui::Frame::none()
             .fill(BG_CARD)
             .rounding(egui::Rounding::same(8.0))
@@ -711,6 +823,45 @@ impl GuiApp {
                             .color(ACCENT_RED)
                             .size(11.0));
                     }
+
+                    if let Some(data) = &self.app.stock_data {
+                        ui.add_space(10.0);
+                        ui.add(egui::Separator::default().spacing(4.0));
+                        ui.add_space(8.0);
+                        section_header(ui, "Single-Stock Simulation");
+                        ui.label(egui::RichText::new("Run paper trading directly from this stock forecast (100% allocation).")
+                            .size(10.0)
+                            .color(TEXT_SECONDARY));
+
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("Capital").size(10.0).color(TEXT_SECONDARY));
+                            ui.add(egui::TextEdit::singleline(&mut self.paper_initial_capital_input).desired_width(80.0));
+                            ui.label(egui::RichText::new("T1").size(10.0).color(TEXT_SECONDARY));
+                            ui.add(egui::TextEdit::singleline(&mut self.paper_time1_input).desired_width(56.0));
+                            ui.label(egui::RichText::new("T2").size(10.0).color(TEXT_SECONDARY));
+                            ui.add(egui::TextEdit::singleline(&mut self.paper_time2_input).desired_width(56.0));
+                        });
+
+                        let run_btn = ui.add_enabled(
+                            self.paper_state != PaperState::Running,
+                            egui::Button::new(
+                                egui::RichText::new("Start Single-Stock Simulation")
+                                    .size(11.0)
+                                    .strong()
+                                    .color(egui::Color32::WHITE),
+                            )
+                            .fill(if self.paper_state == PaperState::Running {
+                                BG_ELEVATED
+                            } else {
+                                ACCENT_GREEN
+                            })
+                            .rounding(egui::Rounding::same(6.0)),
+                        );
+
+                        if run_btn.clicked() {
+                            self.start_single_stock_paper_trading(data.symbol.clone());
+                        }
+                    }
                 });
             });
     }
@@ -807,8 +958,8 @@ impl GuiApp {
         ui.add_space(8.0);
 
         // 鈹€鈹€ Results 鈹€鈹€
-        if let Some(alloc) = &self.portfolio_result.clone() {
-            self.render_portfolio_results(ui, alloc);
+        if let Some(alloc) = self.portfolio_result.clone() {
+            self.render_portfolio_results(ui, &alloc);
         } else if self.portfolio_state == PortfolioState::Idle {
             // Empty state
             let available = ui.available_size();
@@ -830,7 +981,7 @@ impl GuiApp {
         }
     }
 
-    fn render_portfolio_results(&self, ui: &mut egui::Ui, alloc: &PortfolioAllocation) {
+    fn render_portfolio_results(&mut self, ui: &mut egui::Ui, alloc: &PortfolioAllocation) {
         egui::ScrollArea::vertical().show(ui, |ui| {
             // 鈹€鈹€ Summary Cards Row 鈹€鈹€
             ui.horizontal(|ui| {
@@ -850,6 +1001,135 @@ impl GuiApp {
                     &format!("{:.2}x", alloc.leverage),
                     ACCENT_CYAN);
             });
+
+            ui.add_space(8.0);
+
+            egui::Frame::none()
+                .fill(BG_CARD)
+                .rounding(egui::Rounding::same(8.0))
+                .stroke(egui::Stroke::new(1.0, BORDER_SUBTLE))
+                .inner_margin(egui::Margin::same(12.0))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        section_header(ui, "Paper Trading Simulator");
+                        ui.label(egui::RichText::new("Initial Capital: $80,000 | Fee: 0.05% per trade | Analysis: start immediately + every 12h")
+                            .size(10.0)
+                            .color(TEXT_SECONDARY));
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Capital").size(10.0).color(TEXT_SECONDARY));
+                        ui.add(egui::TextEdit::singleline(&mut self.paper_initial_capital_input).desired_width(90.0));
+                        ui.label(egui::RichText::new("Time1").size(10.0).color(TEXT_SECONDARY));
+                        ui.add(egui::TextEdit::singleline(&mut self.paper_time1_input).desired_width(64.0));
+                        ui.label(egui::RichText::new("Time2").size(10.0).color(TEXT_SECONDARY));
+                        ui.add(egui::TextEdit::singleline(&mut self.paper_time2_input).desired_width(64.0));
+
+                        let start_btn = ui.add_enabled(
+                            self.paper_state != PaperState::Running,
+                            egui::Button::new(
+                                egui::RichText::new(if self.paper_state == PaperState::Running {
+                                    "Simulation Running"
+                                } else {
+                                    "Start Simulation"
+                                })
+                                .size(12.0)
+                                .strong()
+                                .color(egui::Color32::WHITE),
+                            )
+                            .fill(if self.paper_state == PaperState::Running {
+                                BG_ELEVATED
+                            } else {
+                                ACCENT_GREEN
+                            })
+                            .rounding(egui::Rounding::same(6.0)),
+                        );
+
+                        if start_btn.clicked() {
+                            self.start_paper_trading_from_weights(alloc.weights.clone());
+                        }
+
+                        let stop_btn = ui.add_enabled(
+                            self.paper_state == PaperState::Running,
+                            egui::Button::new(
+                                egui::RichText::new("Stop")
+                                    .size(11.0)
+                                    .strong()
+                                    .color(egui::Color32::WHITE),
+                            )
+                            .fill(ACCENT_RED)
+                            .rounding(egui::Rounding::same(6.0)),
+                        );
+                        if stop_btn.clicked() {
+                            self.pause_paper_trading();
+                        }
+
+                        let resume_btn = ui.add_enabled(
+                            self.paper_state == PaperState::Paused,
+                            egui::Button::new(
+                                egui::RichText::new("Resume")
+                                    .size(11.0)
+                                    .strong()
+                                    .color(egui::Color32::WHITE),
+                            )
+                            .fill(ACCENT_GREEN)
+                            .rounding(egui::Rounding::same(6.0)),
+                        );
+                        if resume_btn.clicked() {
+                            self.resume_paper_trading();
+                        }
+
+                        let status_text = match &self.paper_state {
+                            PaperState::Idle => "Idle",
+                            PaperState::Running => "Running",
+                            PaperState::Paused => "Paused",
+                            PaperState::Error(_) => "Error",
+                        };
+                        let status_color = match &self.paper_state {
+                            PaperState::Idle => TEXT_SECONDARY,
+                            PaperState::Running => ACCENT_YELLOW,
+                            PaperState::Paused => ACCENT_ORANGE,
+                            PaperState::Error(_) => ACCENT_RED,
+                        };
+                        ui.label(egui::RichText::new(format!("Status: {}", status_text))
+                            .size(11.0)
+                            .color(status_color));
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("History JSONL").size(10.0).color(TEXT_SECONDARY));
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.paper_history_path_input)
+                                .desired_width(280.0)
+                                .hint_text("empty = auto latest log/paper_runtime_*.jsonl"),
+                        );
+                        let load_btn = ui.button("Load History");
+                        if load_btn.clicked() {
+                            self.load_paper_history();
+                        }
+                    });
+
+                    ui.label(egui::RichText::new("Times are local machine time in HH:MM format (daily schedule).")
+                        .size(10.0)
+                        .color(TEXT_SECONDARY));
+
+                    if let Some(path) = &self.paper_strategy_file {
+                        ui.label(egui::RichText::new(format!("Strategy JSON: {}", path))
+                            .size(10.0)
+                            .color(TEXT_SECONDARY));
+                    }
+                    if let Some(path) = &self.paper_runtime_file {
+                        ui.label(egui::RichText::new(format!("Runtime JSONL: {}", path))
+                            .size(10.0)
+                            .color(TEXT_SECONDARY));
+                    }
+
+                    if let PaperState::Error(message) = &self.paper_state {
+                        ui.label(egui::RichText::new(format!("Error: {}", message))
+                            .size(10.0)
+                            .color(ACCENT_RED));
+                    }
+                });
 
             ui.add_space(8.0);
 
@@ -1036,11 +1316,363 @@ impl GuiApp {
                 });
             });
 
+            ui.add_space(8.0);
+            self.render_paper_monitor_panel(ui);
+
             ui.add_space(12.0);
             ui.label(egui::RichText::new("Educational use only. Not financial advice.")
                 .size(10.0)
                 .color(TEXT_SECONDARY));
         });
+    }
+
+    fn start_paper_trading_from_weights(&mut self, target_weights: Vec<(String, f64)>) {
+        if let Some(cmd_tx) = &self.paper_cmd_tx {
+            let _ = cmd_tx.try_send(PaperCommand::Stop);
+        }
+
+        let config = match paper_trading::build_config(
+            Some(&self.paper_initial_capital_input),
+            &self.paper_time1_input,
+            &self.paper_time2_input,
+        ) {
+            Ok(cfg) => cfg,
+            Err(error) => {
+                self.paper_state = PaperState::Error(error.to_string());
+                self.paper_log_messages
+                    .push(format!("Invalid paper trading config: {}", error));
+                return;
+            }
+        };
+
+        self.paper_state = PaperState::Running;
+        self.paper_snapshots.clear();
+        self.paper_last_analysis = None;
+        self.paper_log_messages.clear();
+        self.paper_strategy_file = None;
+        self.paper_runtime_file = None;
+        self.paper_start_time = Some(Instant::now());
+        self.paper_target_weights = Some(target_weights.clone());
+
+        let (tx, rx) = mpsc::channel(1024);
+        self.paper_rx = Some(rx);
+        let (cmd_tx, cmd_rx) = mpsc::channel(64);
+        self.paper_cmd_tx = Some(cmd_tx);
+
+        tokio::spawn(async move {
+            let tx_clone = tx.clone();
+            if let Err(error) = paper_trading::run_paper_trading(target_weights, config, tx_clone, cmd_rx).await {
+                let _ = tx
+                    .send(PaperEvent::Error(format!("Paper trading stopped: {}", error)))
+                    .await;
+            }
+        });
+    }
+
+    fn start_single_stock_paper_trading(&mut self, symbol: String) {
+        self.start_paper_trading_from_weights(vec![(symbol, 1.0)]);
+    }
+
+    fn pause_paper_trading(&mut self) {
+        if let Some(cmd_tx) = &self.paper_cmd_tx {
+            let _ = cmd_tx.try_send(PaperCommand::Pause);
+            self.paper_state = PaperState::Paused;
+        }
+    }
+
+    fn resume_paper_trading(&mut self) {
+        if let Some(cmd_tx) = &self.paper_cmd_tx {
+            let _ = cmd_tx.try_send(PaperCommand::Resume);
+            self.paper_state = PaperState::Running;
+            return;
+        }
+
+        if let Some(weights) = &self.paper_target_weights {
+            self.start_paper_trading_from_weights(weights.clone());
+        }
+    }
+
+    fn load_paper_history(&mut self) {
+        match self.resolve_history_path() {
+            Ok(path) => match std::fs::read_to_string(&path) {
+                Ok(content) => {
+                    let mut loaded = Vec::new();
+                    for line in content.lines().filter(|line| !line.trim().is_empty()) {
+                        if let Ok(snapshot) = serde_json::from_str::<MinutePortfolioSnapshot>(line) {
+                            loaded.push(snapshot);
+                        }
+                    }
+                    if loaded.is_empty() {
+                        self.paper_state = PaperState::Error("No valid minute snapshots in history file".to_string());
+                    } else {
+                        self.paper_snapshots = loaded;
+                        self.paper_runtime_file = Some(path.display().to_string());
+                        self.paper_log_messages.push(format!(
+                            "Loaded {} historical snapshots from {}",
+                            self.paper_snapshots.len(),
+                            path.display()
+                        ));
+                        if self.paper_state != PaperState::Running && self.paper_state != PaperState::Paused {
+                            self.paper_state = PaperState::Idle;
+                        }
+                        self.paper_force_repaint = true;
+                    }
+                }
+                Err(error) => {
+                    self.paper_state = PaperState::Error(format!("Failed to read history file: {}", error));
+                }
+            },
+            Err(error) => {
+                self.paper_state = PaperState::Error(error.to_string());
+            }
+        }
+    }
+
+    fn resolve_history_path(&self) -> anyhow::Result<std::path::PathBuf> {
+        let raw = self.paper_history_path_input.trim();
+        if !raw.is_empty() {
+            let candidate = std::path::PathBuf::from(raw);
+            if candidate.exists() {
+                return Ok(candidate);
+            }
+            return Err(anyhow::anyhow!("History path does not exist: {}", raw));
+        }
+
+        let log_dir = Path::new("log");
+        let mut latest: Option<(std::path::PathBuf, std::time::SystemTime)> = None;
+        for entry in std::fs::read_dir(log_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default()
+                .to_string();
+            if !name.starts_with("paper_runtime_") || !name.ends_with(".jsonl") {
+                continue;
+            }
+            let modified = entry.metadata()?.modified()?;
+            if latest
+                .as_ref()
+                .map(|(_, ts)| modified > *ts)
+                .unwrap_or(true)
+            {
+                latest = Some((path.clone(), modified));
+            }
+        }
+
+        latest
+            .map(|(path, _)| path)
+            .ok_or(anyhow::anyhow!("No historical paper_runtime_*.jsonl file found in log/"))
+    }
+
+    fn render_paper_monitor_panel(&mut self, ui: &mut egui::Ui) {
+        if self.paper_snapshots.is_empty()
+            && self.paper_state != PaperState::Running
+            && self.paper_state != PaperState::Paused
+        {
+            return;
+        }
+
+        egui::Frame::none()
+            .fill(BG_CARD)
+            .rounding(egui::Rounding::same(8.0))
+            .stroke(egui::Stroke::new(1.0, BORDER_SUBTLE))
+            .inner_margin(egui::Margin::same(12.0))
+            .show(ui, |ui| {
+                section_header(ui, "Live Portfolio Monitor (1m)");
+
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Curve Range").size(10.0).color(TEXT_SECONDARY));
+                    egui::ComboBox::from_id_salt("paper_curve_range")
+                        .selected_text(self.curve_range_label())
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.paper_curve_preset, CurveRangePreset::D1, "1D");
+                            ui.selectable_value(&mut self.paper_curve_preset, CurveRangePreset::D7, "7D");
+                            ui.selectable_value(&mut self.paper_curve_preset, CurveRangePreset::M1, "1M");
+                            ui.selectable_value(&mut self.paper_curve_preset, CurveRangePreset::M3, "3M");
+                            ui.selectable_value(&mut self.paper_curve_preset, CurveRangePreset::Y1, "1Y");
+                            ui.selectable_value(&mut self.paper_curve_preset, CurveRangePreset::Y2, "2Y");
+                            ui.selectable_value(&mut self.paper_curve_preset, CurveRangePreset::Manual, "Manual");
+                        });
+
+                    if self.paper_curve_preset == CurveRangePreset::Manual {
+                        ui.label(egui::RichText::new("Days").size(10.0).color(TEXT_SECONDARY));
+                        ui.add(egui::TextEdit::singleline(&mut self.paper_curve_manual_days_input).desired_width(70.0));
+                        ui.label(egui::RichText::new("(max 3650)").size(10.0).color(TEXT_SECONDARY));
+                    }
+                });
+
+                if let Some(snapshot) = self.paper_snapshots.last() {
+                    let filtered = self.filtered_paper_snapshots();
+                    ui.horizontal(|ui| {
+                        summary_card(ui, "Total Value", &format!("${:.2}", snapshot.total_value), ACCENT_CYAN);
+                        summary_card(ui, "PnL", &format!("${:+.2}", snapshot.pnl_usd), if snapshot.pnl_usd >= 0.0 { ACCENT_GREEN } else { ACCENT_RED });
+                        summary_card(ui, "PnL %", &format!("{:+.2}%", snapshot.pnl_pct), if snapshot.pnl_pct >= 0.0 { ACCENT_GREEN } else { ACCENT_RED });
+                        summary_card(ui, "QQQ Ref", &format!("{:+.2}%", snapshot.benchmark_return_pct), ACCENT_YELLOW);
+                    });
+
+                    if let Some(start_time) = self.paper_start_time {
+                        ui.label(egui::RichText::new(format!(
+                            "Runtime: {} | Last update: {}",
+                            format_duration(start_time.elapsed().as_secs()),
+                            snapshot.timestamp
+                        ))
+                        .size(10.0)
+                        .color(TEXT_SECONDARY));
+                    }
+
+                    let asset_curve: PlotPoints = filtered
+                        .iter()
+                        .enumerate()
+                        .map(|(index, point)| [index as f64, point.total_value])
+                        .collect();
+                    let benchmark_curve: PlotPoints = filtered
+                        .iter()
+                        .enumerate()
+                        .map(|(index, point)| {
+                            [
+                                index as f64,
+                                filtered
+                                    .first()
+                                    .map(|point| point.total_value - point.pnl_usd)
+                                    .unwrap_or(paper_trading::DEFAULT_INITIAL_CAPITAL_USD)
+                                    * (1.0 + point.benchmark_return_pct / 100.0),
+                            ]
+                        })
+                        .collect();
+
+                    Plot::new("paper_portfolio_curve")
+                        .height(220.0)
+                        .x_axis_label("Point")
+                        .y_axis_label("USD")
+                        .legend(egui_plot::Legend::default().position(egui_plot::Corner::RightTop))
+                        .show(ui, |plot_ui| {
+                            plot_ui.line(Line::new(asset_curve).name("Portfolio Value").color(ACCENT_CYAN).width(2.2));
+                            plot_ui.line(Line::new(benchmark_curve).name("QQQ Benchmark Value").color(ACCENT_YELLOW).width(1.8));
+                        });
+
+                    ui.add_space(4.0);
+                    section_header(ui, "Per-Symbol 1m Change");
+                    for symbol_snapshot in &snapshot.symbols {
+                        let change_color = if symbol_snapshot.change_1m >= 0.0 {
+                            ACCENT_GREEN
+                        } else {
+                            ACCENT_RED
+                        };
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new(&symbol_snapshot.symbol)
+                                    .size(11.0)
+                                    .strong()
+                                    .color(TEXT_PRIMARY),
+                            );
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "{:+.3}%",
+                                        symbol_snapshot.change_1m_pct
+                                    ))
+                                    .size(11.0)
+                                    .color(change_color),
+                                );
+                                ui.label(
+                                    egui::RichText::new(format!("${:.2}", symbol_snapshot.price))
+                                        .size(11.0)
+                                        .color(TEXT_SECONDARY),
+                                );
+                            });
+                        });
+                    }
+                }
+
+                if let Some(analysis) = &self.paper_last_analysis {
+                    ui.add_space(6.0);
+                    section_header(ui, "Latest Rebalance");
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{} | trades={} | value_before=${:.2} | value_after=${:.2}",
+                            analysis.timestamp,
+                            analysis.trades.len(),
+                            analysis.portfolio_value_before,
+                            analysis.portfolio_value_after
+                        ))
+                        .size(10.0)
+                        .color(TEXT_SECONDARY),
+                    );
+                }
+
+                if !self.paper_log_messages.is_empty() {
+                    ui.add_space(6.0);
+                    section_header(ui, "Simulation Log");
+                    egui::ScrollArea::vertical().max_height(80.0).show(ui, |ui| {
+                        for message in self.paper_log_messages.iter().rev().take(8).rev() {
+                            ui.label(egui::RichText::new(message).size(10.0).color(TEXT_SECONDARY));
+                        }
+                    });
+                }
+            });
+    }
+
+    fn curve_range_label(&self) -> &'static str {
+        match self.paper_curve_preset {
+            CurveRangePreset::D1 => "1D",
+            CurveRangePreset::D7 => "7D",
+            CurveRangePreset::M1 => "1M",
+            CurveRangePreset::M3 => "3M",
+            CurveRangePreset::Y1 => "1Y",
+            CurveRangePreset::Y2 => "2Y",
+            CurveRangePreset::Manual => "Manual",
+        }
+    }
+
+    fn filtered_paper_snapshots(&self) -> Vec<&MinutePortfolioSnapshot> {
+        if self.paper_snapshots.is_empty() {
+            return Vec::new();
+        }
+
+        let max_days = match self.paper_curve_preset {
+            CurveRangePreset::D1 => 1,
+            CurveRangePreset::D7 => 7,
+            CurveRangePreset::M1 => 30,
+            CurveRangePreset::M3 => 90,
+            CurveRangePreset::Y1 => 365,
+            CurveRangePreset::Y2 => 730,
+            CurveRangePreset::Manual => self
+                .paper_curve_manual_days_input
+                .trim()
+                .parse::<i64>()
+                .ok()
+                .unwrap_or(30)
+                .clamp(1, 3650),
+        };
+
+        let reference_time = self
+            .paper_snapshots
+            .last()
+            .and_then(|snapshot| DateTime::parse_from_rfc3339(&snapshot.timestamp).ok());
+
+        let Some(reference_time) = reference_time else {
+            return self.paper_snapshots.iter().collect();
+        };
+
+        let cutoff = reference_time - ChronoDuration::days(max_days);
+
+        let mut filtered: Vec<&MinutePortfolioSnapshot> = self
+            .paper_snapshots
+            .iter()
+            .filter(|snapshot| {
+                DateTime::parse_from_rfc3339(&snapshot.timestamp)
+                    .map(|timestamp| timestamp >= cutoff)
+                    .unwrap_or(false)
+            })
+            .collect();
+
+        if filtered.is_empty() {
+            filtered = self.paper_snapshots.iter().collect();
+        }
+
+        filtered
     }
 }
 
@@ -1423,6 +2055,22 @@ fn summary_card(ui: &mut egui::Ui, label: &str, value: &str, color: egui::Color3
                     .strong()
                     .color(color));
             });
+        });
+}
+
+fn small_chip(ui: &mut egui::Ui, text: &str, color: egui::Color32) {
+    egui::Frame::none()
+        .fill(color.linear_multiply(0.18))
+        .rounding(egui::Rounding::same(6.0))
+        .stroke(egui::Stroke::new(1.0, color.linear_multiply(0.7)))
+        .inner_margin(egui::Margin::symmetric(6.0, 2.0))
+        .show(ui, |ui| {
+            ui.label(
+                egui::RichText::new(text)
+                    .size(10.0)
+                    .strong()
+                    .color(color),
+            );
         });
 }
 
