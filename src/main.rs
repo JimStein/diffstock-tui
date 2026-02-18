@@ -12,9 +12,17 @@ mod ui;
 mod gui;
 
 use app::App;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use std::io;
 use tracing::{info, error};
+use tracing_subscriber::EnvFilter;
+
+#[derive(Clone, Debug, ValueEnum)]
+enum GuiRendererChoice {
+    Auto,
+    Wgpu,
+    Glow,
+}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -59,6 +67,14 @@ struct Args {
     #[arg(long)]
     gui: bool,
 
+    /// GUI renderer backend (auto|wgpu|glow). Useful for RDP compatibility.
+    #[arg(long, value_enum, default_value_t = GuiRendererChoice::Wgpu)]
+    gui_renderer: GuiRendererChoice,
+
+    /// Enable GUI safe mode for remote desktop (disables vsync/MSAA and hardware acceleration).
+    #[arg(long)]
+    gui_safe_mode: bool,
+
     /// Number of epochs for training (default: 200). Ignored if --train is not set.
     #[arg(long)]
     epochs: Option<usize>,
@@ -86,7 +102,12 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    tracing_subscriber::fmt::init();
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        EnvFilter::new("diffstock_tui=info,wgpu_core=error,wgpu_hal=error")
+    });
+    tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .init();
     let args = Args::parse();
 
     if args.cuda && !cfg!(feature = "cuda") {
@@ -154,7 +175,26 @@ async fn main() -> io::Result<()> {
     }
 
     if args.gui {
-        let options = eframe::NativeOptions::default();
+        let mut options = eframe::NativeOptions::default();
+        options.renderer = match args.gui_renderer {
+            GuiRendererChoice::Auto => eframe::Renderer::Wgpu,
+            GuiRendererChoice::Wgpu => eframe::Renderer::Wgpu,
+            GuiRendererChoice::Glow => eframe::Renderer::Glow,
+        };
+
+        if args.gui_safe_mode {
+            options.vsync = false;
+            options.multisampling = 0;
+            options.depth_buffer = 0;
+            options.stencil_buffer = 0;
+            options.hardware_acceleration = eframe::HardwareAcceleration::Off;
+        }
+
+        info!(
+            "Launching GUI with renderer: {:?}, safe_mode={}",
+            args.gui_renderer,
+            args.gui_safe_mode
+        );
         eframe::run_native(
             "DiffStock",
             options,
