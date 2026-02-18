@@ -4,7 +4,7 @@ use crate::app::{App, AppState};
 use crate::paper_trading::{self, AnalysisRecord, MinutePortfolioSnapshot, PaperCommand, PaperEvent};
 use crate::portfolio::{self, PortfolioAllocation};
 use crate::train;
-use chrono::{DateTime, Duration as ChronoDuration, TimeZone};
+use chrono::{DateTime, Duration as ChronoDuration, Local, TimeZone};
 use std::path::Path;
 use tokio::sync::mpsc;
 use std::time::Instant;
@@ -135,7 +135,7 @@ impl GuiApp {
         Self {
             app,
             active_tab: GuiTab::Forecast,
-            portfolio_input: String::from("NVDA,MSFT,AAPL,GOOGL,AMZN,META,QQQ,SPY"),
+            portfolio_input: String::from("NVDA,MSFT,URA,IAU,COPX,ETN,TLT"),
             portfolio_state: PortfolioState::Idle,
             portfolio_result: None,
             portfolio_rx: None,
@@ -266,6 +266,9 @@ impl eframe::App for GuiApp {
                     }
                     Ok(PaperEvent::Info(message)) => {
                         self.paper_log_messages.push(message);
+                    }
+                    Ok(PaperEvent::Warning(message)) => {
+                        self.paper_log_messages.push(format!("Warning: {}", message));
                     }
                     Ok(PaperEvent::Analysis(analysis)) => {
                         self.paper_last_analysis = Some(analysis.clone());
@@ -1512,6 +1515,28 @@ impl GuiApp {
                         summary_card(ui, "QQQ Ref", &format!("{:+.2}%", snapshot.benchmark_return_pct), ACCENT_YELLOW);
                     });
 
+                    let now_text = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                    let (system_status_text, system_status_color) = match &self.paper_state {
+                        PaperState::Running => ("RUNNING", ACCENT_GREEN),
+                        PaperState::Paused => ("PAUSED", ACCENT_ORANGE),
+                        PaperState::Error(_) => ("ERROR", ACCENT_RED),
+                        PaperState::Idle => ("IDLE", TEXT_SECONDARY),
+                    };
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(format!("Current Time: {}", now_text))
+                                .size(11.0)
+                                .color(TEXT_SECONDARY),
+                        );
+                        ui.separator();
+                        ui.label(
+                            egui::RichText::new(format!("System: {}", system_status_text))
+                                .size(11.0)
+                                .strong()
+                                .color(system_status_color),
+                        );
+                    });
+
                     if let Some(start_time) = self.paper_start_time {
                         ui.label(egui::RichText::new(format!(
                             "Runtime: {} | Last update: {}",
@@ -1551,6 +1576,43 @@ impl GuiApp {
                             plot_ui.line(Line::new(asset_curve).name("Portfolio Value").color(ACCENT_CYAN).width(2.2));
                             plot_ui.line(Line::new(benchmark_curve).name("QQQ Benchmark Value").color(ACCENT_YELLOW).width(1.8));
                         });
+
+                    ui.add_space(4.0);
+                    section_header(ui, "Input Symbols Realtime Price");
+                    if let Some(target_weights) = &self.paper_target_weights {
+                        for (symbol, _) in target_weights {
+                            let symbol_price = snapshot
+                                .symbols
+                                .iter()
+                                .find(|symbol_snapshot| symbol_snapshot.symbol == *symbol)
+                                .map(|symbol_snapshot| symbol_snapshot.price);
+
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new(symbol)
+                                        .size(11.0)
+                                        .strong()
+                                        .color(TEXT_PRIMARY),
+                                );
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    let price_text = symbol_price
+                                        .map(|price| format!("${:.2}", price))
+                                        .unwrap_or_else(|| "--".to_string());
+                                    ui.label(
+                                        egui::RichText::new(price_text)
+                                            .size(11.0)
+                                            .color(TEXT_SECONDARY),
+                                    );
+                                });
+                            });
+                        }
+                    } else {
+                        ui.label(
+                            egui::RichText::new("No input symbols available yet")
+                                .size(10.0)
+                                .color(TEXT_SECONDARY),
+                        );
+                    }
 
                     ui.add_space(4.0);
                     section_header(ui, "Per-Symbol 1m Change");

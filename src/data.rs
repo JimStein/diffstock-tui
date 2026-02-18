@@ -167,38 +167,74 @@ async fn fetch_from_api(symbol: &str, range: &str, cache_path: &std::path::Path)
 ///
 /// Uses `interval=1m` and `range=1d`, then returns the most recent non-null close.
 pub async fn fetch_latest_price_1m(symbol: &str) -> Result<f64> {
-    let url = format!(
-        "https://query1.finance.yahoo.com/v8/finance/chart/{}?interval=1m&range=1d",
-        symbol
-    );
+    let urls = [
+        format!(
+            "https://query1.finance.yahoo.com/v8/finance/chart/{}?interval=1m&range=1d",
+            symbol
+        ),
+        format!(
+            "https://query2.finance.yahoo.com/v8/finance/chart/{}?interval=1m&range=1d",
+            symbol
+        ),
+    ];
 
-    let response = reqwest::Client::new()
-        .get(&url)
-        .header("User-Agent", "Mozilla/5.0")
-        .send()
-        .await?
-        .json::<YahooChartResponse>()
-        .await?;
+    let client = reqwest::Client::new();
+    let max_attempts = 3;
+    let mut last_error: Option<anyhow::Error> = None;
 
-    let result = response
-        .chart
-        .result
-        .first()
-        .ok_or(anyhow::anyhow!("No chart result for {}", symbol))?;
-    let quote = result
-        .indicators
-        .quote
-        .first()
-        .ok_or(anyhow::anyhow!("No quote result for {}", symbol))?;
+    for attempt in 1..=max_attempts {
+        for url in &urls {
+            let response = match client
+                .get(url)
+                .header("User-Agent", "Mozilla/5.0")
+                .timeout(std::time::Duration::from_secs(10))
+                .send()
+                .await
+            {
+                Ok(resp) => resp,
+                Err(error) => {
+                    last_error = Some(error.into());
+                    continue;
+                }
+            };
 
-    let latest = quote
-        .close
-        .iter()
-        .rev()
-        .find_map(|value| *value)
-        .ok_or(anyhow::anyhow!("No valid 1m close for {}", symbol))?;
+            match response.json::<YahooChartResponse>().await {
+                Ok(parsed) => {
+                    let result = parsed
+                        .chart
+                        .result
+                        .first()
+                        .ok_or(anyhow::anyhow!("No chart result for {}", symbol))?;
+                    let quote = result
+                        .indicators
+                        .quote
+                        .first()
+                        .ok_or(anyhow::anyhow!("No quote result for {}", symbol))?;
 
-    Ok(latest)
+                    if let Some(latest) = quote.close.iter().rev().find_map(|value| *value) {
+                        return Ok(latest);
+                    }
+
+                    last_error = Some(anyhow::anyhow!("No valid 1m close for {}", symbol));
+                }
+                Err(error) => {
+                    last_error = Some(error.into());
+                }
+            }
+        }
+
+        if attempt < max_attempts {
+            warn!(
+                "1m price fetch failed for {} (attempt {}/{}), retrying...",
+                symbol,
+                attempt,
+                max_attempts
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("Failed to fetch 1m price for {}", symbol)))
 }
 
 impl StockData {

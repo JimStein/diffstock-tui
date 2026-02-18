@@ -132,6 +132,7 @@ pub enum PaperEvent {
         runtime_file: String,
     },
     Info(String),
+    Warning(String),
     Analysis(AnalysisRecord),
     Minute(MinutePortfolioSnapshot),
     Error(String),
@@ -262,7 +263,7 @@ pub async fn run_paper_trading(
             }
             Err(error) => {
                 let _ = event_tx
-                    .send(PaperEvent::Error(format!(
+                    .send(PaperEvent::Warning(format!(
                         "Price polling failed (will retry): {}",
                         error
                     )))
