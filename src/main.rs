@@ -42,6 +42,18 @@ struct Args {
     #[arg(long)]
     backtest: bool,
 
+    /// Number of rolling windows for backtest (default: 1 = single-window backtest)
+    #[arg(long, default_value_t = 1)]
+    backtest_windows: usize,
+
+    /// Rolling step size in days between windows (default: 10)
+    #[arg(long, default_value_t = 10)]
+    backtest_step_days: usize,
+
+    /// Number of hidden days from the end for the first backtest window (default: 50)
+    #[arg(long, default_value_t = 50)]
+    backtest_hidden_days: usize,
+
     /// Launch in GUI mode
     #[arg(long)]
     gui: bool,
@@ -113,7 +125,24 @@ async fn main() -> io::Result<()> {
         match data::fetch_range("SPY", "5y").await {
             Ok(data) => {
                 let data = std::sync::Arc::new(data);
-                match inference::run_backtest(data, args.cuda).await {
+                let result = if args.backtest_windows <= 1 {
+                    inference::run_backtest_with_params(
+                        data,
+                        args.cuda,
+                        args.backtest_hidden_days,
+                    )
+                    .await
+                } else {
+                    inference::run_backtest_rolling(
+                        data,
+                        args.cuda,
+                        args.backtest_windows,
+                        args.backtest_step_days,
+                        args.backtest_hidden_days,
+                    )
+                    .await
+                };
+                match result {
                     Ok(_) => info!("Backtest completed."),
                     Err(e) => error!("Backtest failed: {}", e),
                 }

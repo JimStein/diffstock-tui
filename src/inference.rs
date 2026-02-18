@@ -178,13 +178,18 @@ pub async fn run_inference(
 }
 
 pub async fn run_backtest(data: Arc<StockData>, use_cuda: bool) -> Result<()> {
+    run_backtest_with_params(data, use_cuda, 50).await
+}
+
+pub async fn run_backtest_with_params(
+    data: Arc<StockData>,
+    use_cuda: bool,
+    hidden_days: usize,
+) -> Result<()> {
     println!("Running Backtest...");
     let horizon = 10;
     let num_simulations = 500;
-    
-    // Hide last 50 days (or just horizon?)
-    // The prompt says "hides the last 50 days".
-    let hidden_days = 50;
+
     if data.history.len() < hidden_days + 51 {
         return Err(anyhow::anyhow!("Not enough data for backtest"));
     }
@@ -216,6 +221,105 @@ pub async fn run_backtest(data: Arc<StockData>, use_cuda: bool) -> Result<()> {
     }
 
     println!("Coverage Probability (P10-P90): {:.2}%", (inside_cone as f64 / horizon as f64) * 100.0);
+    Ok(())
+}
+
+pub async fn run_backtest_rolling(
+    data: Arc<StockData>,
+    use_cuda: bool,
+    windows: usize,
+    step_days: usize,
+    hidden_days: usize,
+) -> Result<()> {
+    if windows == 0 {
+        return Err(anyhow::anyhow!("backtest windows must be >= 1"));
+    }
+    if step_days == 0 {
+        return Err(anyhow::anyhow!("backtest step days must be >= 1"));
+    }
+
+    println!(
+        "Running rolling backtest... windows={}, step_days={}, hidden_days={} (SPY)",
+        windows, step_days, hidden_days
+    );
+
+    let horizon = 10usize;
+    let num_simulations = 500usize;
+    let min_required = hidden_days + (windows - 1) * step_days + 51;
+    if data.history.len() < min_required {
+        return Err(anyhow::anyhow!(
+            "Not enough data for rolling backtest: need at least {}, got {}",
+            min_required,
+            data.history.len()
+        ));
+    }
+
+    let mut coverages = Vec::with_capacity(windows);
+    let mut outside_days = Vec::with_capacity(windows);
+
+    for window_idx in 0..windows {
+        let window_hidden_days = hidden_days + window_idx * step_days;
+        let train_len = data.history.len() - window_hidden_days;
+        let train_history = data.history[..train_len].to_vec();
+        let test_history = data.history[train_len..train_len + horizon].to_vec();
+
+        let train_data = Arc::new(StockData {
+            symbol: data.symbol.clone(),
+            history: train_history,
+        });
+
+        let forecast = run_inference(train_data, horizon, num_simulations, None, use_cuda).await?;
+
+        let mut inside_cone = 0usize;
+        for (i, candle) in test_history.iter().enumerate() {
+            let price = candle.close;
+            let lower = forecast.p10[i].1;
+            let upper = forecast.p90[i].1;
+            if price >= lower && price <= upper {
+                inside_cone += 1;
+            }
+        }
+
+        let coverage = (inside_cone as f64 / horizon as f64) * 100.0;
+        let outside = horizon - inside_cone;
+        coverages.push(coverage);
+        outside_days.push(outside as f64);
+
+        println!(
+            "Window {:>2}/{:>2}: hidden_days={}, coverage={:.2}% (inside={}, outside={})",
+            window_idx + 1,
+            windows,
+            window_hidden_days,
+            coverage,
+            inside_cone,
+            outside
+        );
+    }
+
+    let mean = coverages.iter().sum::<f64>() / coverages.len() as f64;
+    let min = coverages.iter().copied().fold(f64::INFINITY, f64::min);
+    let max = coverages
+        .iter()
+        .copied()
+        .fold(f64::NEG_INFINITY, f64::max);
+    let variance = coverages
+        .iter()
+        .map(|v| {
+            let d = *v - mean;
+            d * d
+        })
+        .sum::<f64>()
+        / coverages.len() as f64;
+    let std = variance.sqrt();
+    let avg_outside = outside_days.iter().sum::<f64>() / outside_days.len() as f64;
+
+    println!("Rolling Coverage Summary (P10-P90):");
+    println!("  windows={} step_days={} hidden_days_start={}", windows, step_days, hidden_days);
+    println!(
+        "  mean={:.2}% std={:.2} min={:.2}% max={:.2}% avg_outside_days={:.2}/{}",
+        mean, std, min, max, avg_outside, horizon
+    );
+
     Ok(())
 }
 
