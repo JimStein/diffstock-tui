@@ -1,0 +1,61 @@
+{
+  "created_at": "2026-02-19T10:18:02.865382500+08:00",
+  "initial_capital_usd": 80000.0,
+  "trading_fee_rate": 0.0005,
+  "analysis_times_local": [
+    "09:30",
+    "15:00"
+  ],
+  "benchmark_symbol": "QQQ",
+  "targets": [
+    {
+      "symbol": "MSFT",
+      "target_weight": 0.11397170469492268
+    },
+    {
+      "symbol": "NVDA",
+      "target_weight": 0.22758192699472332
+    },
+    {
+      "symbol": "URA",
+      "target_weight": 0.22759839727286865
+    }
+  ],
+  "analyses": [
+    {
+      "timestamp": "2026-02-19T10:18:02.866041900+08:00",
+      "portfolio_value_before": 80000.0,
+      "portfolio_value_after": 79977.49357485009,
+      "cash_after": 34964.64327501488,
+      "trades": [
+        {
+          "timestamp": "2026-02-19T10:18:02.866041900+08:00",
+          "symbol": "MSFT",
+          "side": "BUY",
+          "quantity": 22.0,
+          "price": 399.6000061035156,
+          "notional": 8791.200134277344,
+          "fee": 4.395600067138672
+        },
+        {
+          "timestamp": "2026-02-19T10:18:02.866041900+08:00",
+          "symbol": "NVDA",
+          "side": "BUY",
+          "quantity": 96.0,
+          "price": 187.97999572753903,
+          "notional": 18046.079589843746,
+          "fee": 9.023039794921873
+        },
+        {
+          "timestamp": "2026-02-19T10:18:02.866041900+08:00",
+          "symbol": "URA",
+          "side": "BUY",
+          "quantity": 343.0,
+          "price": 52.9900016784668,
+          "notional": 18175.57057571411,
+          "fee": 9.087785287857056
+        }
+      ]
+    }
+  ]
+}

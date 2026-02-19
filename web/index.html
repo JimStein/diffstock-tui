@@ -1,0 +1,781 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DiffStock — AI Quantitative Trading</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    /* ─── Design Tokens ─── */
+    :root {
+      --bg:       #06090f;
+      --bg-2:     #0a0e17;
+      --panel:    #0f1420;
+      --panel-2:  #151c2c;
+      --panel-3:  #1a2235;
+      --surface:  #111827;
+      --text:     #e1e4ec;
+      --text-2:   #c5c9d6;
+      --muted:    #6b7a99;
+      --muted-2:  #4a5670;
+      --up:       #00d4aa;
+      --up-bg:    rgba(0,212,170,.08);
+      --down:     #ff4757;
+      --down-bg:  rgba(255,71,87,.08);
+      --accent:   #3b82f6;
+      --accent-2: #60a5fa;
+      --accent-bg:rgba(59,130,246,.10);
+      --gold:     #f59e0b;
+      --border:   rgba(255,255,255,.06);
+      --border-2: rgba(255,255,255,.10);
+      --glow:     rgba(59,130,246,.15);
+      --radius:   10px;
+      --radius-lg:14px;
+      --shadow:   0 1px 3px rgba(0,0,0,.3), 0 4px 12px rgba(0,0,0,.2);
+      --shadow-lg:0 4px 24px rgba(0,0,0,.4);
+      --font:     'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+      --mono:     'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace;
+      --transition: .2s cubic-bezier(.4,0,.2,1);
+    }
+
+    /* ─── Reset & Base ─── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.5;
+      overflow-x: hidden;
+    }
+
+    /* ─── Custom Scrollbar ─── */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--muted-2); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+    /* ─── Top Bar ─── */
+    .topbar {
+      height: 52px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      background: linear-gradient(180deg, rgba(15,20,32,.98) 0%, rgba(10,14,23,.98) 100%);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 15px;
+      letter-spacing: -.2px;
+    }
+    .brand-icon {
+      width: 28px; height: 28px;
+      background: linear-gradient(135deg, var(--accent) 0%, #8b5cf6 100%);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      color: white;
+      font-weight: 700;
+      box-shadow: 0 2px 8px rgba(59,130,246,.3);
+    }
+    .brand-text { background: linear-gradient(135deg, #e1e4ec 0%, #a0aec0 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; color: transparent; }
+    .brand-badge {
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: .6px;
+      text-transform: uppercase;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: linear-gradient(135deg, rgba(59,130,246,.15), rgba(139,92,246,.15));
+      color: var(--accent-2);
+      border: 1px solid rgba(59,130,246,.2);
+    }
+    .chips { display: flex; gap: 8px; align-items: center; }
+    .chip {
+      padding: 5px 12px;
+      border: 1px solid var(--border-2);
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 500;
+      font-family: var(--mono);
+      color: var(--muted);
+      background: rgba(255,255,255,.03);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: var(--transition);
+    }
+    .chip-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--muted-2);
+      flex-shrink: 0;
+    }
+    .chip-dot.active {
+      background: var(--up);
+      box-shadow: 0 0 8px rgba(0,212,170,.5);
+      animation: pulse-dot 2s ease-in-out infinite;
+    }
+    .chip-dot.paused {
+      background: var(--gold);
+      box-shadow: 0 0 8px rgba(245,158,11,.4);
+    }
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; }
+      50% { opacity: .4; }
+    }
+
+    /* ─── Shell Layout ─── */
+    .shell {
+      display: grid;
+      grid-template-columns: 200px 1fr;
+      min-height: calc(100vh - 52px);
+    }
+
+    /* ─── Sidebar ─── */
+    .sidebar {
+      border-right: 1px solid var(--border);
+      padding: 16px 10px;
+      background: var(--bg-2);
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .sidebar-section {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .8px;
+      text-transform: uppercase;
+      color: var(--muted-2);
+      padding: 12px 12px 8px;
+    }
+    .tab-btn {
+      width: 100%;
+      text-align: left;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      padding: 9px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-family: var(--font);
+      font-size: 13px;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      transition: var(--transition);
+      position: relative;
+    }
+    .tab-btn:hover {
+      background: rgba(255,255,255,.04);
+      color: var(--text-2);
+    }
+    .tab-btn.active {
+      background: var(--accent-bg);
+      color: var(--accent-2);
+    }
+    .tab-btn.active::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 50%;
+      transform: translateY(-50%);
+      width: 3px; height: 20px;
+      border-radius: 0 3px 3px 0;
+      background: var(--accent);
+    }
+    .tab-icon {
+      font-size: 16px;
+      width: 20px;
+      text-align: center;
+      flex-shrink: 0;
+      opacity: .8;
+    }
+    .tab-btn.active .tab-icon { opacity: 1; }
+
+    /* ─── Content ─── */
+    .content {
+      padding: 16px 20px;
+      background: var(--bg);
+      min-width: 0;
+    }
+
+    /* ─── Panels ─── */
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 16px;
+      margin-bottom: 14px;
+      box-shadow: var(--shadow);
+      transition: border-color var(--transition);
+    }
+    .panel:hover {
+      border-color: var(--border-2);
+    }
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .panel-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .panel-title-icon { font-size: 15px; opacity: .7; }
+    .panel-subtitle {
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 400;
+    }
+
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+    /* ─── Form Elements ─── */
+    .row { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .field-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .5px;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    input, select {
+      background: var(--surface);
+      border: 1px solid var(--border-2);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 13px;
+      font-family: var(--font);
+      transition: var(--transition);
+      outline: none;
+    }
+    input:focus, select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--glow);
+    }
+    input::placeholder { color: var(--muted-2); }
+
+    button {
+      background: var(--surface);
+      border: 1px solid var(--border-2);
+      color: var(--text-2);
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 13px;
+      font-weight: 500;
+      font-family: var(--font);
+      cursor: pointer;
+      transition: var(--transition);
+      outline: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+    button:hover {
+      background: var(--panel-2);
+      border-color: rgba(255,255,255,.12);
+      color: var(--text);
+    }
+    button:active { transform: scale(.98); }
+    button:disabled {
+      opacity: .4;
+      cursor: not-allowed;
+      transform: none;
+    }
+    button.primary {
+      background: linear-gradient(135deg, var(--accent) 0%, #2563eb 100%);
+      border-color: transparent;
+      color: white;
+      font-weight: 600;
+      box-shadow: 0 2px 8px rgba(59,130,246,.25);
+    }
+    button.primary:hover {
+      background: linear-gradient(135deg, #4d94ff 0%, #3b82f6 100%);
+      box-shadow: 0 4px 16px rgba(59,130,246,.35);
+      border-color: transparent;
+      color: white;
+    }
+    button.primary:disabled {
+      background: linear-gradient(135deg, var(--accent) 0%, #2563eb 100%);
+      border-color: transparent;
+      box-shadow: none;
+    }
+    button.danger {
+      color: var(--down);
+      border-color: rgba(255,71,87,.2);
+    }
+    button.danger:hover {
+      background: var(--down-bg);
+      border-color: rgba(255,71,87,.3);
+    }
+    button.warn {
+      color: var(--gold);
+      border-color: rgba(245,158,11,.2);
+    }
+    button.warn:hover {
+      background: rgba(245,158,11,.08);
+      border-color: rgba(245,158,11,.3);
+    }
+    button.success {
+      color: var(--up);
+      border-color: rgba(0,212,170,.2);
+    }
+    button.success:hover {
+      background: var(--up-bg);
+      border-color: rgba(0,212,170,.3);
+    }
+
+    /* ─── Tables ─── */
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    thead th {
+      padding: 8px 10px;
+      text-align: left;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .5px;
+      text-transform: uppercase;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border-2);
+      background: transparent;
+    }
+    tbody td {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-2);
+      transition: background var(--transition);
+    }
+    tbody tr:hover td { background: rgba(255,255,255,.02); }
+    tbody tr:last-child td { border-bottom: none; }
+    .num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+    .up { color: var(--up); }
+    .down { color: var(--down); }
+    .hidden { display: none; }
+
+    /* ─── Charts ─── */
+    #forecastChart, #paperChart { height: 380px; border-radius: var(--radius); overflow: hidden; }
+    .chart-wrap {
+      position: relative;
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    /* ─── Legend ─── */
+    .chart-legend {
+      position: absolute;
+      left: 12px;
+      top: 12px;
+      background: rgba(10, 14, 23, 0.55);
+      border: 1px solid rgba(255,255,255,.05);
+      border-radius: var(--radius);
+      padding: 10px 14px;
+      min-width: 260px;
+      font-size: 12px;
+      line-height: 1.6;
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      z-index: 20;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity .15s ease;
+      box-shadow: var(--shadow-lg);
+    }
+    .chart-legend.visible { opacity: 1; }
+    .legend-title {
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .5px;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--border);
+    }
+    .legend-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 1px 0;
+    }
+    .legend-key {
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .legend-val {
+      font-variant-numeric: tabular-nums;
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .legend-up { color: var(--up); }
+    .legend-down { color: var(--down); }
+
+    /* ─── Log Box ─── */
+    #logBox {
+      max-height: 200px;
+      overflow: auto;
+      font-size: 11px;
+      font-family: var(--mono);
+      line-height: 1.7;
+      color: var(--muted);
+      padding: 4px 0;
+    }
+    #logBox div {
+      padding: 2px 4px;
+      border-radius: 3px;
+      transition: background var(--transition);
+    }
+    #logBox div:hover { background: rgba(255,255,255,.03); }
+
+    /* ─── Status Bar ─── */
+    .statusbar {
+      margin-bottom: 14px;
+      padding: 8px 14px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--muted);
+      font-size: 12px;
+      font-family: var(--mono);
+      min-height: 36px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: var(--transition);
+    }
+    .statusbar::before {
+      content: '';
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--muted-2);
+      flex-shrink: 0;
+    }
+    .statusbar.ok { color: var(--up); border-color: rgba(0,212,170,.15); background: rgba(0,212,170,.04); }
+    .statusbar.ok::before { background: var(--up); box-shadow: 0 0 6px rgba(0,212,170,.5); }
+    .statusbar.err { color: var(--down); border-color: rgba(255,71,87,.15); background: rgba(255,71,87,.04); }
+    .statusbar.err::before { background: var(--down); box-shadow: 0 0 6px rgba(255,71,87,.5); }
+
+    /* ─── Train Status ─── */
+    #trainStatus {
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-all;
+      color: var(--text-2);
+      max-height: 400px;
+      overflow: auto;
+    }
+
+    /* ─── Utility ─── */
+    .small {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+
+    /* ─── Forecast Chart Legend (inline, always visible) ─── */
+    .forecast-legend {
+      display: flex;
+      gap: 16px;
+      padding: 8px 4px 4px;
+      font-size: 11px;
+    }
+    .forecast-legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+    }
+    .forecast-legend-dot {
+      width: 10px; height: 3px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+
+    /* ─── Paper button group ─── */
+    .btn-group {
+      display: flex;
+      gap: 6px;
+      align-items: flex-end;
+    }
+
+    /* ─── Responsive ─── */
+    @media (max-width: 900px) {
+      .shell { grid-template-columns: 1fr; }
+      .sidebar {
+        flex-direction: row;
+        padding: 8px;
+        gap: 4px;
+        overflow-x: auto;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+      }
+      .sidebar-section { display: none; }
+      .tab-btn { padding: 8px 14px; }
+      .tab-btn.active::before { display: none; }
+      .grid-2 { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ─── Top Bar ─── -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-icon">D</div>
+      <span class="brand-text">DiffStock</span>
+      <span class="brand-badge">AI Quant</span>
+    </div>
+    <div class="chips">
+      <span class="chip">
+        <span class="chip-dot"></span>
+        <span id="clockChip">--:--:--</span>
+      </span>
+      <span class="chip">
+        <span class="chip-dot" id="systemDot"></span>
+        <span id="paperStatusChip">IDLE</span>
+      </span>
+    </div>
+  </header>
+
+  <!-- ─── Shell ─── -->
+  <div class="shell">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-section">Analysis</div>
+      <button class="tab-btn active" data-tab="forecast">
+        <span class="tab-icon">📈</span> Forecast
+      </button>
+      <button class="tab-btn" data-tab="portfolio">
+        <span class="tab-icon">💼</span> Portfolio
+      </button>
+      <div class="sidebar-section">Trading</div>
+      <button class="tab-btn" data-tab="paper">
+        <span class="tab-icon">📄</span> Paper Trade
+      </button>
+      <div class="sidebar-section">System</div>
+      <button class="tab-btn" data-tab="train">
+        <span class="tab-icon">🧠</span> Train Model
+      </button>
+    </aside>
+
+    <!-- Content -->
+    <main class="content">
+      <div id="actionStatus" class="statusbar">Ready.</div>
+
+      <!-- ══════ Forecast Tab ══════ -->
+      <section id="tab-forecast" class="tab-panel">
+        <div class="panel">
+          <div class="row">
+            <div class="field">
+              <label class="field-label">Symbol</label>
+              <input id="fSymbol" value="NVDA" placeholder="e.g. AAPL" style="width:100px" />
+            </div>
+            <div class="field">
+              <label class="field-label">Horizon (days)</label>
+              <input id="fHorizon" type="number" value="10" min="1" max="60" style="width:90px" />
+            </div>
+            <div class="field">
+              <label class="field-label">Simulations</label>
+              <input id="fSims" type="number" value="500" min="50" step="50" style="width:100px" />
+            </div>
+            <div class="field">
+              <label class="field-label">&nbsp;</label>
+              <button class="primary" id="runForecast">&#9654; Run Forecast</button>
+            </div>
+          </div>
+        </div>
+        <div class="panel" style="padding: 12px 12px 8px;">
+          <div id="forecastChart"></div>
+          <div class="forecast-legend">
+            <div class="forecast-legend-item"><span class="forecast-legend-dot" style="background:#7e8aa5"></span> History</div>
+            <div class="forecast-legend-item"><span class="forecast-legend-dot" style="background:#3b82f6"></span> P50 (Median)</div>
+            <div class="forecast-legend-item"><span class="forecast-legend-dot" style="background:#ff4757"></span> P10 (Bear)</div>
+            <div class="forecast-legend-item"><span class="forecast-legend-dot" style="background:#00d4aa"></span> P90 (Bull)</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══════ Portfolio Tab ══════ -->
+      <section id="tab-portfolio" class="tab-panel hidden">
+        <div class="panel">
+          <div class="row">
+            <div class="field" style="flex:1">
+              <label class="field-label">Symbols (comma-separated)</label>
+              <input id="pSymbols" style="width:100%" value="NVDA,MSFT,URA,IAU,COPX,ETN,TLT" />
+            </div>
+            <div class="field">
+              <label class="field-label">&nbsp;</label>
+              <button class="primary" id="runPortfolio">&#9889; Optimize</button>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">
+              <span class="panel-title-icon">&#128202;</span> Asset Forecasts
+            </div>
+            <div class="panel-subtitle" id="quotesAsOf">Current Price as of --</div>
+          </div>
+          <table id="assetTable">
+            <thead>
+              <tr>
+                <th>Symbol</th><th class="num">Model Price</th><th class="num">Current Price</th><th class="num">Deviation</th>
+                <th class="num">E[Ret]</th><th class="num">Vol</th><th class="num">Sharpe</th><th class="num">P50 Target</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ══════ Paper Trading Tab ══════ -->
+      <section id="tab-paper" class="tab-panel hidden">
+        <div class="panel">
+          <div class="row">
+            <div class="field">
+              <label class="field-label">Capital ($)</label>
+              <input id="paperCapital" type="number" value="80000" style="width:120px" />
+            </div>
+            <div class="field">
+              <label class="field-label">Schedule 1</label>
+              <input id="paperTime1" value="09:30" style="width:80px" />
+            </div>
+            <div class="field">
+              <label class="field-label">Schedule 2</label>
+              <input id="paperTime2" value="15:00" style="width:80px" />
+            </div>
+            <div class="field">
+              <label class="field-label">&nbsp;</label>
+              <div class="btn-group">
+                <button class="primary" id="paperStart">&#9654; Start</button>
+                <button class="warn" id="paperPause">&#9208; Pause</button>
+                <button class="success" id="paperResume">&#9654; Resume</button>
+                <button class="danger" id="paperStop">&#9209; Stop</button>
+              </div>
+            </div>
+          </div>
+          <div class="small">Uses current portfolio symbols/weights as targets.</div>
+        </div>
+        <div class="panel" style="padding:12px;">
+          <div class="chart-wrap">
+            <div id="paperChart"></div>
+            <div class="chart-legend" id="paperLegend">
+              <div class="legend-title">Paper Metrics</div>
+              <div class="legend-row"><span class="legend-key">Portfolio</span><span class="legend-val" id="legendPortfolio">--</span></div>
+              <div class="legend-row"><span class="legend-key">Portfolio PnL</span><span class="legend-val" id="legendPortfolioPnl">--</span></div>
+              <div class="legend-row"><span class="legend-key">QQQ Benchmark</span><span class="legend-val" id="legendBenchmark">--</span></div>
+              <div class="legend-row"><span class="legend-key">QQQ Return</span><span class="legend-val" id="legendBenchmarkPnl">--</span></div>
+              <div class="legend-row"><span class="legend-key">Spread</span><span class="legend-val" id="legendSpread">--</span></div>
+              <div class="legend-row"><span class="legend-key">Last Update</span><span class="legend-val" id="legendUpdated">--</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title"><span class="panel-title-icon">&#128188;</span> Current Holdings</div>
+          </div>
+          <table id="holdingsTable">
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Status</th>
+                <th class="num">Quantity</th>
+                <th class="num">Current Price</th>
+                <th class="num">Asset Value</th>
+                <th class="num">Target Weight</th>
+                <th class="num">1m &#916;%</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="grid-2">
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title"><span class="panel-title-icon">&#128225;</span> Realtime Prices</div>
+            </div>
+            <table id="rtTable"><thead><tr><th>Symbol</th><th class="num">Price</th><th>Tag</th></tr></thead><tbody></tbody></table>
+          </div>
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title"><span class="panel-title-icon">&#9889;</span> Per-Symbol 1m Change</div>
+            </div>
+            <table id="chTable"><thead><tr><th>Symbol</th><th class="num">Current</th><th class="num">1m &#916;</th><th class="num">1m &#916;%</th></tr></thead><tbody></tbody></table>
+          </div>
+        </div>
+        <div class="panel" id="logBox"></div>
+      </section>
+
+      <!-- ══════ Train Tab ══════ -->
+      <section id="tab-train" class="tab-panel hidden">
+        <div class="panel">
+          <div class="row">
+            <div class="field">
+              <label class="field-label">Epochs</label>
+              <input id="tEpochs" type="number" value="200" style="width:90px" />
+            </div>
+            <div class="field">
+              <label class="field-label">Batch Size</label>
+              <input id="tBatch" type="number" value="64" style="width:80px" />
+            </div>
+            <div class="field">
+              <label class="field-label">Learning Rate</label>
+              <input id="tLr" type="number" value="0.001" step="0.0001" style="width:110px" />
+            </div>
+            <div class="field">
+              <label class="field-label">Patience</label>
+              <input id="tPatience" type="number" value="20" style="width:80px" />
+            </div>
+            <div class="field">
+              <label class="field-label">&nbsp;</label>
+              <button class="primary" id="trainStart">&#129504; Start Training</button>
+            </div>
+          </div>
+        </div>
+        <div class="panel" id="trainStatus">Idle</div>
+      </section>
+
+    </main>
+  </div>
+
+  <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="/app.js?v=20260219l"></script>
+</body>
+</html>

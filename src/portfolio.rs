@@ -4,6 +4,7 @@ use crate::models::time_grad::{EpsilonTheta, RNNEncoder};
 use anyhow::Result;
 use candle_core::{DType, Tensor};
 use candle_nn::VarBuilder;
+use serde::{Deserialize, Serialize};
 use tracing::{info, warn, error};
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -42,7 +43,7 @@ pub const OPTIMIZER_SAMPLES: usize = 100_000;
 // ──────────────────────────────────────────────────────────────────────────────
 
 /// Per-asset forecast statistics derived from diffusion Monte Carlo paths.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[allow(dead_code)]
 pub struct AssetForecast {
     pub symbol: String,
@@ -66,7 +67,7 @@ pub struct AssetForecast {
 }
 
 /// Complete portfolio allocation result.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PortfolioAllocation {
     pub weights: Vec<(String, f64)>,     // (symbol, weight 0-1)
     pub expected_annual_return: f64,

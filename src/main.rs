@@ -10,6 +10,7 @@ mod train;
 mod tui;
 mod ui;
 mod gui;
+mod webui;
 
 use app::App;
 use clap::{Parser, ValueEnum};
@@ -66,6 +67,14 @@ struct Args {
     /// Launch in GUI mode
     #[arg(long)]
     gui: bool,
+
+    /// Launch in WebUI mode
+    #[arg(long)]
+    webui: bool,
+
+    /// WebUI server port
+    #[arg(long, default_value_t = 8080)]
+    webui_port: u16,
 
     /// GUI renderer backend (auto|wgpu|glow). Useful for RDP compatibility.
     #[arg(long, value_enum, default_value_t = GuiRendererChoice::Wgpu)]
@@ -200,6 +209,14 @@ async fn main() -> io::Result<()> {
             options,
             Box::new(|_cc| Ok(Box::new(gui::GuiApp::new(App::new(args.cuda))))),
         ).map_err(|e| io::Error::other(e.to_string()))?;
+        return Ok(());
+    }
+
+    if args.webui {
+        match webui::run_webui_server(args.webui_port, args.cuda).await {
+            Ok(_) => info!("WebUI exited."),
+            Err(e) => error!("WebUI failed: {}", e),
+        }
         return Ok(());
     }
 

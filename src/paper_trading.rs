@@ -116,13 +116,27 @@ pub struct MinuteSymbolSnapshot {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MinuteHoldingSnapshot {
+    pub symbol: String,
+    pub quantity: f64,
+    pub price: f64,
+    pub asset_value: f64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MinutePortfolioSnapshot {
     pub timestamp: String,
     pub total_value: f64,
+    #[serde(default)]
+    pub cash_usd: f64,
     pub pnl_usd: f64,
     pub pnl_pct: f64,
     pub benchmark_return_pct: f64,
     pub symbols: Vec<MinuteSymbolSnapshot>,
+    #[serde(default)]
+    pub holdings: Vec<MinuteHoldingSnapshot>,
+    #[serde(default)]
+    pub holdings_symbols: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -400,6 +414,7 @@ fn build_minute_snapshot(
     let benchmark_return_pct = (benchmark_price / runtime.benchmark_initial_price - 1.0) * 100.0;
 
     let mut symbols = Vec::new();
+    let mut holdings = Vec::new();
     for target in &runtime.strategy_log.targets {
         let symbol = &target.symbol;
         let price = *current_prices
@@ -424,17 +439,44 @@ fn build_minute_snapshot(
             change_1m,
             change_1m_pct,
         });
+
+        let quantity = *runtime.holdings_shares.get(symbol).unwrap_or(&0.0);
+        if quantity.abs() > 1e-9 {
+            holdings.push(MinuteHoldingSnapshot {
+                symbol: symbol.clone(),
+                quantity,
+                price,
+                asset_value: quantity * price,
+            });
+        }
     }
 
     runtime.previous_prices = current_prices.clone();
 
+    let mut holdings_symbols: Vec<String> = runtime
+        .holdings_shares
+        .iter()
+        .filter_map(|(symbol, quantity)| {
+            if quantity.abs() > 1e-9 {
+                Some(symbol.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+    holdings_symbols.sort();
+    holdings.sort_by(|a, b| a.symbol.cmp(&b.symbol));
+
     Ok(MinutePortfolioSnapshot {
         timestamp,
         total_value,
+        cash_usd: runtime.cash_usd,
         pnl_usd,
         pnl_pct,
         benchmark_return_pct,
         symbols,
+        holdings,
+        holdings_symbols,
     })
 }
 

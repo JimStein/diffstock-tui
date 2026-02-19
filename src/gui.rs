@@ -7,7 +7,7 @@ use crate::train;
 use chrono::{DateTime, Duration as ChronoDuration, Local, TimeZone};
 use std::path::Path;
 use tokio::sync::mpsc;
-use std::time::Instant;
+use std::time::{Duration as StdDuration, Instant};
 
 // 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 // Color Palette 鈥?Professional dark financial terminal
@@ -303,6 +303,8 @@ impl eframe::App for GuiApp {
             self.paper_force_repaint = false;
         }
 
+        ctx.request_repaint_after(StdDuration::from_secs(1));
+
         // 鈹€鈹€ Top Bar 鈹€鈹€
         egui::TopBottomPanel::top("top_bar").show(ctx, |ui| {
             ui.add_space(4.0);
@@ -317,7 +319,19 @@ impl eframe::App for GuiApp {
                     .size(11.0)
                     .color(TEXT_SECONDARY));
 
+                let now_text = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                let (paper_status_text, paper_status_color) = match &self.paper_state {
+                    PaperState::Running => ("System: RUNNING", ACCENT_GREEN),
+                    PaperState::Paused => ("System: PAUSED", ACCENT_ORANGE),
+                    PaperState::Error(_) => ("System: ERROR", ACCENT_RED),
+                    PaperState::Idle => ("System: IDLE", TEXT_SECONDARY),
+                };
+
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    small_chip(ui, &format!("Time {}", now_text), ACCENT_CYAN);
+                    small_chip(ui, paper_status_text, paper_status_color);
+                    ui.add_space(8.0);
+
                     let mode_label = match self.active_tab {
                         GuiTab::Forecast => "Forecast",
                         GuiTab::Portfolio => "Portfolio",
@@ -1224,67 +1238,131 @@ impl GuiApp {
                             ui.add_space(4.0);
 
                             // Table header
-                            ui.horizontal(|ui| {
-                                ui.set_width(ui.available_width());
-                                let col_w = ui.available_width() / 6.0;
-                                ui.allocate_ui(egui::vec2(col_w, 16.0), |ui| {
-                                    ui.label(egui::RichText::new("Symbol").size(10.0).color(TEXT_SECONDARY));
+                            egui::Frame::none()
+                                .fill(BG_ELEVATED)
+                                .rounding(egui::Rounding::same(6.0))
+                                .inner_margin(egui::Margin::symmetric(6.0, 3.0))
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.set_width(ui.available_width());
+                                        let col_w = ui.available_width() / 8.0;
+                                        ui.allocate_ui(egui::vec2(col_w, 16.0), |ui| {
+                                            ui.label(egui::RichText::new("Symbol").size(10.0).color(TEXT_SECONDARY));
+                                        });
+                                        ui.allocate_ui(egui::vec2(col_w, 16.0), |ui| {
+                                            ui.label(egui::RichText::new("Model Price").size(10.0).color(TEXT_SECONDARY));
+                                        });
+                                        ui.allocate_ui(egui::vec2(col_w, 16.0), |ui| {
+                                            ui.label(egui::RichText::new("Current Price").size(10.0).color(TEXT_SECONDARY));
+                                        });
+                                        ui.allocate_ui(egui::vec2(col_w, 16.0), |ui| {
+                                            ui.label(egui::RichText::new("Deviation").size(10.0).color(TEXT_SECONDARY));
+                                        });
+                                        ui.allocate_ui(egui::vec2(col_w, 16.0), |ui| {
+                                            ui.label(egui::RichText::new("E[Ret]").size(10.0).color(TEXT_SECONDARY));
+                                        });
+                                        ui.allocate_ui(egui::vec2(col_w, 16.0), |ui| {
+                                            ui.label(egui::RichText::new("Vol").size(10.0).color(TEXT_SECONDARY));
+                                        });
+                                        ui.allocate_ui(egui::vec2(col_w, 16.0), |ui| {
+                                            ui.label(egui::RichText::new("Sharpe").size(10.0).color(TEXT_SECONDARY));
+                                        });
+                                        ui.allocate_ui(egui::vec2(col_w, 16.0), |ui| {
+                                            ui.label(egui::RichText::new("P50 Target").size(10.0).color(TEXT_SECONDARY));
+                                        });
+                                    });
                                 });
-                                ui.allocate_ui(egui::vec2(col_w, 16.0), |ui| {
-                                    ui.label(egui::RichText::new("Price").size(10.0).color(TEXT_SECONDARY));
-                                });
-                                ui.allocate_ui(egui::vec2(col_w, 16.0), |ui| {
-                                    ui.label(egui::RichText::new("E[Ret]").size(10.0).color(TEXT_SECONDARY));
-                                });
-                                ui.allocate_ui(egui::vec2(col_w, 16.0), |ui| {
-                                    ui.label(egui::RichText::new("Vol").size(10.0).color(TEXT_SECONDARY));
-                                });
-                                ui.allocate_ui(egui::vec2(col_w, 16.0), |ui| {
-                                    ui.label(egui::RichText::new("Sharpe").size(10.0).color(TEXT_SECONDARY));
-                                });
-                                ui.allocate_ui(egui::vec2(col_w, 16.0), |ui| {
-                                    ui.label(egui::RichText::new("P50 Target").size(10.0).color(TEXT_SECONDARY));
-                                });
-                            });
 
                             ui.add(egui::Separator::default().spacing(2.0));
 
-                            for f in &alloc.asset_forecasts {
+                            for (row_idx, f) in alloc.asset_forecasts.iter().enumerate() {
                                 let ret_color = if f.annual_return > 0.0 { ACCENT_GREEN } else { ACCENT_RED };
                                 let sharpe_color = if f.sharpe > 1.0 { ACCENT_GREEN }
                                     else if f.sharpe > 0.0 { ACCENT_YELLOW }
                                     else { ACCENT_RED };
+                                let latest_snapshot_price = self
+                                    .paper_snapshots
+                                    .last()
+                                    .and_then(|snapshot| {
+                                        snapshot
+                                            .symbols
+                                            .iter()
+                                            .find(|symbol_snapshot| symbol_snapshot.symbol == f.symbol)
+                                            .map(|symbol_snapshot| symbol_snapshot.price)
+                                    });
 
-                                ui.horizontal(|ui| {
-                                    let col_w = ui.available_width() / 6.0;
-                                    ui.allocate_ui(egui::vec2(col_w, 18.0), |ui| {
-                                        ui.label(egui::RichText::new(&f.symbol)
-                                            .size(12.0).strong().color(TEXT_PRIMARY));
+                                let (deviation_text, deviation_color) = if let Some(current_price) = latest_snapshot_price {
+                                    let delta = current_price - f.current_price;
+                                    let delta_pct = if f.current_price.abs() > 1e-9 {
+                                        delta / f.current_price * 100.0
+                                    } else {
+                                        0.0
+                                    };
+                                    (
+                                        format!("{:+.2} ({:+.2}%)", delta, delta_pct),
+                                        if delta >= 0.0 { ACCENT_GREEN } else { ACCENT_RED },
+                                    )
+                                } else {
+                                    ("--".to_string(), TEXT_SECONDARY)
+                                };
+
+                                let row_fill = if row_idx % 2 == 0 {
+                                    BG_CARD
+                                } else {
+                                    BG_ELEVATED.linear_multiply(0.6)
+                                };
+
+                                egui::Frame::none()
+                                    .fill(row_fill)
+                                    .rounding(egui::Rounding::same(4.0))
+                                    .inner_margin(egui::Margin::symmetric(6.0, 2.0))
+                                    .show(ui, |ui| {
+                                        ui.horizontal(|ui| {
+                                            let col_w = ui.available_width() / 8.0;
+                                            ui.allocate_ui(egui::vec2(col_w, 20.0), |ui| {
+                                                ui.label(egui::RichText::new(&f.symbol)
+                                                    .size(12.0).strong().color(TEXT_PRIMARY));
+                                            });
+                                            ui.allocate_ui(egui::vec2(col_w, 20.0), |ui| {
+                                                ui.label(egui::RichText::new(format!("${:.2}", f.current_price))
+                                                    .size(12.0).color(TEXT_PRIMARY));
+                                            });
+                                            ui.allocate_ui(egui::vec2(col_w, 20.0), |ui| {
+                                                let current_price_text = latest_snapshot_price
+                                                    .map(|price| format!("${:.2}", price))
+                                                    .unwrap_or_else(|| "--".to_string());
+                                                ui.label(
+                                                    egui::RichText::new(current_price_text)
+                                                        .size(12.0)
+                                                        .color(ACCENT_CYAN),
+                                                );
+                                            });
+                                            ui.allocate_ui(egui::vec2(col_w, 20.0), |ui| {
+                                                ui.label(egui::RichText::new(deviation_text.clone())
+                                                    .size(11.0).color(deviation_color));
+                                            });
+                                            ui.allocate_ui(egui::vec2(col_w, 20.0), |ui| {
+                                                ui.label(egui::RichText::new(format!("{:+.1}%", f.annual_return * 100.0))
+                                                    .size(12.0).color(ret_color));
+                                            });
+                                            ui.allocate_ui(egui::vec2(col_w, 20.0), |ui| {
+                                                ui.label(egui::RichText::new(format!("{:.1}%", f.annual_vol * 100.0))
+                                                    .size(12.0).color(TEXT_SECONDARY));
+                                            });
+                                            ui.allocate_ui(egui::vec2(col_w, 20.0), |ui| {
+                                                ui.label(egui::RichText::new(format!("{:.2}", f.sharpe))
+                                                    .size(12.0).color(sharpe_color));
+                                            });
+                                            ui.allocate_ui(egui::vec2(col_w, 20.0), |ui| {
+                                                let pct = (f.p50_price / f.current_price - 1.0) * 100.0;
+                                                let color = if pct >= 0.0 { ACCENT_GREEN } else { ACCENT_RED };
+                                                ui.label(egui::RichText::new(
+                                                    format!("${:.2} ({:+.1}%)", f.p50_price, pct))
+                                                    .size(12.0).color(color));
+                                            });
+                                        });
                                     });
-                                    ui.allocate_ui(egui::vec2(col_w, 18.0), |ui| {
-                                        ui.label(egui::RichText::new(format!("${:.2}", f.current_price))
-                                            .size(12.0).color(TEXT_PRIMARY));
-                                    });
-                                    ui.allocate_ui(egui::vec2(col_w, 18.0), |ui| {
-                                        ui.label(egui::RichText::new(format!("{:+.1}%", f.annual_return * 100.0))
-                                            .size(12.0).color(ret_color));
-                                    });
-                                    ui.allocate_ui(egui::vec2(col_w, 18.0), |ui| {
-                                        ui.label(egui::RichText::new(format!("{:.1}%", f.annual_vol * 100.0))
-                                            .size(12.0).color(TEXT_SECONDARY));
-                                    });
-                                    ui.allocate_ui(egui::vec2(col_w, 18.0), |ui| {
-                                        ui.label(egui::RichText::new(format!("{:.2}", f.sharpe))
-                                            .size(12.0).color(sharpe_color));
-                                    });
-                                    ui.allocate_ui(egui::vec2(col_w, 18.0), |ui| {
-                                        let pct = (f.p50_price / f.current_price - 1.0) * 100.0;
-                                        let color = if pct >= 0.0 { ACCENT_GREEN } else { ACCENT_RED };
-                                        ui.label(egui::RichText::new(
-                                            format!("${:.2} ({:+.1}%)", f.p50_price, pct))
-                                            .size(12.0).color(color));
-                                    });
-                                });
+                                ui.add_space(2.0);
                             }
 
                             ui.add_space(8.0);
@@ -1320,7 +1398,7 @@ impl GuiApp {
             });
 
             ui.add_space(8.0);
-            self.render_paper_monitor_panel(ui);
+            self.render_paper_monitor_panel(ui, alloc);
 
             ui.add_space(12.0);
             ui.label(egui::RichText::new("Educational use only. Not financial advice.")
@@ -1469,7 +1547,7 @@ impl GuiApp {
             .ok_or(anyhow::anyhow!("No historical paper_runtime_*.jsonl file found in log/"))
     }
 
-    fn render_paper_monitor_panel(&mut self, ui: &mut egui::Ui) {
+    fn render_paper_monitor_panel(&mut self, ui: &mut egui::Ui, alloc: &PortfolioAllocation) {
         if self.paper_snapshots.is_empty()
             && self.paper_state != PaperState::Running
             && self.paper_state != PaperState::Paused
@@ -1515,28 +1593,6 @@ impl GuiApp {
                         summary_card(ui, "QQQ Ref", &format!("{:+.2}%", snapshot.benchmark_return_pct), ACCENT_YELLOW);
                     });
 
-                    let now_text = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-                    let (system_status_text, system_status_color) = match &self.paper_state {
-                        PaperState::Running => ("RUNNING", ACCENT_GREEN),
-                        PaperState::Paused => ("PAUSED", ACCENT_ORANGE),
-                        PaperState::Error(_) => ("ERROR", ACCENT_RED),
-                        PaperState::Idle => ("IDLE", TEXT_SECONDARY),
-                    };
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new(format!("Current Time: {}", now_text))
-                                .size(11.0)
-                                .color(TEXT_SECONDARY),
-                        );
-                        ui.separator();
-                        ui.label(
-                            egui::RichText::new(format!("System: {}", system_status_text))
-                                .size(11.0)
-                                .strong()
-                                .color(system_status_color),
-                        );
-                    });
-
                     if let Some(start_time) = self.paper_start_time {
                         ui.label(egui::RichText::new(format!(
                             "Runtime: {} | Last update: {}",
@@ -1578,44 +1634,132 @@ impl GuiApp {
                         });
 
                     ui.add_space(4.0);
-                    section_header(ui, "Input Symbols Realtime Price");
+                    section_header(ui, "Input + Holding Symbols Realtime Price");
+                    let mut symbols_to_show: Vec<String> = Vec::new();
+                    for asset in &alloc.asset_forecasts {
+                        if !symbols_to_show.iter().any(|existing| existing == &asset.symbol) {
+                            symbols_to_show.push(asset.symbol.clone());
+                        }
+                    }
                     if let Some(target_weights) = &self.paper_target_weights {
                         for (symbol, _) in target_weights {
-                            let symbol_price = snapshot
-                                .symbols
-                                .iter()
-                                .find(|symbol_snapshot| symbol_snapshot.symbol == *symbol)
-                                .map(|symbol_snapshot| symbol_snapshot.price);
-
-                            ui.horizontal(|ui| {
-                                ui.label(
-                                    egui::RichText::new(symbol)
-                                        .size(11.0)
-                                        .strong()
-                                        .color(TEXT_PRIMARY),
-                                );
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    let price_text = symbol_price
-                                        .map(|price| format!("${:.2}", price))
-                                        .unwrap_or_else(|| "--".to_string());
-                                    ui.label(
-                                        egui::RichText::new(price_text)
-                                            .size(11.0)
-                                            .color(TEXT_SECONDARY),
-                                    );
-                                });
-                            });
+                            if !symbols_to_show.iter().any(|existing| existing == symbol) {
+                                symbols_to_show.push(symbol.clone());
+                            }
                         }
-                    } else {
+                    }
+                    for symbol in &snapshot.holdings_symbols {
+                        if !symbols_to_show.iter().any(|existing| existing == symbol) {
+                            symbols_to_show.push(symbol.clone());
+                        }
+                    }
+
+                    if symbols_to_show.is_empty() {
                         ui.label(
-                            egui::RichText::new("No input symbols available yet")
+                            egui::RichText::new("No input/holding symbols available yet")
                                 .size(10.0)
                                 .color(TEXT_SECONDARY),
                         );
+                    } else {
+                        egui::Frame::none()
+                            .fill(BG_ELEVATED)
+                            .rounding(egui::Rounding::same(6.0))
+                            .inner_margin(egui::Margin::symmetric(6.0, 3.0))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    let col_w = ui.available_width() / 3.0;
+                                    ui.allocate_ui(egui::vec2(col_w, 16.0), |ui| {
+                                        ui.label(egui::RichText::new("Symbol").size(10.0).color(TEXT_SECONDARY));
+                                    });
+                                    ui.allocate_ui(egui::vec2(col_w, 16.0), |ui| {
+                                        ui.label(egui::RichText::new("Current Price").size(10.0).color(TEXT_SECONDARY));
+                                    });
+                                    ui.allocate_ui(egui::vec2(col_w, 16.0), |ui| {
+                                        ui.label(egui::RichText::new("Tag").size(10.0).color(TEXT_SECONDARY));
+                                    });
+                                });
+                            });
+                        ui.add(egui::Separator::default().spacing(2.0));
+
+                        for symbol in symbols_to_show {
+                            let symbol_price = snapshot
+                                .symbols
+                                .iter()
+                                .find(|symbol_snapshot| symbol_snapshot.symbol == symbol)
+                                .map(|symbol_snapshot| symbol_snapshot.price);
+                            let model_price = alloc
+                                .asset_forecasts
+                                .iter()
+                                .find(|forecast| forecast.symbol == symbol)
+                                .map(|forecast| forecast.current_price);
+
+                            let is_holding = snapshot.holdings_symbols.iter().any(|held| held == &symbol);
+                            let price_text = symbol_price
+                                .map(|price| format!("${:.2}", price))
+                                .or_else(|| model_price.map(|price| format!("${:.2}", price)))
+                                .unwrap_or_else(|| "--".to_string());
+
+                            egui::Frame::none()
+                                .fill(BG_ELEVATED.linear_multiply(0.35))
+                                .rounding(egui::Rounding::same(4.0))
+                                .inner_margin(egui::Margin::symmetric(6.0, 2.0))
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        let col_w = ui.available_width() / 3.0;
+                                let symbol_label = if is_holding {
+                                            symbol.clone()
+                                } else {
+                                            symbol.clone()
+                                };
+                                        ui.allocate_ui(egui::vec2(col_w, 18.0), |ui| {
+                                            ui.label(
+                                                egui::RichText::new(symbol_label)
+                                                    .size(11.0)
+                                                    .strong()
+                                                    .color(TEXT_PRIMARY),
+                                            );
+                                        });
+                                        ui.allocate_ui(egui::vec2(col_w, 18.0), |ui| {
+                                            ui.label(
+                                                egui::RichText::new(price_text)
+                                                    .size(11.0)
+                                                    .color(ACCENT_CYAN),
+                                            );
+                                        });
+                                        ui.allocate_ui(egui::vec2(col_w, 18.0), |ui| {
+                                            let tag_text = if is_holding { "Holding" } else { "Input" };
+                                            let tag_color = if is_holding { ACCENT_GREEN } else { TEXT_SECONDARY };
+                                            ui.label(
+                                                egui::RichText::new(tag_text)
+                                                    .size(10.0)
+                                                    .color(tag_color),
+                                            );
+                                        });
+                                    });
+                                });
+                            ui.add_space(2.0);
+                        }
                     }
 
                     ui.add_space(4.0);
                     section_header(ui, "Per-Symbol 1m Change");
+                    ui.horizontal(|ui| {
+                        let col_w = ui.available_width() / 4.0;
+                        ui.allocate_ui(egui::vec2(col_w, 16.0), |ui| {
+                            ui.label(egui::RichText::new("Symbol").size(10.0).color(TEXT_SECONDARY));
+                        });
+                        ui.allocate_ui(egui::vec2(col_w, 16.0), |ui| {
+                            ui.label(egui::RichText::new("Current Price").size(10.0).color(TEXT_SECONDARY));
+                        });
+                        ui.allocate_ui(egui::vec2(col_w, 16.0), |ui| {
+                            ui.label(egui::RichText::new("1m Δ").size(10.0).color(TEXT_SECONDARY));
+                        });
+                        ui.allocate_ui(egui::vec2(col_w, 16.0), |ui| {
+                            ui.label(egui::RichText::new("1m Δ%").size(10.0).color(TEXT_SECONDARY));
+                        });
+                    });
+                    ui.add(egui::Separator::default().spacing(2.0));
+
                     for symbol_snapshot in &snapshot.symbols {
                         let change_color = if symbol_snapshot.change_1m >= 0.0 {
                             ACCENT_GREEN
@@ -1623,25 +1767,34 @@ impl GuiApp {
                             ACCENT_RED
                         };
                         ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new(&symbol_snapshot.symbol)
-                                    .size(11.0)
-                                    .strong()
-                                    .color(TEXT_PRIMARY),
-                            );
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let col_w = ui.available_width() / 4.0;
+                            ui.allocate_ui(egui::vec2(col_w, 18.0), |ui| {
                                 ui.label(
-                                    egui::RichText::new(format!(
-                                        "{:+.3}%",
-                                        symbol_snapshot.change_1m_pct
-                                    ))
-                                    .size(11.0)
-                                    .color(change_color),
+                                    egui::RichText::new(&symbol_snapshot.symbol)
+                                        .size(11.0)
+                                        .strong()
+                                        .color(TEXT_PRIMARY),
                                 );
+                            });
+                            ui.allocate_ui(egui::vec2(col_w, 18.0), |ui| {
                                 ui.label(
                                     egui::RichText::new(format!("${:.2}", symbol_snapshot.price))
                                         .size(11.0)
                                         .color(TEXT_SECONDARY),
+                                );
+                            });
+                            ui.allocate_ui(egui::vec2(col_w, 18.0), |ui| {
+                                ui.label(
+                                    egui::RichText::new(format!("{:+.3}", symbol_snapshot.change_1m))
+                                        .size(11.0)
+                                        .color(change_color),
+                                );
+                            });
+                            ui.allocate_ui(egui::vec2(col_w, 18.0), |ui| {
+                                ui.label(
+                                    egui::RichText::new(format!("{:+.3}%", symbol_snapshot.change_1m_pct))
+                                        .size(11.0)
+                                        .color(change_color),
                                 );
                             });
                         });
