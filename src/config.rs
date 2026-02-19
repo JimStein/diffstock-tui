@@ -1,5 +1,25 @@
 use candle_core::Device;
+use rayon::ThreadPoolBuilder;
+use std::sync::OnceLock;
 use tracing::{info, warn};
+
+static RAYON_INIT: OnceLock<()> = OnceLock::new();
+
+pub fn init_cpu_parallelism() {
+    RAYON_INIT.get_or_init(|| {
+        let num_threads = num_cpus::get().max(1);
+        match ThreadPoolBuilder::new().num_threads(num_threads).build_global() {
+            Ok(_) => info!(
+                "Initialized Rayon thread pool with {} threads (all logical CPU cores)",
+                num_threads
+            ),
+            Err(e) => warn!(
+                "Rayon thread pool already initialized or unavailable ({}). Using existing configuration.",
+                e
+            ),
+        }
+    });
+}
 
 pub fn get_device(use_cuda: bool) -> Device {
     if use_cuda {

@@ -111,6 +111,8 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
+    config::init_cpu_parallelism();
+
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         EnvFilter::new("diffstock_tui=info,wgpu_core=error,wgpu_hal=error")
     });

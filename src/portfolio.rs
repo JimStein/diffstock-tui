@@ -4,7 +4,9 @@ use crate::models::time_grad::{EpsilonTheta, RNNEncoder};
 use anyhow::Result;
 use candle_core::{DType, Tensor};
 use candle_nn::VarBuilder;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 use tracing::{info, warn, error};
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -317,6 +319,7 @@ fn portfolio_variance(weights: &[f64], cov: &[Vec<f64>]) -> f64 {
 fn portfolio_cvar(weights: &[f64], forecasts: &[AssetForecast], alpha: f64) -> f64 {
     let num_paths = forecasts[0].mc_period_returns.len();
     let mut portfolio_returns: Vec<f64> = (0..num_paths)
+        .into_par_iter()
         .map(|k| {
             weights
                 .iter()
@@ -365,41 +368,42 @@ pub fn optimize_portfolio(forecasts: &[AssetForecast]) -> Result<PortfolioAlloca
         );
     }
 
-    let mut rng = rand::thread_rng();
-
-    let mut best_sharpe = f64::NEG_INFINITY;
     let mut best_weights: Vec<f64> = vec![1.0 / n as f64; n]; // Equal weight fallback
 
     // Phase 1: Maximum Sharpe via Monte Carlo random weight sampling
-    for _ in 0..OPTIMIZER_SAMPLES {
-        let weights = generate_random_weights(n, &mut rng);
+    let best_candidate = (0..OPTIMIZER_SAMPLES)
+        .into_par_iter()
+        .map_init(rand::thread_rng, |rng, _| {
+            let weights = generate_random_weights(n, rng);
 
-        // Apply weight constraints
-        if weights.iter().any(|&w| w > MAX_SINGLE_WEIGHT) {
-            continue;
-        }
-        if weights.iter().any(|&w| w > 0.0 && w < MIN_SINGLE_WEIGHT) {
-            continue;
-        }
+            if weights.iter().any(|&w| w > MAX_SINGLE_WEIGHT) {
+                return None;
+            }
+            if weights.iter().any(|&w| w > 0.0 && w < MIN_SINGLE_WEIGHT) {
+                return None;
+            }
 
-        let port_ret = portfolio_return(&weights, &means) * periods_per_year;
-        let port_var = portfolio_variance(&weights, &cov) * periods_per_year;
-        let port_vol = port_var.sqrt();
+            let port_ret = portfolio_return(&weights, &means) * periods_per_year;
+            let port_var = portfolio_variance(&weights, &cov) * periods_per_year;
+            let port_vol = port_var.sqrt();
+            if port_vol < 1e-8 {
+                return None;
+            }
 
-        if port_vol < 1e-8 {
-            continue;
-        }
+            let sharpe = (port_ret - RISK_FREE_RATE) / port_vol;
+            Some((sharpe, weights))
+        })
+        .filter_map(|candidate| candidate)
+        .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(Ordering::Equal));
 
-        let sharpe = (port_ret - RISK_FREE_RATE) / port_vol;
-
-        if sharpe > best_sharpe {
-            best_sharpe = sharpe;
-            best_weights = weights;
-        }
+    if let Some((sharpe, weights)) = best_candidate {
+        let _ = sharpe;
+        best_weights = weights;
     }
 
     // Phase 2: Among top candidates near the best Sharpe, prefer lower CVaR
     // Re-sample around the best weights (local refinement)
+    let mut rng = rand::thread_rng();
     let refined_weights = refine_weights(&best_weights, &means, &cov, forecasts, &mut rng);
 
     let port_ret = portfolio_return(&refined_weights, &means) * periods_per_year;
