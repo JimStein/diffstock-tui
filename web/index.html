@@ -444,6 +444,11 @@
     .legend-up { color: var(--up); }
     .legend-down { color: var(--down); }
 
+    #forecastLegend {
+      z-index: 60;
+      pointer-events: none;
+    }
+
     /* ─── Log Box ─── */
     #logBox {
       max-height: 200px;
@@ -622,7 +627,18 @@
           </div>
         </div>
         <div class="panel" style="padding: 12px 12px 8px;">
-          <div id="forecastChart"></div>
+          <div class="chart-wrap">
+            <div id="forecastChart"></div>
+            <div class="chart-legend visible" id="forecastLegend">
+              <div class="legend-title">Forecast Metrics</div>
+              <div class="legend-row"><span class="legend-key">Current Date</span><span class="legend-val" id="legendForecastCurrentDate">--</span></div>
+              <div class="legend-row"><span class="legend-key">Current Price</span><span class="legend-val" id="legendForecastCurrentPrice">--</span></div>
+              <div class="legend-row"><span class="legend-key">Target Date</span><span class="legend-val" id="legendForecastTargetDate">--</span></div>
+              <div class="legend-row"><span class="legend-key">P50 Target</span><span class="legend-val" id="legendForecastP50">--</span></div>
+              <div class="legend-row"><span class="legend-key">P10 Target</span><span class="legend-val" id="legendForecastP10">--</span></div>
+              <div class="legend-row"><span class="legend-key">P90 Target</span><span class="legend-val" id="legendForecastP90">--</span></div>
+            </div>
+          </div>
           <div class="forecast-legend">
             <div class="forecast-legend-item"><span class="forecast-legend-dot" style="background:#7e8aa5"></span> History</div>
             <div class="forecast-legend-item"><span class="forecast-legend-dot" style="background:#3b82f6"></span> P50 (Median)</div>

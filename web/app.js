@@ -28,7 +28,74 @@ const legendBenchmark = document.getElementById('legendBenchmark');
 const legendBenchmarkPnl = document.getElementById('legendBenchmarkPnl');
 const legendSpread = document.getElementById('legendSpread');
 const legendUpdated = document.getElementById('legendUpdated');
+let legendForecastCurrentDate = document.getElementById('legendForecastCurrentDate');
+let legendForecastCurrentPrice = document.getElementById('legendForecastCurrentPrice');
+let legendForecastTargetDate = document.getElementById('legendForecastTargetDate');
+let legendForecastP50 = document.getElementById('legendForecastP50');
+let legendForecastP10 = document.getElementById('legendForecastP10');
+let legendForecastP90 = document.getElementById('legendForecastP90');
 let paperMetricsByTime = new Map();
+let lastForecastContext = null;
+
+const ensureForecastLegendElements = () => {
+  const chartHost = document.getElementById('forecastChart');
+  if (!chartHost) return false;
+
+  let wrap = chartHost.parentElement;
+  if (!wrap || !wrap.classList.contains('chart-wrap')) {
+    const newWrap = document.createElement('div');
+    newWrap.className = 'chart-wrap';
+    chartHost.parentNode.insertBefore(newWrap, chartHost);
+    newWrap.appendChild(chartHost);
+    wrap = newWrap;
+  }
+
+  let legend = document.getElementById('forecastLegend');
+  if (!legend) {
+    legend = document.createElement('div');
+    legend.id = 'forecastLegend';
+    legend.className = 'chart-legend';
+    legend.innerHTML = `
+      <div class="legend-title">Forecast Metrics</div>
+      <div class="legend-row"><span class="legend-key">Current Date</span><span class="legend-val" id="legendForecastCurrentDate">--</span></div>
+      <div class="legend-row"><span class="legend-key">Current Price</span><span class="legend-val" id="legendForecastCurrentPrice">--</span></div>
+      <div class="legend-row"><span class="legend-key">Target Date</span><span class="legend-val" id="legendForecastTargetDate">--</span></div>
+      <div class="legend-row"><span class="legend-key">P50 Target</span><span class="legend-val" id="legendForecastP50">--</span></div>
+      <div class="legend-row"><span class="legend-key">P10 Target</span><span class="legend-val" id="legendForecastP10">--</span></div>
+      <div class="legend-row"><span class="legend-key">P90 Target</span><span class="legend-val" id="legendForecastP90">--</span></div>
+    `;
+    wrap.appendChild(legend);
+  }
+
+  legend.style.zIndex = '60';
+  legend.style.pointerEvents = 'none';
+
+  legendForecastCurrentDate = document.getElementById('legendForecastCurrentDate');
+  legendForecastCurrentPrice = document.getElementById('legendForecastCurrentPrice');
+  legendForecastTargetDate = document.getElementById('legendForecastTargetDate');
+  legendForecastP50 = document.getElementById('legendForecastP50');
+  legendForecastP10 = document.getElementById('legendForecastP10');
+  legendForecastP90 = document.getElementById('legendForecastP90');
+
+  return !!(
+    legendForecastCurrentDate && legendForecastCurrentPrice && legendForecastTargetDate &&
+    legendForecastP50 && legendForecastP10 && legendForecastP90
+  );
+};
+
+ensureForecastLegendElements();
+
+const showForecastLegend = () => {
+  const legend = document.getElementById('forecastLegend');
+  if (!legend) return;
+  legend.classList.add('visible');
+};
+
+const hideForecastLegend = () => {
+  const legend = document.getElementById('forecastLegend');
+  if (!legend) return;
+  legend.classList.remove('visible');
+};
 
 const setStatus = (text, type = '') => {
   if (!actionStatus) return;
@@ -155,6 +222,30 @@ if (!fChart.chart) {
 }
 attachChartAutoResize(fChart);
 
+if (fChart?.container) {
+  fChart.container.addEventListener('mouseenter', () => {
+    if (!lastForecastContext) return;
+    showForecastLegend();
+  });
+  fChart.container.addEventListener('mouseleave', () => {
+    if (!lastForecastContext) return;
+    hideForecastLegend();
+  });
+}
+
+if (fChart?.chart && typeof fChart.chart.subscribeCrosshairMove === 'function') {
+  fChart.chart.subscribeCrosshairMove((param) => {
+    if (!param || !param.time || !lastForecastContext) return;
+    const t = typeof param.time === 'number'
+      ? param.time
+      : (typeof param.time?.timestamp === 'number' ? param.time.timestamp : null);
+    if (t == null) return;
+
+    showForecastLegend();
+    setForecastLegendAtTime(Number(t));
+  });
+}
+
 const toSeries = (points) => points.map(p => ({ time: p.time, value: p.value }));
 
 const toPaperSeriesFromSnapshots = (snapshots = []) => {
@@ -258,6 +349,100 @@ const ensureVisibleSeries = (series = []) => {
 
 const formatMoney = (v) => `$${v.toFixed(2)}`;
 
+const formatChartDate = (unixSec) => {
+  if (!Number.isFinite(unixSec)) return '--';
+  return new Date(unixSec * 1000).toLocaleDateString();
+};
+
+const formatPrice = (v) => {
+  if (!Number.isFinite(v)) return '--';
+  return `$${v.toFixed(2)}`;
+};
+
+const formatPct = (v) => {
+  if (!Number.isFinite(v)) return '--';
+  return `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
+};
+
+const setForecastDeltaText = (el, targetValue, currentValue) => {
+  if (!el) return;
+  el.classList.remove('legend-up', 'legend-down');
+
+  if (!Number.isFinite(targetValue) || !Number.isFinite(currentValue) || currentValue === 0) {
+    el.textContent = '--';
+    return;
+  }
+
+  const changePct = ((targetValue - currentValue) / currentValue) * 100;
+  el.textContent = `${formatPrice(targetValue)} (${formatPct(changePct)})`;
+  el.classList.add(changePct >= 0 ? 'legend-up' : 'legend-down');
+};
+
+const setForecastLegend = (data) => {
+  if (!ensureForecastLegendElements()) return;
+  if (!legendForecastCurrentDate || !legendForecastCurrentPrice || !legendForecastTargetDate || !legendForecastP50 || !legendForecastP10 || !legendForecastP90) {
+    return;
+  }
+
+  const history = Array.isArray(data?.history) ? data.history : [];
+  const p50 = Array.isArray(data?.p50) ? data.p50 : [];
+  const p10 = Array.isArray(data?.p10) ? data.p10 : [];
+  const p90 = Array.isArray(data?.p90) ? data.p90 : [];
+
+  const current = history.length > 0 ? history[history.length - 1] : null;
+  const p50Last = p50.length > 0 ? p50[p50.length - 1] : null;
+  const p10Last = p10.length > 0 ? p10[p10.length - 1] : null;
+  const p90Last = p90.length > 0 ? p90[p90.length - 1] : null;
+
+  const currentPrice = Number(current?.value);
+
+  const p10ByTime = new Map(p10.map((pt) => [Number(pt.time), Number(pt.value)]));
+  const p50ByTime = new Map(p50.map((pt) => [Number(pt.time), Number(pt.value)]));
+  const p90ByTime = new Map(p90.map((pt) => [Number(pt.time), Number(pt.value)]));
+  lastForecastContext = {
+    currentTime: Number(current?.time),
+    currentPrice,
+    p10ByTime,
+    p50ByTime,
+    p90ByTime,
+    defaultTargetTime: Number(p50Last?.time),
+  };
+
+  legendForecastCurrentDate.textContent = formatChartDate(Number(current?.time));
+  legendForecastCurrentPrice.textContent = formatPrice(currentPrice);
+  legendForecastTargetDate.textContent = formatChartDate(Number(p50Last?.time));
+
+  setForecastDeltaText(legendForecastP50, Number(p50Last?.value), currentPrice);
+  setForecastDeltaText(legendForecastP10, Number(p10Last?.value), currentPrice);
+  setForecastDeltaText(legendForecastP90, Number(p90Last?.value), currentPrice);
+};
+
+const setForecastLegendAtTime = (time) => {
+  if (!ensureForecastLegendElements()) return;
+  if (!lastForecastContext) return;
+  const {
+    currentTime,
+    currentPrice,
+    p10ByTime,
+    p50ByTime,
+    p90ByTime,
+    defaultTargetTime,
+  } = lastForecastContext;
+
+  const targetTime = p50ByTime.has(time) ? time : defaultTargetTime;
+  const p50Value = p50ByTime.get(targetTime);
+  const p10Value = p10ByTime.get(targetTime);
+  const p90Value = p90ByTime.get(targetTime);
+
+  legendForecastCurrentDate.textContent = formatChartDate(currentTime);
+  legendForecastCurrentPrice.textContent = formatPrice(currentPrice);
+  legendForecastTargetDate.textContent = formatChartDate(targetTime);
+
+  setForecastDeltaText(legendForecastP50, p50Value, currentPrice);
+  setForecastDeltaText(legendForecastP10, p10Value, currentPrice);
+  setForecastDeltaText(legendForecastP90, p90Value, currentPrice);
+};
+
 const setLegendText = (metrics) => {
   if (!legendPortfolio || !legendPortfolioPnl || !legendBenchmark || !legendBenchmarkPnl || !legendSpread || !legendUpdated) return;
 
@@ -346,6 +531,7 @@ document.getElementById('runForecast').addEventListener('click', async () => {
       p10Series.setData(toSeries(data.p10));
       p50Series.setData(toSeries(data.p50));
       p90Series.setData(toSeries(data.p90));
+      setForecastLegend(data);
       fChart.fit();
     });
   } catch (e) { alert(e.message); }
