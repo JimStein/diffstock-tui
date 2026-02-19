@@ -176,6 +176,11 @@ struct PaperStartRequest {
     time2: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct PaperLoadRequest {
+    strategy_file: String,
+}
+
 pub async fn run_webui_server(port: u16, use_cuda_default: bool) -> Result<()> {
     let state = WebState {
         use_cuda_default,
@@ -196,6 +201,7 @@ pub async fn run_webui_server(port: u16, use_cuda_default: bool) -> Result<()> {
         .route("/api/train/start", post(start_train))
         .route("/api/train/status", get(train_status))
         .route("/api/paper/start", post(start_paper))
+        .route("/api/paper/load", post(load_paper))
         .route("/api/paper/status", get(paper_status))
         .route("/api/paper/pause", post(paper_pause))
         .route("/api/paper/resume", post(paper_resume))
@@ -509,6 +515,92 @@ async fn start_paper(
     let paper_state_runner = state.paper.clone();
     tokio::spawn(async move {
         let res = paper_trading::run_paper_trading(weights, cfg, event_tx, cmd_rx).await;
+        let mut ps = paper_state_runner.lock().await;
+        ps.running = false;
+        ps.paused = false;
+        ps.cmd_tx = None;
+        if let Err(err) = res {
+            ps.logs.push(format!("Error: {}", err));
+        } else {
+            ps.logs.push("Paper trading stopped".to_string());
+        }
+    });
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn load_paper(
+    State(state): State<WebState>,
+    Json(req): Json<PaperLoadRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ApiError>)> {
+    let strategy_file = req.strategy_file.trim().to_string();
+    if strategy_file.is_empty() {
+        return Err(api_err(StatusCode::BAD_REQUEST, "strategy_file cannot be empty"));
+    }
+
+    let (event_tx, mut event_rx) = mpsc::channel(1024);
+    let (cmd_tx, cmd_rx) = mpsc::channel(64);
+
+    {
+        let mut paper_state = state.paper.lock().await;
+        paper_state.running = true;
+        paper_state.paused = false;
+        paper_state.started_at = Some(chrono::Local::now().to_rfc3339());
+        paper_state.strategy_file = Some(strategy_file.clone());
+        paper_state.runtime_file = None;
+        paper_state.latest_snapshot = None;
+        paper_state.snapshots.clear();
+        paper_state.last_analysis = None;
+        paper_state.logs.clear();
+        paper_state.cmd_tx = Some(cmd_tx.clone());
+    }
+
+    let paper_state_for_events = state.paper.clone();
+    tokio::spawn(async move {
+        while let Some(ev) = event_rx.recv().await {
+            let mut ps = paper_state_for_events.lock().await;
+            match ev {
+                paper_trading::PaperEvent::Started {
+                    strategy_file,
+                    runtime_file,
+                } => {
+                    ps.strategy_file = Some(strategy_file);
+                    ps.runtime_file = Some(runtime_file);
+                    ps.logs.push("Paper trading loaded".to_string());
+                }
+                paper_trading::PaperEvent::Info(msg) => {
+                    ps.logs.push(msg);
+                }
+                paper_trading::PaperEvent::Warning(msg) => {
+                    ps.logs.push(format!("Warning: {}", msg));
+                }
+                paper_trading::PaperEvent::Analysis(a) => {
+                    ps.last_analysis = Some(a);
+                }
+                paper_trading::PaperEvent::Minute(m) => {
+                    ps.latest_snapshot = Some(m.clone());
+                    ps.snapshots.push(m);
+                    if ps.snapshots.len() > 6000 {
+                        let keep_from = ps.snapshots.len().saturating_sub(6000);
+                        ps.snapshots = ps.snapshots.split_off(keep_from);
+                    }
+                }
+                paper_trading::PaperEvent::Error(msg) => {
+                    ps.logs.push(format!("Error: {}", msg));
+                    ps.running = false;
+                    ps.paused = false;
+                }
+            }
+            if ps.logs.len() > 200 {
+                let keep_from = ps.logs.len().saturating_sub(200);
+                ps.logs = ps.logs.split_off(keep_from);
+            }
+        }
+    });
+
+    let paper_state_runner = state.paper.clone();
+    tokio::spawn(async move {
+        let res = paper_trading::run_paper_trading_from_strategy_file(&strategy_file, event_tx, cmd_rx).await;
         let mut ps = paper_state_runner.lock().await;
         ps.running = false;
         ps.paused = false;

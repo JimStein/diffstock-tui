@@ -103,6 +103,8 @@ pub struct StrategyLog {
     pub trading_fee_rate: f64,
     pub analysis_times_local: Vec<String>,
     pub benchmark_symbol: String,
+    #[serde(default)]
+    pub benchmark_initial_price: Option<f64>,
     pub targets: Vec<TargetWeight>,
     pub analyses: Vec<AnalysisRecord>,
 }
@@ -210,6 +212,7 @@ pub async fn run_paper_trading(
                 .map(|t| t.format("%H:%M").to_string())
                 .collect(),
             benchmark_symbol: BENCHMARK_SYMBOL.to_string(),
+            benchmark_initial_price: Some(benchmark_initial_price),
             targets: target_weights.clone(),
             analyses: Vec::new(),
         },
@@ -295,6 +298,177 @@ pub async fn run_paper_trading(
         let now_time = now_local.time();
 
         for (index, scheduled_time) in config.analysis_times_local.iter().enumerate() {
+            let already_ran_today = schedule_last_run_dates[index]
+                .map(|date| date == now_date)
+                .unwrap_or(false);
+
+            if !already_ran_today && now_time >= *scheduled_time {
+                let analysis = run_analysis_once(&mut runtime, &current_prices)?;
+                let _ = event_tx.send(PaperEvent::Analysis(analysis)).await;
+                schedule_last_run_dates[index] = Some(now_date);
+            }
+        }
+    }
+}
+
+pub async fn run_paper_trading_from_strategy_file(
+    strategy_file: &str,
+    event_tx: Sender<PaperEvent>,
+    mut command_rx: Receiver<PaperCommand>,
+) -> Result<()> {
+    let strategy_path = PathBuf::from(strategy_file);
+    if !strategy_path.exists() {
+        return Err(anyhow!("Strategy file not found: {}", strategy_file));
+    }
+
+    let raw = std::fs::read_to_string(&strategy_path)?;
+    let strategy_log: StrategyLog = serde_json::from_str(&raw)
+        .map_err(|e| anyhow!("Failed to parse strategy JSON: {}", e))?;
+
+    if strategy_log.targets.is_empty() {
+        return Err(anyhow!("No targets found in strategy JSON"));
+    }
+
+    let mut analysis_times_local = Vec::new();
+    for t in &strategy_log.analysis_times_local {
+        analysis_times_local.push(parse_hhmm_local_time(t)?);
+    }
+    if analysis_times_local.is_empty() {
+        return Err(anyhow!("No analysis schedule found in strategy JSON"));
+    }
+
+    let cfg = PaperTradingConfig {
+        initial_capital_usd: strategy_log.initial_capital_usd,
+        analysis_times_local,
+    };
+
+    let tracked_symbols = tracked_symbols(&strategy_log.targets);
+    let mut current_prices = fetch_prices_for_symbols(&tracked_symbols).await?;
+
+    let benchmark_initial_price = strategy_log
+        .benchmark_initial_price
+        .unwrap_or_else(|| *current_prices.get(BENCHMARK_SYMBOL).unwrap_or(&1.0));
+
+    let mut holdings_shares = HashMap::new();
+    for target in &strategy_log.targets {
+        holdings_shares.insert(target.symbol.clone(), 0.0);
+    }
+
+    let mut cash_usd = strategy_log.initial_capital_usd;
+    for analysis in &strategy_log.analyses {
+        for trade in &analysis.trades {
+            let entry = holdings_shares.entry(trade.symbol.clone()).or_insert(0.0);
+            match trade.side.as_str() {
+                "BUY" => {
+                    *entry += trade.quantity;
+                }
+                "SELL" => {
+                    *entry -= trade.quantity;
+                }
+                _ => {}
+            }
+        }
+        cash_usd = analysis.cash_after;
+    }
+
+    let runtime_path = strategy_path
+        .to_string_lossy()
+        .replace("paper_strategy_", "paper_runtime_")
+        .replace(".json", ".jsonl");
+
+    let mut runtime = PaperRuntime {
+        initial_capital_usd: cfg.initial_capital_usd,
+        cash_usd,
+        holdings_shares,
+        previous_prices: current_prices.clone(),
+        benchmark_initial_price,
+        strategy_log,
+        strategy_path: strategy_path.clone(),
+        runtime_path: PathBuf::from(runtime_path),
+    };
+
+    let _ = event_tx
+        .send(PaperEvent::Started {
+            strategy_file: runtime.strategy_path.display().to_string(),
+            runtime_file: runtime.runtime_path.display().to_string(),
+        })
+        .await;
+    let _ = event_tx
+        .send(PaperEvent::Info(format!(
+            "Resumed from strategy file with {} historical analyses",
+            runtime.strategy_log.analyses.len()
+        )))
+        .await;
+
+    let immediate_analysis = run_analysis_once(&mut runtime, &current_prices)?;
+    let _ = event_tx.send(PaperEvent::Analysis(immediate_analysis)).await;
+
+    let now_local = Local::now();
+    let today = now_local.date_naive();
+    let mut schedule_last_run_dates: Vec<Option<NaiveDate>> = cfg
+        .analysis_times_local
+        .iter()
+        .map(|time| if now_local.time() >= *time { Some(today) } else { None })
+        .collect();
+
+    let mut interval = tokio::time::interval(Duration::from_secs(PRICE_POLL_INTERVAL_SECS));
+    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let mut paused = false;
+
+    loop {
+        interval.tick().await;
+
+        while let Ok(command) = command_rx.try_recv() {
+            match command {
+                PaperCommand::Pause => {
+                    paused = true;
+                    let _ = event_tx
+                        .send(PaperEvent::Info("Simulation paused".to_string()))
+                        .await;
+                }
+                PaperCommand::Resume => {
+                    paused = false;
+                    let _ = event_tx
+                        .send(PaperEvent::Info("Simulation resumed".to_string()))
+                        .await;
+                }
+                PaperCommand::Stop => {
+                    let _ = event_tx
+                        .send(PaperEvent::Info("Simulation stopped".to_string()))
+                        .await;
+                    return Ok(());
+                }
+            }
+        }
+
+        if paused {
+            continue;
+        }
+
+        match fetch_prices_for_symbols(&tracked_symbols).await {
+            Ok(prices) => {
+                current_prices = prices;
+            }
+            Err(error) => {
+                let _ = event_tx
+                    .send(PaperEvent::Warning(format!(
+                        "Price polling failed (will retry): {}",
+                        error
+                    )))
+                    .await;
+                continue;
+            }
+        }
+
+        let minute_snapshot = build_minute_snapshot(&mut runtime, &current_prices)?;
+        append_jsonl(&runtime.runtime_path, &minute_snapshot)?;
+        let _ = event_tx.send(PaperEvent::Minute(minute_snapshot)).await;
+
+        let now_local = Local::now();
+        let now_date = now_local.date_naive();
+        let now_time = now_local.time();
+
+        for (index, scheduled_time) in cfg.analysis_times_local.iter().enumerate() {
             let already_ran_today = schedule_last_run_dates[index]
                 .map(|date| date == now_date)
                 .unwrap_or(false);

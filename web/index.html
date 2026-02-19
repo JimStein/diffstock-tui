@@ -685,10 +685,17 @@
               <label class="field-label">&nbsp;</label>
               <div class="btn-group">
                 <button class="primary" id="paperStart">&#9654; Start</button>
+                <button id="paperLoad">&#128194; Load</button>
                 <button class="warn" id="paperPause">&#9208; Pause</button>
                 <button class="success" id="paperResume">&#9654; Resume</button>
                 <button class="danger" id="paperStop">&#9209; Stop</button>
               </div>
+            </div>
+          </div>
+          <div class="row" style="margin-top: 8px;">
+            <div class="field" style="min-width: 420px; flex: 1;">
+              <label class="field-label">History JSON Path</label>
+              <input id="paperLoadPath" placeholder="e.g. log/paper_strategy_20260219_101500.json" style="width:100%" />
             </div>
           </div>
           <div class="small">Uses current portfolio symbols/weights as targets.</div>

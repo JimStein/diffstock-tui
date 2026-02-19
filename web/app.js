@@ -651,6 +651,17 @@ document.getElementById('paperStart').addEventListener('click', async () => {
     time2: document.getElementById('paperTime2').value,
   });
 });
+document.getElementById('paperLoad').addEventListener('click', async () => {
+  const strategyFile = (document.getElementById('paperLoadPath')?.value || '').trim();
+  if (!strategyFile) {
+    alert('Please enter strategy JSON path, e.g. log/paper_strategy_YYYYMMDD_HHMMSS.json');
+    return;
+  }
+
+  await paperControl('/api/paper/load', {
+    strategy_file: strategyFile,
+  });
+});
 document.getElementById('paperPause').addEventListener('click', () => paperControl('/api/paper/pause'));
 document.getElementById('paperResume').addEventListener('click', () => paperControl('/api/paper/resume'));
 document.getElementById('paperStop').addEventListener('click', () => paperControl('/api/paper/stop'));
@@ -712,6 +723,9 @@ const restoreState = async () => {
     if (state.paper) {
       setPaperStatusChip(state.paper);
       syncPaperButtons(state.paper);
+      if (state.paper.strategy_file && document.getElementById('paperLoadPath')) {
+        document.getElementById('paperLoadPath').value = state.paper.strategy_file;
+      }
       const ctx = buildPaperSeriesContext(state.paper.snapshots || []);
       paperMetricsByTime = ctx.metricsByTime;
 
