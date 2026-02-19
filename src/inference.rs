@@ -1,7 +1,7 @@
 use crate::data::StockData;
 use crate::diffusion::GaussianDiffusion;
 use crate::models::time_grad::{EpsilonTheta, RNNEncoder};
-use crate::config::{get_device, CUDA_INFERENCE_BATCH_SIZE, DDIM_ETA, DDIM_INFERENCE_STEPS, DIFF_STEPS, DROPOUT_RATE, HIDDEN_DIM, INFERENCE_BATCH_SIZE, INPUT_DIM, LOOKBACK, LSTM_LAYERS, NUM_LAYERS, TRAINING_SYMBOLS};
+use crate::config::{get_device, CUDA_INFERENCE_BATCH_SIZE, DDIM_ETA, DDIM_INFERENCE_STEPS, DIFF_STEPS, DROPOUT_RATE, FORECAST, HIDDEN_DIM, INFERENCE_BATCH_SIZE, INPUT_DIM, LOOKBACK, LSTM_LAYERS, NUM_LAYERS, TRAINING_SYMBOLS};
 use anyhow::Result;
 use candle_core::{DType, Tensor};
 use candle_nn::VarBuilder;
@@ -100,8 +100,10 @@ pub async fn run_inference(
         INFERENCE_BATCH_SIZE
     };
 
+    let chunk_len = FORECAST.max(1);
+    let chunks_per_path = horizon.div_ceil(chunk_len);
     let total_horizon_batches = num_simulations.div_ceil(inference_batch_size);
-    let total_steps = total_horizon_batches * horizon;
+    let total_steps = total_horizon_batches * chunks_per_path;
     let mut completed_steps = 0;
 
     let mut remaining = num_simulations;
@@ -110,32 +112,39 @@ pub async fn run_inference(
         let mut batch_paths: Vec<Vec<f64>> = (0..batch).map(|_| Vec::with_capacity(horizon)).collect();
         let mut last_vals: Vec<f64> = vec![data.history.last().unwrap().close; batch];
 
-        for _ in 0..horizon {
-            // Batched DDIM sampling: all MC paths in one forward pass
+        let mut produced = 0;
+        while produced < horizon {
+            let current_chunk = (horizon - produced).min(chunk_len);
+
+            // Batched DDIM chunk sampling: generate multiple future returns in one forward pass
             let samples = diffusion.sample_ddim_batched(
                 &model,
                 &hidden_state,
                 asset_id as u32,
                 batch,
+                current_chunk,
                 DDIM_INFERENCE_STEPS,
                 DDIM_ETA,
             )?;
 
-            // Extract predictions: samples is [batch, 1, 1]
-            let flat = samples.squeeze(2)?.squeeze(1)?;  // [batch]
-            let vals = flat.to_vec1::<f32>()?;
+            // samples: [batch, 1, current_chunk] -> [batch, current_chunk]
+            let chunk_vals = samples.squeeze(1)?.to_vec2::<f32>()?;
 
-            for (j, &predicted_norm_ret) in vals.iter().enumerate() {
-                let predicted_ret = (predicted_norm_ret as f64 * std) + mean;
-                let next_price = last_vals[j] * predicted_ret.exp();
-                batch_paths[j].push(next_price);
-                last_vals[j] = next_price;
+            for (path_idx, returns) in chunk_vals.iter().enumerate() {
+                for &predicted_norm_ret in returns {
+                    let predicted_ret = (predicted_norm_ret as f64 * std) + mean;
+                    let next_price = last_vals[path_idx] * predicted_ret.exp();
+                    batch_paths[path_idx].push(next_price);
+                    last_vals[path_idx] = next_price;
+                }
             }
 
             completed_steps += 1;
             if let Some(tx) = &progress_tx {
                 let _ = tx.send(completed_steps as f64 / total_steps as f64).await;
             }
+
+            produced += current_chunk;
         }
 
         all_paths.extend(batch_paths);

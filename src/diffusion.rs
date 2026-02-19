@@ -186,6 +186,7 @@ impl GaussianDiffusion {
     /// * `cond` - Single conditional context [1, cond_dim, 1] — will be broadcast.
     /// * `asset_id` - Single asset ID (u32).
     /// * `batch_size` - Number of parallel MC samples.
+    /// * `sample_len` - Number of forecast steps to sample per path in one pass.
     /// * `ddim_steps` - Number of DDIM denoising steps.
     /// * `eta` - DDIM stochasticity parameter.
     pub fn sample_ddim_batched(
@@ -194,6 +195,7 @@ impl GaussianDiffusion {
         cond: &Tensor,  // [1, cond_dim, 1]
         asset_id: u32,
         batch_size: usize,
+        sample_len: usize,
         ddim_steps: usize,
         eta: f64,
     ) -> Result<Tensor> {
@@ -204,7 +206,7 @@ impl GaussianDiffusion {
             .contiguous()?;
         let asset_ids = Tensor::from_vec(vec![asset_id; batch_size], (batch_size,), device)?;
 
-        self.sample_ddim(model, &cond_batched, &asset_ids, (batch_size, 1, 1), ddim_steps, eta)
+        self.sample_ddim(model, &cond_batched, &asset_ids, (batch_size, 1, sample_len), ddim_steps, eta)
     }
 }
 

@@ -1,4 +1,4 @@
-use crate::config::{get_device, DATA_RANGE, DDIM_ETA, DDIM_INFERENCE_STEPS, DIFF_STEPS, DROPOUT_RATE, HIDDEN_DIM, INFERENCE_BATCH_SIZE, INPUT_DIM, LOOKBACK, LSTM_LAYERS, NUM_LAYERS, TRAINING_SYMBOLS};
+use crate::config::{get_device, DATA_RANGE, DDIM_ETA, DDIM_INFERENCE_STEPS, DIFF_STEPS, DROPOUT_RATE, FORECAST, HIDDEN_DIM, INFERENCE_BATCH_SIZE, INPUT_DIM, LOOKBACK, LSTM_LAYERS, NUM_LAYERS, TRAINING_SYMBOLS};
 use crate::diffusion::GaussianDiffusion;
 use crate::models::time_grad::{EpsilonTheta, RNNEncoder};
 use anyhow::Result;
@@ -182,6 +182,7 @@ pub async fn generate_multi_asset_forecasts(
         // Monte Carlo sampling (batched DDIM for speed)
         let mut period_returns = Vec::with_capacity(num_simulations);
 
+        let chunk_len = FORECAST.max(1);
         let mut remaining = num_simulations;
         while remaining > 0 {
             let batch = remaining.min(INFERENCE_BATCH_SIZE);
@@ -190,25 +191,30 @@ pub async fn generate_multi_asset_forecasts(
             let mut batch_log_rets = vec![0.0f64; batch];
             let mut batch_last_vals = vec![current_price; batch];
 
-            for _ in 0..horizon {
+            let mut produced = 0;
+            while produced < horizon {
+                let current_chunk = (horizon - produced).min(chunk_len);
                 let samples = diffusion.sample_ddim_batched(
                     &model,
                     &hidden_state,
                     asset_id as u32,
                     batch,
+                    current_chunk,
                     DDIM_INFERENCE_STEPS,
                     DDIM_ETA,
                 )?;
 
-                let flat = samples.squeeze(2)?.squeeze(1)?;
-                let vals = flat.to_vec1::<f32>()?;
-
-                for (j, &predicted_norm_ret) in vals.iter().enumerate() {
-                    let predicted_ret = (predicted_norm_ret as f64 * std) + mean;
-                    batch_log_rets[j] += predicted_ret;
-                    let next_price = batch_last_vals[j] * predicted_ret.exp();
-                    batch_last_vals[j] = next_price;
+                let chunk_vals = samples.squeeze(1)?.to_vec2::<f32>()?;
+                for (path_idx, returns) in chunk_vals.iter().enumerate() {
+                    for &predicted_norm_ret in returns {
+                        let predicted_ret = (predicted_norm_ret as f64 * std) + mean;
+                        batch_log_rets[path_idx] += predicted_ret;
+                        let next_price = batch_last_vals[path_idx] * predicted_ret.exp();
+                        batch_last_vals[path_idx] = next_price;
+                    }
                 }
+
+                produced += current_chunk;
             }
 
             period_returns.extend(batch_log_rets);
