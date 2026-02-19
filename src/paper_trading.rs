@@ -25,8 +25,8 @@ impl PaperTradingConfig {
         Self {
             initial_capital_usd: DEFAULT_INITIAL_CAPITAL_USD,
             analysis_times_local: vec![
-                NaiveTime::from_hms_opt(9, 30, 0).unwrap(),
-                NaiveTime::from_hms_opt(15, 0, 0).unwrap(),
+                NaiveTime::from_hms_opt(2, 30, 0).unwrap(),
+                NaiveTime::from_hms_opt(23, 30, 0).unwrap(),
             ],
         }
     }

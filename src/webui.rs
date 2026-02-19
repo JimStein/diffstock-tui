@@ -447,8 +447,8 @@ async fn start_paper(
         .collect::<Vec<_>>();
 
     let capital_str = req.initial_capital.map(|v| format!("{v}"));
-    let t1 = req.time1.unwrap_or_else(|| "09:30".to_string());
-    let t2 = req.time2.unwrap_or_else(|| "15:00".to_string());
+    let t1 = req.time1.unwrap_or_else(|| "23:30".to_string());
+    let t2 = req.time2.unwrap_or_else(|| "02:30".to_string());
     let cfg = paper_trading::build_config(capital_str.as_deref(), &t1, &t2)
         .map_err(|e| api_err(StatusCode::BAD_REQUEST, &e.to_string()))?;
 
