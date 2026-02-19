@@ -3,12 +3,21 @@ use crate::diffusion::GaussianDiffusion;
 use crate::models::time_grad::{EpsilonTheta, RNNEncoder};
 use crate::config::{get_device, ComputeBackend, CUDA_INFERENCE_BATCH_SIZE, DDIM_ETA, DDIM_INFERENCE_STEPS, DIFF_STEPS, DROPOUT_RATE, FORECAST, HIDDEN_DIM, INFERENCE_BATCH_SIZE, INPUT_DIM, LOOKBACK, LSTM_LAYERS, NUM_LAYERS, TRAINING_SYMBOLS};
 use anyhow::Result;
+#[cfg(feature = "directml")]
+use anyhow::Context;
 use candle_core::{DType, Tensor};
 use candle_nn::VarBuilder;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 use chrono::Duration;
 use tracing::warn;
+
+#[cfg(feature = "directml")]
+use ort::execution_providers::DirectMLExecutionProvider;
+#[cfg(feature = "directml")]
+use ort::session::Session;
+#[cfg(feature = "directml")]
+use ort::value::Tensor as OrtTensor;
 
 #[derive(Clone, Debug)]
 pub struct ForecastData {
@@ -45,26 +54,308 @@ pub async fn run_inference_with_backend(
             .await
         }
         ComputeBackend::Directml => {
-            match crate::config::find_directml_onnx_model_path() {
-                Some(model_path) => {
-                    match crate::ort_directml::probe_directml_session(&model_path) {
-                        Ok(_) => warn!(
-                            "DirectML session probe succeeded with model '{}', but full ONNX forecast graph execution is not yet wired. Falling back to CPU path.",
-                            model_path.display()
-                        ),
-                        Err(e) => warn!(
-                            "DirectML backend requested but ORT DirectML probe failed: {}. Falling back to CPU path.",
-                            e
-                        ),
+            #[cfg(feature = "directml")]
+            {
+                match crate::config::find_directml_onnx_model_path() {
+                    Some(model_path) => {
+                        match run_inference_directml(
+                            data.clone(),
+                            horizon,
+                            num_simulations,
+                            progress_tx.clone(),
+                            &model_path,
+                        )
+                        .await
+                        {
+                            Ok(forecast) => return Ok(forecast),
+                            Err(e) => warn!(
+                                "DirectML inference failed ({}). Falling back to CPU path.",
+                                e
+                            ),
+                        }
                     }
+                    None => warn!(
+                        "DirectML backend requested but no ONNX model found. Set DIFFSTOCK_ORT_MODEL or place model_weights.onnx/model.onnx. Falling back to CPU path."
+                    ),
                 }
-                None => warn!(
-                    "DirectML backend requested but no ONNX model found. Set DIFFSTOCK_ORT_MODEL or place model_weights.onnx/model.onnx. Falling back to CPU path."
-                ),
+            }
+            #[cfg(not(feature = "directml"))]
+            {
+                warn!(
+                    "DirectML backend requested but binary was built without 'directml' feature. Falling back to CPU path."
+                );
             }
             run_inference(data, horizon, num_simulations, progress_tx, false).await
         }
     }
+}
+
+#[cfg(feature = "directml")]
+fn sample_ddim_batched_directml(
+    session: &mut Session,
+    diffusion: &GaussianDiffusion,
+    cond: &Tensor,
+    asset_id: u32,
+    batch_size: usize,
+    sample_len: usize,
+    ddim_steps: usize,
+    eta: f64,
+) -> Result<Tensor> {
+    let device = cond.device();
+    let mut x = Tensor::randn(0.0f32, 1.0f32, (batch_size, 1, sample_len), device)?;
+
+    let step_size = diffusion.num_steps / ddim_steps;
+    let timesteps: Vec<usize> = (0..ddim_steps).map(|i| i * step_size).rev().collect();
+    let alpha_bar_vec = diffusion.alpha_bar.to_vec1::<f32>()?;
+
+    let cond_batched = cond
+        .broadcast_as((batch_size, cond.dim(1)?, cond.dim(2)?))?
+        .contiguous()?;
+    let cond_flat = cond_batched.flatten_all()?.to_vec1::<f32>()?;
+
+    let batch_i64 = batch_size as i64;
+    let sample_len_i64 = sample_len as i64;
+    let asset_ids = vec![asset_id as i64; batch_size];
+
+    for (i, &t) in timesteps.iter().enumerate() {
+        let x_flat = x.flatten_all()?.to_vec1::<f32>()?;
+        let time_steps = vec![t as f32; batch_size];
+
+        let outputs = session.run(ort::inputs! {
+            "x_t" => OrtTensor::from_array((vec![batch_i64, 1, sample_len_i64], x_flat))?,
+            "time_steps" => OrtTensor::from_array((vec![batch_i64, 1], time_steps))?,
+            "asset_ids" => OrtTensor::from_array((vec![batch_i64], asset_ids.clone()))?,
+            "cond" => OrtTensor::from_array((vec![batch_i64, 1, 1], cond_flat.clone()))?,
+        })?;
+
+        let epsilon_dyn = outputs
+            .get("epsilon_pred")
+            .or_else(|| outputs.get("output"))
+            .unwrap_or(&outputs[0]);
+        let (_, epsilon_data) = epsilon_dyn.try_extract_tensor::<f32>()?;
+        if epsilon_data.len() != batch_size * sample_len {
+            anyhow::bail!(
+                "DirectML denoiser output size mismatch: got {}, expected {}",
+                epsilon_data.len(),
+                batch_size * sample_len
+            );
+        }
+        let epsilon_pred =
+            Tensor::from_vec(epsilon_data.to_vec(), (batch_size, 1, sample_len), device)?;
+
+        let alpha_bar_t = alpha_bar_vec[t] as f64;
+        let sqrt_alpha_bar_t = alpha_bar_t.sqrt();
+        let sqrt_one_minus_alpha_bar_t = (1.0 - alpha_bar_t).sqrt();
+
+        let pred_x0 = ((&x - epsilon_pred.affine(sqrt_one_minus_alpha_bar_t, 0.0))?
+            .affine(1.0 / sqrt_alpha_bar_t, 0.0))?;
+        let pred_x0 = pred_x0.clamp(-3.0f32, 3.0f32)?;
+
+        if i < timesteps.len() - 1 {
+            let t_prev = timesteps[i + 1];
+            let alpha_bar_t_prev = alpha_bar_vec[t_prev] as f64;
+
+            let sigma = if eta > 0.0 {
+                let sigma_sq = eta * eta * (1.0 - alpha_bar_t_prev) / (1.0 - alpha_bar_t)
+                    * (1.0 - alpha_bar_t / alpha_bar_t_prev);
+                sigma_sq.max(0.0).sqrt()
+            } else {
+                0.0
+            };
+
+            let sqrt_alpha_bar_prev = alpha_bar_t_prev.sqrt();
+            let dir_coeff = ((1.0 - alpha_bar_t_prev - sigma * sigma).max(0.0)).sqrt();
+
+            x = (pred_x0.affine(sqrt_alpha_bar_prev, 0.0)?
+                + epsilon_pred.affine(dir_coeff, 0.0)?)?;
+
+            if sigma > 1e-8 {
+                let noise = Tensor::randn(0.0f32, 1.0f32, (batch_size, 1, sample_len), device)?;
+                x = (x + noise.affine(sigma, 0.0)?)?;
+            }
+        } else {
+            x = pred_x0;
+        }
+    }
+
+    Ok(x)
+}
+
+#[cfg(feature = "directml")]
+pub async fn run_inference_directml(
+    data: Arc<StockData>,
+    horizon: usize,
+    num_simulations: usize,
+    progress_tx: Option<Sender<f64>>,
+    model_path: &std::path::Path,
+) -> Result<ForecastData> {
+    let device = get_device(false);
+
+    let context_len = LOOKBACK;
+    if data.history.len() < context_len + 1 {
+        return Err(anyhow::anyhow!(
+            "Not enough history data (need at least {} days)",
+            context_len + 1
+        ));
+    }
+
+    let start_idx = data.history.len() - context_len;
+
+    let mut features = Vec::with_capacity(context_len);
+    let mut close_vals = Vec::with_capacity(context_len);
+
+    for i in 0..context_len {
+        let idx = start_idx + i;
+        let close_ret = (data.history[idx].close / data.history[idx - 1].close).ln();
+        let overnight_ret = (data.history[idx].open / data.history[idx - 1].close).ln();
+        features.push(vec![close_ret, overnight_ret]);
+        close_vals.push(close_ret);
+    }
+
+    let mean = close_vals.iter().sum::<f64>() / context_len as f64;
+    let variance =
+        close_vals.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (context_len as f64 - 1.0);
+    let std = variance.sqrt() + 1e-6;
+
+    let normalized_features: Vec<f32> = features
+        .iter()
+        .flat_map(|f| vec![((f[0] - mean) / std) as f32, ((f[1] - mean) / std) as f32])
+        .collect();
+    let context_tensor = Tensor::from_slice(&normalized_features, (1, context_len, 2), &device)?;
+
+    let symbol_upper = data.symbol.to_uppercase();
+    let asset_id = TRAINING_SYMBOLS
+        .iter()
+        .position(|&s| s.eq_ignore_ascii_case(&symbol_upper))
+        .unwrap_or_else(|| {
+            warn!(
+                "Symbol {} not found in training set. Using default asset ID 0.",
+                data.symbol
+            );
+            0
+        });
+
+    let vb = if let Some(weights_path) = crate::config::find_model_weights_safetensors_path() {
+        unsafe {
+            VarBuilder::from_mmaped_safetensors(&[weights_path], DType::F32, &device)?
+        }
+    } else {
+        warn!(
+            "model_weights.safetensors not found under project root '{}' — encoder is untrained. DirectML forecasts will be meaningless.",
+            crate::config::project_root_path().display()
+        );
+        VarBuilder::zeros(DType::F32, &device)
+    };
+
+    let encoder = RNNEncoder::new(
+        INPUT_DIM,
+        HIDDEN_DIM,
+        LSTM_LAYERS,
+        DROPOUT_RATE,
+        vb.pp("encoder"),
+    )?;
+    let diffusion = GaussianDiffusion::new(DIFF_STEPS, &device)?;
+
+    let hidden_state = encoder.forward(&context_tensor, false)?;
+    let hidden_state = hidden_state.unsqueeze(2)?;
+
+    let mut session = Session::builder()?
+        .with_execution_providers([DirectMLExecutionProvider::default().build()])?
+        .commit_from_file(model_path)
+        .with_context(|| format!("failed to load DirectML ONNX model '{}'", model_path.display()))?;
+    if session.inputs().is_empty() {
+        anyhow::bail!(
+            "ONNX model has 0 inputs (not executable graph). Re-export model_weights.onnx with explicit runtime inputs."
+        );
+    }
+
+    let mut all_paths = Vec::with_capacity(num_simulations);
+    let start_date = data.history.last().unwrap().date;
+    let inference_batch_size = INFERENCE_BATCH_SIZE;
+
+    let chunk_len = FORECAST.max(1);
+    let chunks_per_path = horizon.div_ceil(chunk_len);
+    let total_horizon_batches = num_simulations.div_ceil(inference_batch_size);
+    let total_steps = total_horizon_batches * chunks_per_path;
+    let mut completed_steps = 0;
+
+    let mut remaining = num_simulations;
+    while remaining > 0 {
+        let batch = remaining.min(inference_batch_size);
+        let mut batch_paths: Vec<Vec<f64>> =
+            (0..batch).map(|_| Vec::with_capacity(horizon)).collect();
+        let mut last_vals: Vec<f64> = vec![data.history.last().unwrap().close; batch];
+
+        let mut produced = 0;
+        while produced < horizon {
+            let current_chunk = (horizon - produced).min(chunk_len);
+
+            let samples = sample_ddim_batched_directml(
+                &mut session,
+                &diffusion,
+                &hidden_state,
+                asset_id as u32,
+                batch,
+                current_chunk,
+                DDIM_INFERENCE_STEPS,
+                DDIM_ETA,
+            )?;
+
+            let chunk_vals = samples.squeeze(1)?.to_vec2::<f32>()?;
+
+            for (path_idx, returns) in chunk_vals.iter().enumerate() {
+                for &predicted_norm_ret in returns {
+                    let predicted_ret = (predicted_norm_ret as f64 * std) + mean;
+                    let next_price = last_vals[path_idx] * predicted_ret.exp();
+                    batch_paths[path_idx].push(next_price);
+                    last_vals[path_idx] = next_price;
+                }
+            }
+
+            completed_steps += 1;
+            if let Some(tx) = &progress_tx {
+                let _ = tx.send(completed_steps as f64 / total_steps as f64).await;
+            }
+
+            produced += current_chunk;
+        }
+
+        all_paths.extend(batch_paths);
+        remaining -= batch;
+    }
+
+    let mut p10 = Vec::with_capacity(horizon);
+    let mut p30 = Vec::with_capacity(horizon);
+    let mut p50 = Vec::with_capacity(horizon);
+    let mut p70 = Vec::with_capacity(horizon);
+    let mut p90 = Vec::with_capacity(horizon);
+
+    for t in 0..horizon {
+        let mut time_slice: Vec<f64> = all_paths.iter().map(|p| p[t]).collect();
+        time_slice.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+        let idx_10 = (num_simulations as f64 * 0.1) as usize;
+        let idx_30 = (num_simulations as f64 * 0.3) as usize;
+        let idx_50 = (num_simulations as f64 * 0.5) as usize;
+        let idx_70 = (num_simulations as f64 * 0.7) as usize;
+        let idx_90 = (num_simulations as f64 * 0.9) as usize;
+
+        let time_point = (start_date + Duration::days(t as i64 + 1)).timestamp() as f64;
+        p10.push((time_point, time_slice[idx_10]));
+        p30.push((time_point, time_slice[idx_30]));
+        p50.push((time_point, time_slice[idx_50]));
+        p70.push((time_point, time_slice[idx_70]));
+        p90.push((time_point, time_slice[idx_90]));
+    }
+
+    Ok(ForecastData {
+        p10,
+        p30,
+        p50,
+        p70,
+        p90,
+        _paths: all_paths,
+    })
 }
 
 pub async fn run_inference(
@@ -123,10 +414,13 @@ pub async fn run_inference(
     let num_assets = TRAINING_SYMBOLS.len();
 
     // Load weights if available
-    let vb = if std::path::Path::new("model_weights.safetensors").exists() {
-        unsafe { VarBuilder::from_mmaped_safetensors(&["model_weights.safetensors"], DType::F32, &device)? }
+    let vb = if let Some(weights_path) = crate::config::find_model_weights_safetensors_path() {
+        unsafe { VarBuilder::from_mmaped_safetensors(&[weights_path], DType::F32, &device)? }
     } else {
-        warn!("model_weights.safetensors not found — model is untrained. Predictions will be meaningless. Run with --train first.");
+        warn!(
+            "model_weights.safetensors not found under project root '{}' — model is untrained. Predictions will be meaningless. Run with --train first.",
+            crate::config::project_root_path().display()
+        );
         VarBuilder::zeros(DType::F32, &device)
     };
 

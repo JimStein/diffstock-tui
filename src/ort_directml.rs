@@ -6,9 +6,16 @@ pub fn probe_directml_session(model_path: &std::path::Path) -> Result<()> {
         use ort::execution_providers::DirectMLExecutionProvider;
         use ort::session::Session;
 
-        let _session = Session::builder()?
+        let session = Session::builder()?
             .with_execution_providers([DirectMLExecutionProvider::default().build()])?
             .commit_from_file(model_path)?;
+
+        if session.inputs().is_empty() {
+            anyhow::bail!(
+                "ONNX model has 0 inputs (likely weight snapshot export, not executable graph). Re-export a runnable ONNX with explicit model inputs/outputs."
+            );
+        }
+
         return Ok(());
     }
 

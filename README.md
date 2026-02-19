@@ -99,13 +99,15 @@ python tools/export_to_onnx.py --input model_weights.safetensors --output model_
 
 Exporter dependencies (Python):
 ```bash
-pip install onnx safetensors numpy
+pip install torch onnx safetensors numpy
 ```
 
 Current exporter behavior:
-- Produces a valid ONNX weight-archive model (`model_weights.onnx`) from `model_weights.safetensors`.
-- The artifact is sufficient for ORT/DirectML session probing and model distribution.
-- Full end-to-end forecast graph execution via ONNX is not yet wired in runtime.
+- Converts `model_weights.safetensors` into executable ONNX subgraphs:
+	- Denoiser: `model_weights.onnx`
+	- Encoder: `model_weights.encoder.onnx`
+- The denoiser graph has runtime inputs (`x_t`, `time_steps`, `asset_ids`, `cond`) and can be consumed by ORT.
+- Runtime still uses Candle for final forecast sampling path; ORT DirectML full execution wiring remains next step.
 
 You can override exporter and script via env vars:
 ```bash

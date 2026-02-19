@@ -33,4 +33,4 @@ rayon = "1.10"
 num_cpus = "1.16"
 axum = "0.7"
 tower-http = { version = "0.6", features = ["fs"] }
-ort = { version = "2.0.0-rc.9", default-features = false, features = ["load-dynamic", "directml"], optional = true }
+ort = { version = "2.0.0-rc.11", default-features = false, features = ["load-dynamic", "download-binaries", "copy-dylibs", "tls-rustls", "directml"], optional = true }

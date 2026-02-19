@@ -80,6 +80,27 @@ pub fn find_directml_onnx_model_path() -> Option<std::path::PathBuf> {
     candidates.into_iter().find(|p| p.exists() && p.is_file())
 }
 
+pub fn project_root_path() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+pub fn project_file_path(file_name: &str) -> std::path::PathBuf {
+    project_root_path().join(file_name)
+}
+
+pub fn model_weights_safetensors_path() -> std::path::PathBuf {
+    project_file_path("model_weights.safetensors")
+}
+
+pub fn find_model_weights_safetensors_path() -> Option<std::path::PathBuf> {
+    let path = model_weights_safetensors_path();
+    if path.exists() && path.is_file() {
+        Some(path)
+    } else {
+        None
+    }
+}
+
 pub fn get_device(use_cuda: bool) -> Device {
     if use_cuda {
         #[cfg(feature = "cuda")]

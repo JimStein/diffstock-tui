@@ -104,17 +104,18 @@ pub async fn generate_multi_asset_forecasts(
     let num_assets = TRAINING_SYMBOLS.len();
 
     // Load model weights once
-    let vb = if std::path::Path::new("model_weights.safetensors").exists() {
+    let vb = if let Some(weights_path) = crate::config::find_model_weights_safetensors_path() {
         unsafe {
             VarBuilder::from_mmaped_safetensors(
-                &["model_weights.safetensors"],
+                &[weights_path],
                 DType::F32,
                 &device,
             )?
         }
     } else {
         return Err(anyhow::anyhow!(
-            "model_weights.safetensors not found. Run --train first."
+            "model_weights.safetensors not found under project root '{}'. Run --train first.",
+            crate::config::project_root_path().display()
         ));
     };
 
