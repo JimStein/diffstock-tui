@@ -97,13 +97,21 @@ Default ONNX export hook:
 python tools/export_to_onnx.py --input model_weights.safetensors --output model_weights.onnx
 ```
 
+Exporter dependencies (Python):
+```bash
+pip install onnx safetensors numpy
+```
+
+Current exporter behavior:
+- Produces a valid ONNX weight-archive model (`model_weights.onnx`) from `model_weights.safetensors`.
+- The artifact is sufficient for ORT/DirectML session probing and model distribution.
+- Full end-to-end forecast graph execution via ONNX is not yet wired in runtime.
+
 You can override exporter and script via env vars:
 ```bash
 set DIFFSTOCK_ONNX_EXPORTER=python
 set DIFFSTOCK_ONNX_EXPORT_SCRIPT=tools/export_to_onnx.py
 ```
-
-Note: `tools/export_to_onnx.py` is a project hook entrypoint. Replace it with your model-specific converter implementation.
 Training stops early if validation loss doesn't improve for `--patience` epochs (default: 20). Configuration (tickers, defaults) can be edited in `src/config.rs`.
 
 ### 2. Forecasting

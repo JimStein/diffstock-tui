@@ -1,0 +1,75 @@
+{
+  "created_at": "2026-02-19T13:55:18.637059500+08:00",
+  "initial_capital_usd": 80000.0,
+  "trading_fee_rate": 0.0005,
+  "analysis_times_local": [
+    "02:30",
+    "23:30"
+  ],
+  "benchmark_symbol": "QQQ",
+  "benchmark_initial_price": 605.7899780273438,
+  "targets": [
+    {
+      "symbol": "COPX",
+      "target_weight": 0.36462558549398066
+    },
+    {
+      "symbol": "ETN",
+      "target_weight": 0.3071447080952804
+    },
+    {
+      "symbol": "IAU",
+      "target_weight": 0.14904191750776424
+    },
+    {
+      "symbol": "TLT",
+      "target_weight": 0.09083109778528003
+    }
+  ],
+  "analyses": [
+    {
+      "timestamp": "2026-02-19T13:55:18.637522600+08:00",
+      "portfolio_value_before": 80000.0,
+      "portfolio_value_after": 79963.68351937484,
+      "cash_after": 7330.722269069668,
+      "trades": [
+        {
+          "timestamp": "2026-02-19T13:55:18.637522600+08:00",
+          "symbol": "COPX",
+          "side": "BUY",
+          "quantity": 336.0,
+          "price": 86.66000366210938,
+          "notional": 29117.76123046875,
+          "fee": 14.558880615234376
+        },
+        {
+          "timestamp": "2026-02-19T13:55:18.637522600+08:00",
+          "symbol": "ETN",
+          "side": "BUY",
+          "quantity": 64.0,
+          "price": 380.3800048828125,
+          "notional": 24344.3203125,
+          "fee": 12.17216015625
+        },
+        {
+          "timestamp": "2026-02-19T13:55:18.637522600+08:00",
+          "symbol": "IAU",
+          "side": "BUY",
+          "quantity": 127.0,
+          "price": 93.8499984741211,
+          "notional": 11918.949806213379,
+          "fee": 5.959474903106689
+        },
+        {
+          "timestamp": "2026-02-19T13:55:18.637522600+08:00",
+          "symbol": "TLT",
+          "side": "BUY",
+          "quantity": 81.0,
+          "price": 89.52999877929688,
+          "notional": 7251.929901123047,
+          "fee": 3.6259649505615235
+        }
+      ]
+    }
+  ]
+}

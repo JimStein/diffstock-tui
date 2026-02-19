@@ -1,0 +1,2 @@
+{"event":"start","timestamp":"2026-02-19T06:37:07.506358300+00:00","run_type":"cli","epoch":null,"train_loss":null,"val_loss":null,"best_val_loss":null,"message":"training_started"}
+{"event":"epoch","timestamp":"2026-02-19T06:44:05.908679600+00:00","run_type":"cli","epoch":1,"train_loss":1.1038194709238798,"val_loss":1.0017122236315998,"best_val_loss":1.0017122236315998,"message":null}
