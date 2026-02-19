@@ -1,6 +1,7 @@
 use crate::config::{get_device, AUGMENTATION_COPIES, AUGMENTATION_NOISE, BATCH_SIZE, CUDA_BATCH_SIZE, DATA_RANGE, DIFF_STEPS, DROPOUT_RATE, EPOCHS, FORECAST, HIDDEN_DIM, INPUT_DIM, LEARNING_RATE, LOOKBACK, LSTM_LAYERS, NUM_LAYERS, PATIENCE, TRAIN_LOG_INTERVAL_BATCHES, TRAINING_SYMBOLS, WEIGHT_DECAY};
 use crate::data::{StockData, TrainingDataset};
 use crate::diffusion::GaussianDiffusion;
+use crate::model_artifacts::save_best_model_artifacts;
 use crate::models::time_grad::{EpsilonTheta, RNNEncoder};
 use crate::gui::TrainMessage;
 use anyhow::Result;
@@ -406,7 +407,7 @@ async fn train_loop_with_progress(
                 "Epoch {}: New best model! Val loss: {:.6}. Saving weights...",
                 epoch + 1, best_val_loss
             ))).await;
-            varmap.save("model_weights.safetensors")?;
+            save_best_model_artifacts(&varmap, use_cuda)?;
         } else {
             epochs_without_improvement += 1;
             if epochs_without_improvement >= patience {
@@ -753,7 +754,7 @@ pub async fn train_model_with_data(
             best_val_loss = avg_val_loss;
             epochs_without_improvement = 0;
             info!("New best model found! Saving weights...");
-            varmap.save("model_weights.safetensors")?;
+            save_best_model_artifacts(&varmap, use_cuda)?;
         } else {
             epochs_without_improvement += 1;
             if epochs_without_improvement >= patience {

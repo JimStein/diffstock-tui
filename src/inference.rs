@@ -1,7 +1,7 @@
 use crate::data::StockData;
 use crate::diffusion::GaussianDiffusion;
 use crate::models::time_grad::{EpsilonTheta, RNNEncoder};
-use crate::config::{get_device, CUDA_INFERENCE_BATCH_SIZE, DDIM_ETA, DDIM_INFERENCE_STEPS, DIFF_STEPS, DROPOUT_RATE, FORECAST, HIDDEN_DIM, INFERENCE_BATCH_SIZE, INPUT_DIM, LOOKBACK, LSTM_LAYERS, NUM_LAYERS, TRAINING_SYMBOLS};
+use crate::config::{get_device, ComputeBackend, CUDA_INFERENCE_BATCH_SIZE, DDIM_ETA, DDIM_INFERENCE_STEPS, DIFF_STEPS, DROPOUT_RATE, FORECAST, HIDDEN_DIM, INFERENCE_BATCH_SIZE, INPUT_DIM, LOOKBACK, LSTM_LAYERS, NUM_LAYERS, TRAINING_SYMBOLS};
 use anyhow::Result;
 use candle_core::{DType, Tensor};
 use candle_nn::VarBuilder;
@@ -18,6 +18,53 @@ pub struct ForecastData {
     pub p70: Vec<(f64, f64)>,
     pub p90: Vec<(f64, f64)>,
     pub _paths: Vec<Vec<f64>>, // Raw paths for potential detailed inspection
+}
+
+pub async fn run_inference_with_backend(
+    data: Arc<StockData>,
+    horizon: usize,
+    num_simulations: usize,
+    progress_tx: Option<Sender<f64>>,
+    backend: ComputeBackend,
+) -> Result<ForecastData> {
+    match backend {
+        ComputeBackend::Cuda => {
+            run_inference(data, horizon, num_simulations, progress_tx, true).await
+        }
+        ComputeBackend::Cpu => {
+            run_inference(data, horizon, num_simulations, progress_tx, false).await
+        }
+        ComputeBackend::Auto => {
+            run_inference(
+                data,
+                horizon,
+                num_simulations,
+                progress_tx,
+                cfg!(feature = "cuda"),
+            )
+            .await
+        }
+        ComputeBackend::Directml => {
+            match crate::config::find_directml_onnx_model_path() {
+                Some(model_path) => {
+                    match crate::ort_directml::probe_directml_session(&model_path) {
+                        Ok(_) => warn!(
+                            "DirectML session probe succeeded with model '{}', but full ONNX forecast graph execution is not yet wired. Falling back to CPU path.",
+                            model_path.display()
+                        ),
+                        Err(e) => warn!(
+                            "DirectML backend requested but ORT DirectML probe failed: {}. Falling back to CPU path.",
+                            e
+                        ),
+                    }
+                }
+                None => warn!(
+                    "DirectML backend requested but no ONNX model found. Set DIFFSTOCK_ORT_MODEL or place model_weights.onnx/model.onnx. Falling back to CPU path."
+                ),
+            }
+            run_inference(data, horizon, num_simulations, progress_tx, false).await
+        }
+    }
 }
 
 pub async fn run_inference(

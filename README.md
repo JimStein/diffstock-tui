@@ -52,6 +52,58 @@ cargo run --release -- --train --epochs 100 --batch-size 32 --learning-rate 0.00
 ```bash
 cargo run --release --features cuda -- --train --cuda
 ```
+
+**Select Compute Backend (new):**
+```bash
+# Auto (default): prefer CUDA when available, otherwise CPU
+cargo run --release -- --train --compute-backend auto
+
+# Force CUDA (requires build with --features cuda)
+cargo run --release --features cuda -- --train --compute-backend cuda
+
+# Request DirectML path (current build falls back to CPU with warning)
+cargo run --release -- --train --compute-backend directml
+
+# Force CPU
+cargo run --release -- --train --compute-backend cpu
+```
+
+**DirectML (Windows AMD/Intel iGPU) build path:**
+```bash
+# Build/run with ORT DirectML support enabled
+cargo run --features directml -- --webui --compute-backend directml
+
+# Optional: explicitly provide ONNX model path
+set DIFFSTOCK_ORT_MODEL=D:\path\to\model.onnx
+cargo run --features directml -- --webui --compute-backend directml
+```
+
+When `--compute-backend directml` is selected, the runtime searches ONNX in this order:
+1. `%DIFFSTOCK_ORT_MODEL%`
+2. `model_weights.onnx`
+3. `model.onnx`
+4. `onnx/model.onnx`
+
+If no ONNX model is found, runtime logs a warning and falls back to CPU.
+
+### Automatic dual-artifact checkpointing (CUDA training)
+
+During training, when a new best checkpoint is found:
+- `model_weights.safetensors` is always saved.
+- If training is running with CUDA, the trainer also attempts to export `model_weights.onnx` to the same directory.
+
+Default ONNX export hook:
+```bash
+python tools/export_to_onnx.py --input model_weights.safetensors --output model_weights.onnx
+```
+
+You can override exporter and script via env vars:
+```bash
+set DIFFSTOCK_ONNX_EXPORTER=python
+set DIFFSTOCK_ONNX_EXPORT_SCRIPT=tools/export_to_onnx.py
+```
+
+Note: `tools/export_to_onnx.py` is a project hook entrypoint. Replace it with your model-specific converter implementation.
 Training stops early if validation loss doesn't improve for `--patience` epochs (default: 20). Configuration (tickers, defaults) can be edited in `src/config.rs`.
 
 ### 2. Forecasting
@@ -68,7 +120,7 @@ cargo run --release
 cargo run --release -- --gui
 ```
 
-Add `--cuda` to any command above to use GPU acceleration (requires the `cuda` feature at compile time). If CUDA is unavailable at runtime, it falls back to CPU automatically.
+Add `--compute-backend <auto|cuda|directml|cpu>` to any command above to choose compute backend. `--cuda` remains as a compatibility shortcut for `--compute-backend cuda`.
 
 ### 3. Backtesting
 Validate performance on historical SPY data.

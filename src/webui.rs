@@ -1,4 +1,4 @@
-use crate::{data, inference, paper_trading, portfolio, train};
+use crate::{config, data, inference, paper_trading, portfolio, train};
 use anyhow::Result;
 use axum::extract::State;
 use axum::http::{header, StatusCode};
@@ -9,18 +9,38 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
-use tracing::info;
+use tracing::{info, warn};
 
 const INDEX_HTML: &str = include_str!("../web/index.html");
 const APP_JS: &str = include_str!("../web/app.js");
 
 #[derive(Clone)]
 struct WebState {
-    use_cuda_default: bool,
+    backend_default: config::ComputeBackend,
     train: Arc<Mutex<TrainRuntimeState>>,
     paper: Arc<Mutex<PaperRuntimeState>>,
     forecast: Arc<Mutex<ForecastRuntimeState>>,
     portfolio: Arc<Mutex<PortfolioRuntimeState>>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum ApiComputeBackend {
+    Auto,
+    Cuda,
+    Directml,
+    Cpu,
+}
+
+impl From<ApiComputeBackend> for config::ComputeBackend {
+    fn from(value: ApiComputeBackend) -> Self {
+        match value {
+            ApiComputeBackend::Auto => config::ComputeBackend::Auto,
+            ApiComputeBackend::Cuda => config::ComputeBackend::Cuda,
+            ApiComputeBackend::Directml => config::ComputeBackend::Directml,
+            ApiComputeBackend::Cpu => config::ComputeBackend::Cpu,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -49,7 +69,7 @@ struct ForecastRequestState {
     symbol: String,
     horizon: usize,
     simulations: usize,
-    use_cuda: bool,
+    compute_backend: String,
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -118,6 +138,7 @@ struct ForecastRequest {
     horizon: Option<usize>,
     simulations: Option<usize>,
     use_cuda: Option<bool>,
+    compute_backend: Option<ApiComputeBackend>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -141,6 +162,7 @@ struct ForecastResponse {
 struct PortfolioRequest {
     symbols: Vec<String>,
     use_cuda: Option<bool>,
+    compute_backend: Option<ApiComputeBackend>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -160,6 +182,7 @@ struct TrainStartRequest {
     learning_rate: Option<f64>,
     patience: Option<usize>,
     use_cuda: Option<bool>,
+    compute_backend: Option<ApiComputeBackend>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -181,9 +204,9 @@ struct PaperLoadRequest {
     strategy_file: String,
 }
 
-pub async fn run_webui_server(port: u16, use_cuda_default: bool) -> Result<()> {
+pub async fn run_webui_server(port: u16, backend_default: config::ComputeBackend) -> Result<()> {
     let state = WebState {
-        use_cuda_default,
+        backend_default,
         train: Arc::new(Mutex::new(TrainRuntimeState::default())),
         paper: Arc::new(Mutex::new(PaperRuntimeState::default())),
         forecast: Arc::new(Mutex::new(ForecastRuntimeState::default())),
@@ -236,9 +259,15 @@ async fn forecast(
         return Err(api_err(StatusCode::BAD_REQUEST, "symbol is required"));
     }
 
-    let use_cuda = req.use_cuda.unwrap_or(state.use_cuda_default);
+    let requested_backend = match req.use_cuda {
+        Some(true) => config::ComputeBackend::Cuda,
+        Some(false) => config::ComputeBackend::Cpu,
+        None => req.compute_backend.map(Into::into).unwrap_or(state.backend_default),
+    };
+    let backend = config::resolve_compute_backend(requested_backend, "webui-forecast");
     let horizon = req.horizon.unwrap_or(10);
     let simulations = req.simulations.unwrap_or(500);
+    let backend_label = format!("{:?}", backend).to_lowercase();
 
     {
         let mut fs = state.forecast.lock().await;
@@ -246,7 +275,7 @@ async fn forecast(
             symbol: symbol.clone(),
             horizon,
             simulations,
-            use_cuda,
+            compute_backend: backend_label.clone(),
         });
         fs.last_error = None;
     }
@@ -263,12 +292,12 @@ async fn forecast(
         })
         .collect::<Vec<_>>();
 
-    let forecast = inference::run_inference(
+    let forecast = inference::run_inference_with_backend(
         Arc::new(data),
         horizon,
         simulations,
         None,
-        use_cuda,
+        backend,
     )
     .await
     .map_err(internal_err)?;
@@ -321,8 +350,13 @@ async fn portfolio_opt(
         ));
     }
 
-    let use_cuda = req.use_cuda.unwrap_or(state.use_cuda_default);
-    let alloc = portfolio::run_portfolio_optimization(&symbols, use_cuda)
+    let requested_backend = match req.use_cuda {
+        Some(true) => config::ComputeBackend::Cuda,
+        Some(false) => config::ComputeBackend::Cpu,
+        None => req.compute_backend.map(Into::into).unwrap_or(state.backend_default),
+    };
+    let backend = config::resolve_compute_backend(requested_backend, "webui-portfolio");
+    let alloc = portfolio::run_portfolio_optimization_with_backend(&symbols, backend)
         .await
         .map_err(internal_err)?;
 
@@ -397,7 +431,20 @@ async fn start_train(
     }
 
     let train_state = state.train.clone();
-    let use_cuda = req.use_cuda.unwrap_or(state.use_cuda_default);
+    let requested_backend = match req.use_cuda {
+        Some(true) => config::ComputeBackend::Cuda,
+        Some(false) => config::ComputeBackend::Cpu,
+        None => req.compute_backend.map(Into::into).unwrap_or(state.backend_default),
+    };
+    let backend = config::resolve_compute_backend(requested_backend, "webui-train");
+    let use_cuda = if matches!(backend, config::ComputeBackend::Cuda) {
+        true
+    } else {
+        if matches!(backend, config::ComputeBackend::Directml) {
+            warn!("WebUI train requested directml; training path still uses candle and falls back to CPU.");
+        }
+        false
+    };
     tokio::spawn(async move {
         let result = train::train_model(
             req.epochs,

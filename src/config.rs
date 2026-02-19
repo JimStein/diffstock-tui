@@ -5,6 +5,14 @@ use tracing::{info, warn};
 
 static RAYON_INIT: OnceLock<()> = OnceLock::new();
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ComputeBackend {
+    Auto,
+    Cuda,
+    Directml,
+    Cpu,
+}
+
 pub fn init_cpu_parallelism() {
     RAYON_INIT.get_or_init(|| {
         let num_threads = num_cpus::get().max(1);
@@ -19,6 +27,57 @@ pub fn init_cpu_parallelism() {
             ),
         }
     });
+}
+
+pub fn resolve_compute_backend(requested: ComputeBackend, context: &str) -> ComputeBackend {
+    match requested {
+        ComputeBackend::Auto => {
+            if cfg!(feature = "cuda") {
+                info!("Compute backend=auto for {} -> selected cuda", context);
+                ComputeBackend::Cuda
+            } else {
+                info!("Compute backend=auto for {} -> selected cpu", context);
+                ComputeBackend::Cpu
+            }
+        }
+        ComputeBackend::Cuda => {
+            if cfg!(feature = "cuda") {
+                info!("Compute backend=cuda for {}", context);
+                ComputeBackend::Cuda
+            } else {
+                warn!(
+                    "Compute backend=cuda requested for {}, but binary lacks CUDA feature. Falling back to cpu.",
+                    context
+                );
+                ComputeBackend::Cpu
+            }
+        }
+        ComputeBackend::Directml => {
+            info!("Compute backend=directml requested for {}", context);
+            ComputeBackend::Directml
+        }
+        ComputeBackend::Cpu => {
+            info!("Compute backend=cpu for {}", context);
+            ComputeBackend::Cpu
+        }
+    }
+}
+
+pub fn find_directml_onnx_model_path() -> Option<std::path::PathBuf> {
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+
+    if let Ok(path) = std::env::var("DIFFSTOCK_ORT_MODEL") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            candidates.push(std::path::PathBuf::from(trimmed));
+        }
+    }
+
+    candidates.push(std::path::PathBuf::from("model_weights.onnx"));
+    candidates.push(std::path::PathBuf::from("model.onnx"));
+    candidates.push(std::path::PathBuf::from("onnx/model.onnx"));
+
+    candidates.into_iter().find(|p| p.exists() && p.is_file())
 }
 
 pub fn get_device(use_cuda: bool) -> Device {

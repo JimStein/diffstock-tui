@@ -1,5 +1,6 @@
-use crate::config::{get_device, DATA_RANGE, DDIM_ETA, DDIM_INFERENCE_STEPS, DIFF_STEPS, DROPOUT_RATE, FORECAST, HIDDEN_DIM, INFERENCE_BATCH_SIZE, INPUT_DIM, LOOKBACK, LSTM_LAYERS, NUM_LAYERS, TRAINING_SYMBOLS};
+use crate::config::{get_device, ComputeBackend, DATA_RANGE, DDIM_ETA, DDIM_INFERENCE_STEPS, DIFF_STEPS, DROPOUT_RATE, FORECAST, HIDDEN_DIM, INFERENCE_BATCH_SIZE, INPUT_DIM, LOOKBACK, LSTM_LAYERS, NUM_LAYERS, TRAINING_SYMBOLS};
 use crate::diffusion::GaussianDiffusion;
+use crate::inference::{self, ForecastData};
 use crate::models::time_grad::{EpsilonTheta, RNNEncoder};
 use anyhow::Result;
 use candle_core::{DType, Tensor};
@@ -7,6 +8,7 @@ use candle_nn::VarBuilder;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
+use std::sync::Arc;
 use tracing::{info, warn, error};
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -264,6 +266,127 @@ pub async fn generate_multi_asset_forecasts(
     }
 
     Ok(forecasts)
+}
+
+async fn generate_multi_asset_forecasts_via_inference(
+    symbols: &[String],
+    horizon: usize,
+    num_simulations: usize,
+    backend: ComputeBackend,
+) -> Result<Vec<AssetForecast>> {
+    let mut forecasts = Vec::with_capacity(symbols.len());
+
+    for symbol in symbols {
+        info!("Forecasting {} via backend-dispatch path...", symbol);
+
+        let data = match crate::data::fetch_range(symbol, DATA_RANGE).await {
+            Ok(d) => d,
+            Err(e) => {
+                error!("Failed to fetch {}: {}. Skipping.", symbol, e);
+                continue;
+            }
+        };
+
+        if data.history.len() < LOOKBACK + 1 {
+            warn!("{}: insufficient history ({} days). Skipping.", symbol, data.history.len());
+            continue;
+        }
+
+        let current_price = data.history.last().map(|c| c.close).unwrap_or_default();
+        let forecast = inference::run_inference_with_backend(
+            Arc::new(data),
+            horizon,
+            num_simulations,
+            None,
+            backend,
+        )
+        .await?;
+
+        let asset_forecast = build_asset_forecast_from_inference(
+            symbol.clone(),
+            current_price,
+            horizon,
+            forecast,
+        )?;
+        forecasts.push(asset_forecast);
+    }
+
+    Ok(forecasts)
+}
+
+fn build_asset_forecast_from_inference(
+    symbol: String,
+    current_price: f64,
+    horizon: usize,
+    forecast: ForecastData,
+) -> Result<AssetForecast> {
+    let period_returns: Vec<f64> = forecast
+        ._paths
+        .iter()
+        .filter_map(|path| path.last().copied())
+        .map(|final_price| (final_price / current_price.max(1e-8)).ln())
+        .collect();
+
+    if period_returns.len() < 2 {
+        return Err(anyhow::anyhow!(
+            "insufficient inference paths for portfolio stats on {}",
+            symbol
+        ));
+    }
+
+    let n = period_returns.len() as f64;
+    let mean_ret = period_returns.iter().sum::<f64>() / n;
+    let var_ret = period_returns
+        .iter()
+        .map(|r| (r - mean_ret).powi(2))
+        .sum::<f64>()
+        / (n - 1.0);
+    let std_ret = var_ret.sqrt();
+
+    let periods_per_year = TRADING_DAYS / horizon as f64;
+    let annual_return = mean_ret * periods_per_year;
+    let annual_vol = std_ret * periods_per_year.sqrt();
+    let sharpe = if annual_vol > 1e-8 {
+        (annual_return - RISK_FREE_RATE) / annual_vol
+    } else {
+        0.0
+    };
+
+    let mut sorted_rets = period_returns.clone();
+    sorted_rets.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let idx_10 = (n * 0.1) as usize;
+    let idx_50 = (n * 0.5) as usize;
+    let idx_90 = (n * 0.9) as usize;
+
+    let p10_price = forecast
+        .p10
+        .last()
+        .map(|(_, p)| *p)
+        .unwrap_or_else(|| current_price * sorted_rets[idx_10].exp());
+    let p50_price = forecast
+        .p50
+        .last()
+        .map(|(_, p)| *p)
+        .unwrap_or_else(|| current_price * sorted_rets[idx_50].exp());
+    let p90_price = forecast
+        .p90
+        .last()
+        .map(|(_, p)| *p)
+        .unwrap_or_else(|| current_price * sorted_rets[idx_90].exp());
+
+    Ok(AssetForecast {
+        symbol,
+        current_price,
+        expected_return: mean_ret / horizon as f64,
+        volatility: std_ret / (horizon as f64).sqrt(),
+        annual_return,
+        annual_vol,
+        sharpe,
+        mc_period_returns: period_returns,
+        p10_price,
+        p50_price,
+        p90_price,
+    })
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -542,19 +665,67 @@ pub async fn run_portfolio_optimization(
     symbols: &[String],
     use_cuda: bool,
 ) -> Result<PortfolioAllocation> {
-    info!(
-        "=== DiffStock Portfolio Optimizer ===\n  Assets: {:?}\n  Horizon: {} days\n  MC Paths: {}\n  Target Vol: {:.0}%",
-        symbols, PORTFOLIO_HORIZON, PORTFOLIO_MC_PATHS, TARGET_ANNUAL_VOL * 100.0
-    );
+    let backend = if use_cuda {
+        ComputeBackend::Cuda
+    } else {
+        ComputeBackend::Cpu
+    };
+    run_portfolio_optimization_with_backend(symbols, backend).await
+}
 
-    // Step 1: Generate forecasts
-    let forecasts = generate_multi_asset_forecasts(
+pub async fn run_portfolio_optimization_with_backend(
+    symbols: &[String],
+    backend: ComputeBackend,
+) -> Result<PortfolioAllocation> {
+    info!(
+        "=== DiffStock Portfolio Optimizer ===\n  Assets: {:?}\n  Horizon: {} days\n  MC Paths: {}\n  Backend: {:?}\n  Target Vol: {:.0}%",
         symbols,
         PORTFOLIO_HORIZON,
         PORTFOLIO_MC_PATHS,
-        use_cuda,
-    )
-    .await?;
+        backend,
+        TARGET_ANNUAL_VOL * 100.0
+    );
+
+    // Step 1: Generate forecasts
+    let forecasts = match backend {
+        ComputeBackend::Directml => {
+            generate_multi_asset_forecasts_via_inference(
+                symbols,
+                PORTFOLIO_HORIZON,
+                PORTFOLIO_MC_PATHS,
+                backend,
+            )
+            .await?
+        }
+        ComputeBackend::Auto => {
+            let use_cuda = cfg!(feature = "cuda");
+            generate_multi_asset_forecasts(
+                symbols,
+                PORTFOLIO_HORIZON,
+                PORTFOLIO_MC_PATHS,
+                use_cuda,
+            )
+            .await?
+        }
+        ComputeBackend::Cuda => {
+            generate_multi_asset_forecasts(
+                symbols,
+                PORTFOLIO_HORIZON,
+                PORTFOLIO_MC_PATHS,
+                true,
+            )
+            .await?
+        }
+        ComputeBackend::Cpu => {
+            generate_multi_asset_forecasts(
+                symbols,
+                PORTFOLIO_HORIZON,
+                PORTFOLIO_MC_PATHS,
+                false,
+            )
+            .await?
+        }
+    };
 
     if forecasts.len() < 2 {
         return Err(anyhow::anyhow!(

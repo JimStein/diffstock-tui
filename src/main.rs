@@ -4,6 +4,8 @@ mod data;
 mod diffusion;
 mod inference;
 mod models;
+mod model_artifacts;
+mod ort_directml;
 mod portfolio;
 mod paper_trading;
 mod train;
@@ -15,7 +17,7 @@ mod webui;
 use app::App;
 use clap::{Parser, ValueEnum};
 use std::io;
-use tracing::{info, error};
+use tracing::{info, error, warn};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Clone, Debug, ValueEnum)]
@@ -23,6 +25,14 @@ enum GuiRendererChoice {
     Auto,
     Wgpu,
     Glow,
+}
+
+#[derive(Clone, Debug, ValueEnum)]
+enum ComputeBackendChoice {
+    Auto,
+    Cuda,
+    Directml,
+    Cpu,
 }
 
 #[derive(Parser, Debug)]
@@ -104,9 +114,13 @@ struct Args {
     #[arg(long)]
     portfolio: Option<String>,
 
-    /// Use CUDA GPU acceleration (requires --features cuda at compile time)
+    /// Legacy shortcut for --compute-backend cuda
     #[arg(long)]
     cuda: bool,
+
+    /// Compute backend: auto|cuda|directml|cpu (directml currently falls back to CPU)
+    #[arg(long, value_enum, default_value_t = ComputeBackendChoice::Auto)]
+    compute_backend: ComputeBackendChoice,
 }
 
 #[tokio::main]
@@ -121,15 +135,34 @@ async fn main() -> io::Result<()> {
         .init();
     let args = Args::parse();
 
-    if args.cuda && !cfg!(feature = "cuda") {
-        error!(
-            "--cuda was requested, but this binary was compiled without CUDA support. Re-run with: cargo run --release --features cuda -- --train --cuda"
-        );
-        return Ok(());
-    }
+    let requested_backend = if args.cuda {
+        config::ComputeBackend::Cuda
+    } else {
+        match args.compute_backend {
+            ComputeBackendChoice::Auto => config::ComputeBackend::Auto,
+            ComputeBackendChoice::Cuda => config::ComputeBackend::Cuda,
+            ComputeBackendChoice::Directml => config::ComputeBackend::Directml,
+            ComputeBackendChoice::Cpu => config::ComputeBackend::Cpu,
+        }
+    };
+
+    let select_cuda_for = |context: &str| {
+        match config::resolve_compute_backend(requested_backend, context) {
+            config::ComputeBackend::Cuda => true,
+            config::ComputeBackend::Directml => {
+                warn!(
+                    "DirectML backend is currently only wired for WebUI inference path. Falling back to CPU for {}.",
+                    context
+                );
+                false
+            }
+            _ => false,
+        }
+    };
 
     if args.train {
-        match train::train_model(args.epochs, args.batch_size, args.learning_rate, args.patience, args.cuda).await {
+        let use_cuda = select_cuda_for("training");
+        match train::train_model(args.epochs, args.batch_size, args.learning_rate, args.patience, use_cuda).await {
             Ok(_) => info!("Training completed successfully."),
             Err(e) => error!("Training failed: {}", e),
         }
@@ -146,7 +179,8 @@ async fn main() -> io::Result<()> {
             error!("Portfolio optimization requires at least 2 symbols. Example: --portfolio NVDA,MSFT,AAPL,QQQ");
             return Ok(());
         }
-        match portfolio::run_portfolio_optimization(&symbols, args.cuda).await {
+        let backend = config::resolve_compute_backend(requested_backend, "portfolio");
+        match portfolio::run_portfolio_optimization_with_backend(&symbols, backend).await {
             Ok(_alloc) => info!("Portfolio optimization completed."),
             Err(e) => error!("Portfolio optimization failed: {}", e),
         }
@@ -154,6 +188,7 @@ async fn main() -> io::Result<()> {
     }
 
     if args.backtest {
+        let use_cuda = select_cuda_for("backtest");
         info!("Fetching SPY data for backtesting...");
         match data::fetch_range("SPY", "5y").await {
             Ok(data) => {
@@ -161,14 +196,14 @@ async fn main() -> io::Result<()> {
                 let result = if args.backtest_windows <= 1 {
                     inference::run_backtest_with_params(
                         data,
-                        args.cuda,
+                        use_cuda,
                         args.backtest_hidden_days,
                     )
                     .await
                 } else {
                     inference::run_backtest_rolling(
                         data,
-                        args.cuda,
+                        use_cuda,
                         args.backtest_windows,
                         args.backtest_step_days,
                         args.backtest_hidden_days,
@@ -206,16 +241,18 @@ async fn main() -> io::Result<()> {
             args.gui_renderer,
             args.gui_safe_mode
         );
+        let use_cuda = select_cuda_for("gui-forecast");
         eframe::run_native(
             "DiffStock",
             options,
-            Box::new(|_cc| Ok(Box::new(gui::GuiApp::new(App::new(args.cuda))))),
+            Box::new(move |_cc| Ok(Box::new(gui::GuiApp::new(App::new(use_cuda))))),
         ).map_err(|e| io::Error::other(e.to_string()))?;
         return Ok(());
     }
 
     if args.webui {
-        match webui::run_webui_server(args.webui_port, args.cuda).await {
+        let backend_default = config::resolve_compute_backend(requested_backend, "webui-default");
+        match webui::run_webui_server(args.webui_port, backend_default).await {
             Ok(_) => info!("WebUI exited."),
             Err(e) => error!("WebUI failed: {}", e),
         }
@@ -223,7 +260,8 @@ async fn main() -> io::Result<()> {
     }
 
     let mut terminal = tui::init()?;
-    let mut app = App::new(args.cuda);
+    let use_cuda = select_cuda_for("tui-forecast");
+    let mut app = App::new(use_cuda);
     let res = app.run(&mut terminal).await;
     
     tui::restore()?;
