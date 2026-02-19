@@ -1,0 +1,131 @@
+{
+  "created_at": "2026-02-18T21:22:41.982176500+08:00",
+  "initial_capital_usd": 80000.0,
+  "trading_fee_rate": 0.0005,
+  "analysis_times_local": [
+    "02:30",
+    "23:30"
+  ],
+  "benchmark_symbol": "QQQ",
+  "targets": [
+    {
+      "symbol": "ETN",
+      "target_weight": 0.3209982008401943
+    },
+    {
+      "symbol": "IAU",
+      "target_weight": 0.2100294792889114
+    },
+    {
+      "symbol": "COPX",
+      "target_weight": 0.35376709754907554
+    }
+  ],
+  "analyses": [
+    {
+      "timestamp": "2026-02-18T21:22:41.982702800+08:00",
+      "portfolio_value_before": 80000.0,
+      "portfolio_value_after": 79964.8050855484,
+      "cash_after": 9574.976182350165,
+      "trades": [
+        {
+          "timestamp": "2026-02-18T21:22:41.982702800+08:00",
+          "symbol": "ETN",
+          "side": "BUY",
+          "quantity": 65.0,
+          "price": 391.489990234375,
+          "notional": 25446.849365234375,
+          "fee": 12.723424682617187
+        },
+        {
+          "timestamp": "2026-02-18T21:22:41.982702800+08:00",
+          "symbol": "IAU",
+          "side": "BUY",
+          "quantity": 182.0,
+          "price": 91.81999969482422,
+          "notional": 16711.239944458008,
+          "fee": 8.355619972229004
+        },
+        {
+          "timestamp": "2026-02-18T21:22:41.982702800+08:00",
+          "symbol": "COPX",
+          "side": "BUY",
+          "quantity": 333.0,
+          "price": 84.77999877929688,
+          "notional": 28231.73959350586,
+          "fee": 14.11586979675293
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-02-18T23:30:45.941289800+08:00",
+      "portfolio_value_before": 81293.54553354645,
+      "portfolio_value_after": 81293.12765348816,
+      "cash_after": 9625.798399337775,
+      "trades": [
+        {
+          "timestamp": "2026-02-18T23:30:45.941289800+08:00",
+          "symbol": "ETN",
+          "side": "BUY",
+          "quantity": 1.0,
+          "price": 392.260009765625,
+          "notional": 392.260009765625,
+          "fee": 0.19613000488281251
+        },
+        {
+          "timestamp": "2026-02-18T23:30:45.941289800+08:00",
+          "symbol": "IAU",
+          "side": "SELL",
+          "quantity": 1.0,
+          "price": 94.18009948730467,
+          "notional": 94.18009948730467,
+          "fee": 0.047090049743652336
+        },
+        {
+          "timestamp": "2026-02-18T23:30:45.941289800+08:00",
+          "symbol": "COPX",
+          "side": "SELL",
+          "quantity": 4.0,
+          "price": 87.33000183105469,
+          "notional": 349.32000732421875,
+          "fee": 0.17466000366210938
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-02-19T02:30:46.485637800+08:00",
+      "portfolio_value_before": 80664.98917997742,
+      "portfolio_value_after": 80664.66268497086,
+      "cash_after": 9508.371890598304,
+      "trades": [
+        {
+          "timestamp": "2026-02-19T02:30:46.485637800+08:00",
+          "symbol": "ETN",
+          "side": "BUY",
+          "quantity": 1.0,
+          "price": 385.0450134277344,
+          "notional": 385.0450134277344,
+          "fee": 0.1925225067138672
+        },
+        {
+          "timestamp": "2026-02-19T02:30:46.485637800+08:00",
+          "symbol": "IAU",
+          "side": "SELL",
+          "quantity": 1.0,
+          "price": 93.8949966430664,
+          "notional": 93.8949966430664,
+          "fee": 0.04694749832153321
+        },
+        {
+          "timestamp": "2026-02-19T02:30:46.485637800+08:00",
+          "symbol": "COPX",
+          "side": "SELL",
+          "quantity": 2.0,
+          "price": 87.0250015258789,
+          "notional": 174.0500030517578,
+          "fee": 0.08702500152587891
+        }
+      ]
+    }
+  ]
+}
