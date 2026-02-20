@@ -1,4 +1,4 @@
-use crate::data;
+use crate::{config, data};
 use anyhow::{anyhow, Result};
 use chrono::{Local, NaiveDate, NaiveTime};
 use serde::{Deserialize, Serialize};
@@ -123,6 +123,8 @@ pub struct MinuteHoldingSnapshot {
     pub quantity: f64,
     pub price: f64,
     pub asset_value: f64,
+    #[serde(default)]
+    pub avg_cost: f64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -165,6 +167,7 @@ struct PaperRuntime {
     initial_capital_usd: f64,
     cash_usd: f64,
     holdings_shares: HashMap<String, f64>,
+    holdings_avg_cost: HashMap<String, f64>,
     previous_prices: HashMap<String, f64>,
     benchmark_initial_price: f64,
     strategy_log: StrategyLog,
@@ -192,14 +195,17 @@ pub async fn run_paper_trading(
         .ok_or(anyhow!("Benchmark symbol {} price missing", BENCHMARK_SYMBOL))?;
 
     let mut holdings_shares = HashMap::new();
+    let mut holdings_avg_cost = HashMap::new();
     for target in &target_weights {
         holdings_shares.insert(target.symbol.clone(), 0.0);
+        holdings_avg_cost.insert(target.symbol.clone(), 0.0);
     }
 
     let mut runtime = PaperRuntime {
         initial_capital_usd: config.initial_capital_usd,
         cash_usd: config.initial_capital_usd,
         holdings_shares,
+        holdings_avg_cost,
         previous_prices: current_prices.clone(),
         benchmark_initial_price,
         strategy_log: StrategyLog {
@@ -316,7 +322,7 @@ pub async fn run_paper_trading_from_strategy_file(
     event_tx: Sender<PaperEvent>,
     mut command_rx: Receiver<PaperCommand>,
 ) -> Result<()> {
-    let strategy_path = PathBuf::from(strategy_file);
+    let strategy_path = resolve_strategy_path(strategy_file);
     if !strategy_path.exists() {
         return Err(anyhow!("Strategy file not found: {}", strategy_file));
     }
@@ -350,20 +356,32 @@ pub async fn run_paper_trading_from_strategy_file(
         .unwrap_or_else(|| *current_prices.get(BENCHMARK_SYMBOL).unwrap_or(&1.0));
 
     let mut holdings_shares = HashMap::new();
+    let mut holdings_avg_cost = HashMap::new();
     for target in &strategy_log.targets {
         holdings_shares.insert(target.symbol.clone(), 0.0);
+        holdings_avg_cost.insert(target.symbol.clone(), 0.0);
     }
 
     let mut cash_usd = strategy_log.initial_capital_usd;
     for analysis in &strategy_log.analyses {
         for trade in &analysis.trades {
             let entry = holdings_shares.entry(trade.symbol.clone()).or_insert(0.0);
+            let avg_entry = holdings_avg_cost.entry(trade.symbol.clone()).or_insert(0.0);
             match trade.side.as_str() {
                 "BUY" => {
+                    let prev_qty = *entry;
+                    let new_qty = prev_qty + trade.quantity;
+                    if new_qty > 1e-9 {
+                        *avg_entry = ((*avg_entry * prev_qty) + (trade.price * trade.quantity)) / new_qty;
+                    }
                     *entry += trade.quantity;
                 }
                 "SELL" => {
                     *entry -= trade.quantity;
+                    if *entry <= 1e-9 {
+                        *entry = 0.0;
+                        *avg_entry = 0.0;
+                    }
                 }
                 _ => {}
             }
@@ -380,12 +398,24 @@ pub async fn run_paper_trading_from_strategy_file(
         initial_capital_usd: cfg.initial_capital_usd,
         cash_usd,
         holdings_shares,
+        holdings_avg_cost,
         previous_prices: current_prices.clone(),
         benchmark_initial_price,
         strategy_log,
         strategy_path: strategy_path.clone(),
         runtime_path: PathBuf::from(runtime_path),
     };
+
+    let historical_snapshots = load_runtime_snapshots(&runtime.runtime_path)?;
+    if let Some(last_runtime_snapshot) = historical_snapshots.last() {
+        let mut prev_prices = HashMap::new();
+        for symbol in &last_runtime_snapshot.symbols {
+            prev_prices.insert(symbol.symbol.clone(), symbol.price);
+        }
+        if !prev_prices.is_empty() {
+            runtime.previous_prices = prev_prices;
+        }
+    }
 
     let _ = event_tx
         .send(PaperEvent::Started {
@@ -400,8 +430,17 @@ pub async fn run_paper_trading_from_strategy_file(
         )))
         .await;
 
-    let immediate_analysis = run_analysis_once(&mut runtime, &current_prices)?;
-    let _ = event_tx.send(PaperEvent::Analysis(immediate_analysis)).await;
+    for snapshot in historical_snapshots {
+        let _ = event_tx.send(PaperEvent::Minute(snapshot)).await;
+    }
+
+    if let Some(last_analysis) = runtime.strategy_log.analyses.last().cloned() {
+        let _ = event_tx.send(PaperEvent::Analysis(last_analysis)).await;
+    }
+
+    let immediate_snapshot = build_minute_snapshot(&mut runtime, &current_prices)?;
+    append_jsonl(&runtime.runtime_path, &immediate_snapshot)?;
+    let _ = event_tx.send(PaperEvent::Minute(immediate_snapshot)).await;
 
     let now_local = Local::now();
     let today = now_local.date_naive();
@@ -510,11 +549,22 @@ fn run_analysis_once(runtime: &mut PaperRuntime, current_prices: &HashMap<String
                 let notional = execute_qty * price;
                 let fee = notional * TRADING_FEE_RATE;
                 runtime.cash_usd -= notional + fee;
+                let prev_qty = *runtime.holdings_shares.get(&target.symbol).unwrap_or(&0.0);
+                let prev_avg = *runtime.holdings_avg_cost.get(&target.symbol).unwrap_or(&0.0);
+                let new_qty = prev_qty + execute_qty;
+                let new_avg = if new_qty > 1e-9 {
+                    ((prev_avg * prev_qty) + (price * execute_qty)) / new_qty
+                } else {
+                    0.0
+                };
                 runtime
                     .holdings_shares
                     .entry(target.symbol.clone())
                     .and_modify(|quantity| *quantity += execute_qty)
                     .or_insert(execute_qty);
+                runtime
+                    .holdings_avg_cost
+                    .insert(target.symbol.clone(), new_avg);
 
                 trades.push(TradeRecord {
                     timestamp: now.clone(),
@@ -535,11 +585,20 @@ fn run_analysis_once(runtime: &mut PaperRuntime, current_prices: &HashMap<String
                 let notional = execute_qty * price;
                 let fee = notional * TRADING_FEE_RATE;
                 runtime.cash_usd += notional - fee;
+                let mut next_qty = current_shares - execute_qty;
+                if next_qty <= 1e-9 {
+                    next_qty = 0.0;
+                }
                 runtime
                     .holdings_shares
                     .entry(target.symbol.clone())
-                    .and_modify(|quantity| *quantity -= execute_qty)
-                    .or_insert(0.0);
+                    .and_modify(|quantity| *quantity = next_qty)
+                    .or_insert(next_qty);
+                if next_qty <= 1e-9 {
+                    runtime
+                        .holdings_avg_cost
+                        .insert(target.symbol.clone(), 0.0);
+                }
 
                 trades.push(TradeRecord {
                     timestamp: now.clone(),
@@ -616,11 +675,13 @@ fn build_minute_snapshot(
 
         let quantity = *runtime.holdings_shares.get(symbol).unwrap_or(&0.0);
         if quantity.abs() > 1e-9 {
+            let avg_cost = *runtime.holdings_avg_cost.get(symbol).unwrap_or(&0.0);
             holdings.push(MinuteHoldingSnapshot {
                 symbol: symbol.clone(),
                 quantity,
                 price,
                 asset_value: quantity * price,
+                avg_cost,
             });
         }
     }
@@ -717,6 +778,19 @@ fn create_output_paths() -> Result<(PathBuf, PathBuf)> {
     Ok((strategy_path, runtime_path))
 }
 
+fn resolve_strategy_path(strategy_file: &str) -> PathBuf {
+    let input = PathBuf::from(strategy_file);
+    if input.is_absolute() {
+        return input;
+    }
+
+    if input.exists() {
+        return input;
+    }
+
+    config::project_root_path().join(input)
+}
+
 fn write_strategy_json(path: &Path, strategy: &StrategyLog) -> Result<()> {
     let json = serde_json::to_string_pretty(strategy)?;
     std::fs::write(path, json)?;
@@ -728,4 +802,23 @@ fn append_jsonl<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     let mut file = OpenOptions::new().create(true).append(true).open(path)?;
     writeln!(file, "{}", line)?;
     Ok(())
+}
+
+fn load_runtime_snapshots(path: &Path) -> Result<Vec<MinutePortfolioSnapshot>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let content = std::fs::read_to_string(path)?;
+    let mut snapshots = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Ok(snapshot) = serde_json::from_str::<MinutePortfolioSnapshot>(trimmed) {
+            snapshots.push(snapshot);
+        }
+    }
+    Ok(snapshots)
 }

@@ -110,6 +110,7 @@ struct PaperRuntimeState {
     latest_snapshot: Option<paper_trading::MinutePortfolioSnapshot>,
     snapshots: Vec<paper_trading::MinutePortfolioSnapshot>,
     last_analysis: Option<paper_trading::AnalysisRecord>,
+    trade_history: Vec<paper_trading::TradeRecord>,
     logs: Vec<String>,
     #[serde(skip_serializing)]
     cmd_tx: Option<mpsc::Sender<paper_trading::PaperCommand>>,
@@ -126,6 +127,7 @@ impl Default for PaperRuntimeState {
             latest_snapshot: None,
             snapshots: Vec::new(),
             last_analysis: None,
+            trade_history: Vec::new(),
             logs: Vec::new(),
             cmd_tx: None,
         }
@@ -512,6 +514,7 @@ async fn start_paper(
         paper_state.latest_snapshot = None;
         paper_state.snapshots.clear();
         paper_state.last_analysis = None;
+        paper_state.trade_history.clear();
         paper_state.logs.clear();
         paper_state.cmd_tx = Some(cmd_tx.clone());
     }
@@ -536,6 +539,11 @@ async fn start_paper(
                     ps.logs.push(format!("Warning: {}", msg));
                 }
                 paper_trading::PaperEvent::Analysis(a) => {
+                    ps.trade_history.extend(a.trades.clone());
+                    if ps.trade_history.len() > 6000 {
+                        let keep_from = ps.trade_history.len().saturating_sub(6000);
+                        ps.trade_history = ps.trade_history.split_off(keep_from);
+                    }
                     ps.last_analysis = Some(a);
                 }
                 paper_trading::PaperEvent::Minute(m) => {
@@ -587,6 +595,7 @@ async fn load_paper(
 
     let (event_tx, mut event_rx) = mpsc::channel(1024);
     let (cmd_tx, cmd_rx) = mpsc::channel(64);
+    let historical_trades = collect_trade_history_from_strategy(&strategy_file);
 
     {
         let mut paper_state = state.paper.lock().await;
@@ -598,6 +607,7 @@ async fn load_paper(
         paper_state.latest_snapshot = None;
         paper_state.snapshots.clear();
         paper_state.last_analysis = None;
+        paper_state.trade_history = historical_trades;
         paper_state.logs.clear();
         paper_state.cmd_tx = Some(cmd_tx.clone());
     }
@@ -613,7 +623,8 @@ async fn load_paper(
                 } => {
                     ps.strategy_file = Some(strategy_file);
                     ps.runtime_file = Some(runtime_file);
-                    ps.logs.push("Paper trading loaded".to_string());
+                    ps.logs
+                        .push("Paper history loaded · Restored holdings and running".to_string());
                 }
                 paper_trading::PaperEvent::Info(msg) => {
                     ps.logs.push(msg);
@@ -622,6 +633,11 @@ async fn load_paper(
                     ps.logs.push(format!("Warning: {}", msg));
                 }
                 paper_trading::PaperEvent::Analysis(a) => {
+                    ps.trade_history.extend(a.trades.clone());
+                    if ps.trade_history.len() > 6000 {
+                        let keep_from = ps.trade_history.len().saturating_sub(6000);
+                        ps.trade_history = ps.trade_history.split_off(keep_from);
+                    }
                     ps.last_analysis = Some(a);
                 }
                 paper_trading::PaperEvent::Minute(m) => {
@@ -717,6 +733,30 @@ async fn paper_stop(
             .map_err(internal_err)?;
     }
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+fn collect_trade_history_from_strategy(strategy_file: &str) -> Vec<paper_trading::TradeRecord> {
+    let input = std::path::PathBuf::from(strategy_file);
+    let resolved = if input.is_absolute() {
+        input
+    } else if input.exists() {
+        input
+    } else {
+        config::project_root_path().join(input)
+    };
+
+    let Ok(raw) = std::fs::read_to_string(resolved) else {
+        return Vec::new();
+    };
+    let Ok(strategy_log) = serde_json::from_str::<paper_trading::StrategyLog>(&raw) else {
+        return Vec::new();
+    };
+
+    let mut trades = Vec::new();
+    for analysis in strategy_log.analyses {
+        trades.extend(analysis.trades);
+    }
+    trades
 }
 
 fn api_err(status: StatusCode, message: &str) -> (StatusCode, Json<ApiError>) {

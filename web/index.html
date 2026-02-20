@@ -383,7 +383,78 @@
     }
     .up { color: var(--up); }
     .down { color: var(--down); }
+    .flat { color: var(--muted); }
     .hidden { display: none; }
+
+    .price-indicator {
+      margin-left: 6px;
+      font-size: 10px;
+      vertical-align: 1px;
+      opacity: .9;
+    }
+
+    .trade-history {
+      max-height: 220px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+    .trade-item {
+      display: grid;
+      grid-template-columns: 136px 90px 1fr auto;
+      gap: 10px;
+      align-items: center;
+      font-size: 12px;
+      border-bottom: 1px solid var(--border);
+      padding: 8px 2px;
+    }
+    .trade-item:last-child { border-bottom: none; }
+    .trade-time {
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+    .trade-side {
+      display: inline-block;
+      min-width: 48px;
+      text-align: center;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 10px;
+      letter-spacing: .4px;
+      font-weight: 700;
+    }
+    .trade-side.buy {
+      color: var(--up);
+      background: var(--up-bg);
+      border: 1px solid rgba(0,212,170,.25);
+    }
+    .trade-side.sell {
+      color: var(--down);
+      background: var(--down-bg);
+      border: 1px solid rgba(255,71,87,.25);
+    }
+    .trade-main {
+      color: var(--text-2);
+      display: flex;
+      gap: 8px;
+      align-items: baseline;
+      flex-wrap: wrap;
+    }
+    .trade-symbol {
+      color: var(--text);
+      font-weight: 600;
+      letter-spacing: .2px;
+    }
+    .trade-meta {
+      color: var(--muted);
+      font-size: 11px;
+      font-family: var(--mono);
+    }
+    .trade-pnl {
+      font-family: var(--mono);
+      font-size: 11px;
+      text-align: right;
+    }
 
     /* ─── Charts ─── */
     #forecastChart, #paperChart { height: 380px; border-radius: var(--radius); overflow: hidden; }
@@ -705,6 +776,7 @@
                 <button class="warn" id="paperPause">&#9208; Pause</button>
                 <button class="success" id="paperResume">&#9654; Resume</button>
                 <button class="danger" id="paperStop">&#9209; Stop</button>
+                <input id="paperFilePicker" type="file" accept=".json,application/json" class="hidden" />
               </div>
             </div>
           </div>
@@ -741,13 +813,21 @@
                 <th>Status</th>
                 <th class="num">Quantity</th>
                 <th class="num">Current Price</th>
+                <th class="num" title="Average holding cost reconstructed from full historical BUY/SELL trades.">Avg Cost</th>
                 <th class="num">Asset Value</th>
                 <th class="num">Target Weight</th>
-                <th class="num">1m &#916;%</th>
+                <th class="num">Floating PnL</th>
               </tr>
             </thead>
             <tbody></tbody>
           </table>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title"><span class="panel-title-icon">&#128221;</span> Trade History</div>
+            <div class="panel-subtitle">Latest first · Scrollable</div>
+          </div>
+          <div id="tradeHistory" class="trade-history"></div>
         </div>
         <div class="grid-2">
           <div class="panel">
@@ -799,6 +879,6 @@
   </div>
 
   <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
-  <script src="/app.js?v=20260219l"></script>
+  <script src="/app.js?v=20260220c"></script>
 </body>
 </html>

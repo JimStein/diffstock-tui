@@ -18,6 +18,8 @@ let lastQuotesStampText = '--';
 const actionStatus = document.getElementById('actionStatus');
 const quotesAsOf = document.getElementById('quotesAsOf');
 const paperStartBtn = document.getElementById('paperStart');
+const paperLoadBtn = document.getElementById('paperLoad');
+const paperFilePicker = document.getElementById('paperFilePicker');
 const paperPauseBtn = document.getElementById('paperPause');
 const paperResumeBtn = document.getElementById('paperResume');
 const paperStopBtn = document.getElementById('paperStop');
@@ -36,6 +38,9 @@ let legendForecastP10 = document.getElementById('legendForecastP10');
 let legendForecastP90 = document.getElementById('legendForecastP90');
 let paperMetricsByTime = new Map();
 let lastForecastContext = null;
+let paperTradeHistory = [];
+let paperTradeSeenKeys = new Set();
+let paperCostBasis = new Map();
 
 const ensureForecastLegendElements = () => {
   const chartHost = document.getElementById('forecastChart');
@@ -364,6 +369,183 @@ const formatPct = (v) => {
   return `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
 };
 
+const formatSignedMoney = (v) => {
+  if (!Number.isFinite(v)) return '--';
+  return `${v >= 0 ? '+' : '-'}$${Math.abs(v).toFixed(2)}`;
+};
+
+const normalizeTradeSide = (side) => {
+  const s = String(side || '').toUpperCase();
+  if (s === 'BUY' || s === 'B') return 'BUY';
+  if (s === 'SELL' || s === 'S') return 'SELL';
+  return s || 'UNKNOWN';
+};
+
+const applyTradeToCostBasis = (trade) => {
+  const symbol = trade.symbol;
+  const side = trade.side;
+  const quantity = Math.max(0, Number(trade.quantity) || 0);
+  const price = Number(trade.price) || 0;
+
+  const current = paperCostBasis.get(symbol) || { quantity: 0, avgCost: 0 };
+  let nextQty = current.quantity;
+  let nextAvg = current.avgCost;
+  let realizedUsd = 0;
+
+  if (side === 'BUY') {
+    nextQty = current.quantity + quantity;
+    nextAvg = nextQty > 0
+      ? ((current.avgCost * current.quantity) + (price * quantity)) / nextQty
+      : 0;
+  } else if (side === 'SELL') {
+    const matchedQty = Math.min(quantity, Math.max(0, current.quantity));
+    if (matchedQty > 0) {
+      realizedUsd = (price - current.avgCost) * matchedQty;
+      nextQty = current.quantity - matchedQty;
+      if (nextQty <= 1e-8) {
+        nextQty = 0;
+        nextAvg = 0;
+      }
+    }
+  }
+
+  paperCostBasis.set(symbol, { quantity: nextQty, avgCost: nextAvg });
+  return realizedUsd;
+};
+
+const ingestPaperTrades = (paperStatus) => {
+  const fullTradeHistory = Array.isArray(paperStatus?.trade_history) ? paperStatus.trade_history : null;
+  if (fullTradeHistory && fullTradeHistory.length > 0) {
+    paperTradeHistory = [];
+    paperTradeSeenKeys = new Set();
+    paperCostBasis = new Map();
+
+    for (const tr of fullTradeHistory) {
+      const symbol = String(tr?.symbol || '').toUpperCase();
+      const side = normalizeTradeSide(tr?.side);
+      const quantity = Number(tr?.quantity);
+      const price = Number(tr?.price);
+      const fee = Number(tr?.fee || 0);
+      const notional = Number(tr?.notional || (quantity * price));
+      const timestamp = tr?.timestamp || new Date().toISOString();
+
+      if (!symbol || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(price) || price <= 0) {
+        continue;
+      }
+
+      const key = [timestamp, symbol, side, quantity.toFixed(8), price.toFixed(8), fee.toFixed(8)].join('|');
+      if (paperTradeSeenKeys.has(key)) continue;
+
+      const realizedUsd = applyTradeToCostBasis({ symbol, side, quantity, price });
+      const parsedTs = Date.parse(timestamp);
+      const timestampMs = Number.isFinite(parsedTs) ? parsedTs : Date.now();
+
+      paperTradeSeenKeys.add(key);
+      paperTradeHistory.push({
+        key,
+        timestamp,
+        timestampMs,
+        symbol,
+        side,
+        quantity,
+        price,
+        notional: Number.isFinite(notional) ? notional : quantity * price,
+        fee: Number.isFinite(fee) ? fee : 0,
+        realizedUsd,
+      });
+    }
+
+    paperTradeHistory.sort((a, b) => b.timestampMs - a.timestampMs);
+    if (paperTradeHistory.length > 300) {
+      paperTradeHistory = paperTradeHistory.slice(0, 300);
+    }
+    return;
+  }
+
+  const analysis = paperStatus?.last_analysis;
+  const trades = Array.isArray(analysis?.trades) ? analysis.trades : [];
+  if (trades.length === 0) return;
+
+  for (const tr of trades) {
+    const symbol = String(tr?.symbol || '').toUpperCase();
+    const side = normalizeTradeSide(tr?.side);
+    const quantity = Number(tr?.quantity);
+    const price = Number(tr?.price);
+    const fee = Number(tr?.fee || 0);
+    const notional = Number(tr?.notional || (quantity * price));
+    const timestamp = tr?.timestamp || analysis?.timestamp || new Date().toISOString();
+
+    if (!symbol || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(price) || price <= 0) {
+      continue;
+    }
+
+    const key = [timestamp, symbol, side, quantity.toFixed(8), price.toFixed(8), fee.toFixed(8)].join('|');
+    if (paperTradeSeenKeys.has(key)) continue;
+
+    const realizedUsd = applyTradeToCostBasis({ symbol, side, quantity, price });
+    const parsedTs = Date.parse(timestamp);
+    const timestampMs = Number.isFinite(parsedTs) ? parsedTs : Date.now();
+
+    paperTradeSeenKeys.add(key);
+    paperTradeHistory.push({
+      key,
+      timestamp,
+      timestampMs,
+      symbol,
+      side,
+      quantity,
+      price,
+      notional: Number.isFinite(notional) ? notional : quantity * price,
+      fee: Number.isFinite(fee) ? fee : 0,
+      realizedUsd,
+    });
+  }
+
+  paperTradeHistory.sort((a, b) => b.timestampMs - a.timestampMs);
+  if (paperTradeHistory.length > 300) {
+    paperTradeHistory = paperTradeHistory.slice(0, 300);
+  }
+};
+
+const renderTradeHistory = () => {
+  const box = document.getElementById('tradeHistory');
+  if (!box) return;
+
+  if (!paperTradeHistory.length) {
+    box.innerHTML = `<div class='small'>No trades yet. Start paper trading to see execution history.</div>`;
+    return;
+  }
+
+  box.innerHTML = paperTradeHistory.map((tr) => {
+    const sideClass = tr.side === 'BUY' ? 'buy' : (tr.side === 'SELL' ? 'sell' : '');
+    const sideText = tr.side === 'BUY' ? 'BUY' : (tr.side === 'SELL' ? 'SELL' : tr.side);
+    const feeText = Number.isFinite(tr.fee) ? `$${tr.fee.toFixed(2)}` : '--';
+    const realizedClass = tr.realizedUsd > 0 ? 'up' : (tr.realizedUsd < 0 ? 'down' : 'flat');
+    const realizedText = tr.side === 'SELL' ? formatSignedMoney(tr.realizedUsd) : '--';
+    const ts = Number.isFinite(tr.timestampMs) ? new Date(tr.timestampMs).toLocaleString() : tr.timestamp;
+
+    return `
+      <div class='trade-item'>
+        <div class='trade-time'>${ts}</div>
+        <div><span class='trade-side ${sideClass}'>${sideText}</span></div>
+        <div class='trade-main'>
+          <span class='trade-symbol'>${tr.symbol}</span>
+          <span>${tr.quantity.toFixed(2)} @ $${tr.price.toFixed(2)}</span>
+          <span class='trade-meta'>Notional $${tr.notional.toFixed(2)} · Fee ${feeText}</span>
+        </div>
+        <div class='trade-pnl ${realizedClass}'>${realizedText}</div>
+      </div>
+    `;
+  }).join('');
+};
+
+const resetPaperTradeState = () => {
+  paperTradeHistory = [];
+  paperTradeSeenKeys = new Set();
+  paperCostBasis = new Map();
+  renderTradeHistory();
+};
+
 const setForecastDeltaText = (el, targetValue, currentValue) => {
   if (!el) return;
   el.classList.remove('legend-up', 'legend-down');
@@ -578,7 +760,7 @@ const fillHoldingsTable = (paperStatus) => {
   const orderedSymbols = Array.from(symbols).sort();
   if (orderedSymbols.length === 0) {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td colspan='7' class='small'>No holdings data yet. Run portfolio optimization and start paper trading.</td>`;
+    tr.innerHTML = `<td colspan='8' class='small'>No holdings data yet. Run portfolio optimization and start paper trading.</td>`;
     tb.appendChild(tr);
     return;
   }
@@ -588,20 +770,47 @@ const fillHoldingsTable = (paperStatus) => {
     const holding = holdingsMap.get(sym);
     const targetWeight = targetMap.get(sym);
     const currentPrice = row?.price ?? latestQuoteMap.get(sym);
-    const change1mPct = row?.change_1m_pct;
     const quantity = holding?.quantity ?? (holdingsSet.has(sym) ? 0 : null);
     const assetValue = holding?.asset_value ?? (quantity != null && currentPrice != null ? quantity * currentPrice : null);
     const isHolding = holdingsSet.has(sym);
+    const snapshotAvgCost = holding?.avg_cost;
+    const basis = paperCostBasis.get(sym);
+    const avgCostFromTrades = basis && Number.isFinite(basis.avgCost) && basis.avgCost > 0 ? basis.avgCost : null;
+    const avgCost = Number.isFinite(snapshotAvgCost) && snapshotAvgCost > 0
+      ? snapshotAvgCost
+      : avgCostFromTrades;
+
+    let priceCell = '--';
+    if (currentPrice != null) {
+      let indicator = '';
+      if (avgCost != null) {
+        const diff = currentPrice - avgCost;
+        const cls = diff > 0 ? 'up' : (diff < 0 ? 'down' : 'flat');
+        const arrow = diff > 0 ? '&#9650;' : (diff < 0 ? '&#9660;' : '&#9679;');
+        indicator = ` <span class='price-indicator ${cls}' title='Avg buy: $${avgCost.toFixed(2)}'>${arrow}</span>`;
+      }
+      priceCell = `$${currentPrice.toFixed(2)}${indicator}`;
+    }
+
+    let unrealizedText = '--';
+    let unrealizedClass = '';
+    if (quantity != null && currentPrice != null && avgCost != null && quantity > 0) {
+      const unrealizedUsd = (currentPrice - avgCost) * quantity;
+      const unrealizedPct = avgCost !== 0 ? ((currentPrice - avgCost) / avgCost) * 100 : 0;
+      unrealizedText = `${formatSignedMoney(unrealizedUsd)} (${unrealizedPct >= 0 ? '+' : ''}${unrealizedPct.toFixed(2)}%)`;
+      unrealizedClass = unrealizedUsd >= 0 ? 'up' : 'down';
+    }
 
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${sym}</td>
       <td class='${isHolding ? 'up' : ''}'>${isHolding ? 'Holding' : 'Target Only'}</td>
       <td class='num'>${quantity == null ? '--' : quantity.toFixed(2)}</td>
-      <td class='num'>${currentPrice == null ? '--' : '$' + currentPrice.toFixed(2)}</td>
+      <td class='num'>${priceCell}</td>
+      <td class='num'>${avgCost == null ? '--' : '$' + avgCost.toFixed(2)}</td>
       <td class='num'>${assetValue == null ? '--' : '$' + assetValue.toFixed(2)}</td>
       <td class='num'>${targetWeight == null ? '--' : `${(targetWeight * 100).toFixed(2)}%`}</td>
-      <td class='num ${change1mPct == null ? '' : (change1mPct >= 0 ? 'up' : 'down')}'>${change1mPct == null ? '--' : `${change1mPct >= 0 ? '+' : ''}${change1mPct.toFixed(3)}%`}</td>
+      <td class='num ${unrealizedClass}'>${unrealizedText}</td>
     `;
     tb.appendChild(tr);
   }
@@ -615,6 +824,7 @@ const fillHoldingsTable = (paperStatus) => {
     <td>Balance</td>
     <td class='num'>--</td>
     <td class='num'>--</td>
+    <td class='num'>--</td>
     <td class='num'>${cashUsd == null ? '--' : '$' + cashUsd.toFixed(2)}</td>
     <td class='num'>--</td>
     <td class='num'>--</td>
@@ -625,6 +835,7 @@ const fillHoldingsTable = (paperStatus) => {
   totalTr.innerHTML = `
     <td><strong>TOTAL ASSETS</strong></td>
     <td>Portfolio</td>
+    <td class='num'>--</td>
     <td class='num'>--</td>
     <td class='num'>--</td>
     <td class='num'>${totalAssets == null ? '--' : '$' + totalAssets.toFixed(2)}</td>
@@ -801,6 +1012,8 @@ const refreshPaper = async () => {
 
     const logBox = document.getElementById('logBox');
     logBox.innerHTML = (st.logs || []).slice(-20).map(x => `<div>${x}</div>`).join('');
+    ingestPaperTrades(st);
+    renderTradeHistory();
     fillHoldingsTable(st);
 
     if (lastPortfolio) fillAssetTable(lastPortfolio, st);
@@ -813,10 +1026,16 @@ const refreshPaper = async () => {
 
 setInterval(refreshPaper, 4000);
 
-const paperControl = async (path, body={}) => {
+const paperControl = async (path, body = {}, options = {}) => {
   try {
     await api(path, { method: 'POST', body: JSON.stringify(body) });
-    setStatus(`Action success: ${path}`, 'ok');
+    const successText = path === '/api/paper/load'
+      ? 'Paper history loaded · Restored holdings and running'
+      : `Action success: ${path}`;
+    setStatus(successText, 'ok');
+    if (options.resetTradeState) {
+      resetPaperTradeState();
+    }
     await refreshPaper();
   } catch (e) {
     setStatus(e.message || String(e), 'err');
@@ -835,19 +1054,59 @@ document.getElementById('paperStart').addEventListener('click', async () => {
     initial_capital: Number(document.getElementById('paperCapital').value),
     time1: document.getElementById('paperTime1').value,
     time2: document.getElementById('paperTime2').value,
-  });
+  }, { resetTradeState: true });
 });
 document.getElementById('paperLoad').addEventListener('click', async () => {
-  const strategyFile = (document.getElementById('paperLoadPath')?.value || '').trim();
-  if (!strategyFile) {
-    alert('Please enter strategy JSON path, e.g. log/paper_strategy_YYYYMMDD_HHMMSS.json');
+  if (!paperFilePicker) {
+    const strategyFile = (document.getElementById('paperLoadPath')?.value || '').trim();
+    if (!strategyFile) {
+      alert('Please enter strategy JSON path, e.g. log/paper_strategy_YYYYMMDD_HHMMSS.json');
+      return;
+    }
+    await paperControl('/api/paper/load', {
+      strategy_file: strategyFile,
+    }, { resetTradeState: true });
     return;
   }
 
-  await paperControl('/api/paper/load', {
-    strategy_file: strategyFile,
-  });
+  paperFilePicker.value = '';
+  paperFilePicker.click();
 });
+
+if (paperFilePicker) {
+  paperFilePicker.addEventListener('change', async (event) => {
+    const file = event?.target?.files?.[0];
+    if (!file) return;
+
+    const input = document.getElementById('paperLoadPath');
+    const selectedName = String(file.name || '').trim();
+    if (!selectedName) return;
+
+    const suggestedPath = selectedName.toLowerCase().endsWith('.json')
+      ? `log/${selectedName}`
+      : `log/${selectedName}.json`;
+
+    if (input) {
+      input.value = suggestedPath;
+    }
+
+    if (paperLoadBtn) {
+      paperLoadBtn.disabled = true;
+      paperLoadBtn.textContent = 'Loading...';
+    }
+
+    try {
+      await paperControl('/api/paper/load', {
+        strategy_file: suggestedPath,
+      }, { resetTradeState: true });
+    } finally {
+      if (paperLoadBtn) {
+        paperLoadBtn.disabled = false;
+        paperLoadBtn.textContent = '\uD83D\uDCC2 Load';
+      }
+    }
+  });
+}
 document.getElementById('paperPause').addEventListener('click', () => paperControl('/api/paper/pause'));
 document.getElementById('paperResume').addEventListener('click', () => paperControl('/api/paper/resume'));
 document.getElementById('paperStop').addEventListener('click', () => paperControl('/api/paper/stop'));
@@ -945,6 +1204,8 @@ const restoreState = async () => {
         setLegendText(null);
       }
 
+      ingestPaperTrades(state.paper);
+      renderTradeHistory();
       fillHoldingsTable(state.paper);
     }
 
@@ -960,3 +1221,4 @@ const restoreState = async () => {
 
 restoreState();
 renderQuotesAsOf();
+renderTradeHistory();

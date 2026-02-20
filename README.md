@@ -86,6 +86,23 @@ When `--compute-backend directml` is selected, the runtime searches ONNX in this
 
 If no ONNX model is found, runtime logs a warning and falls back to CPU.
 
+### Backend selection logic (important)
+
+Current backend resolution is **explicit**, not a full auto-chain:
+
+- `--compute-backend auto`
+	- Selects `cuda` **only if** binary was built with `--features cuda`
+	- Otherwise selects `cpu`
+- `--compute-backend directml`
+	- Uses DirectML path (requires build with `--features directml`)
+	- If DirectML runtime/model unavailable at inference time, request falls back to CPU
+- `--compute-backend cuda`
+	- Requires build with `--features cuda`, otherwise falls back to CPU
+- `--compute-backend cpu`
+	- Always CPU
+
+So the current behavior is **not** `cuda -> directml -> cpu` automatic cascading under `auto`.
+
 ### Automatic dual-artifact checkpointing (CUDA training)
 
 During training, when a new best checkpoint is found:
@@ -107,7 +124,33 @@ Current exporter behavior:
 	- Denoiser: `model_weights.onnx`
 	- Encoder: `model_weights.encoder.onnx`
 - The denoiser graph has runtime inputs (`x_t`, `time_steps`, `asset_ids`, `cond`) and can be consumed by ORT.
-- Runtime still uses Candle for final forecast sampling path; ORT DirectML full execution wiring remains next step.
+
+### If you only have `model_weights.safetensors`
+
+You can convert it manually at any time:
+
+```bash
+# From project root (recommended)
+py tools/export_to_onnx.py --input model_weights.safetensors --output model_weights.onnx
+```
+
+Equivalent absolute-path example:
+
+```bash
+py d:\DiffStock\diffstock-tui\tools\export_to_onnx.py --input d:\DiffStock\diffstock-tui\model_weights.safetensors --output d:\DiffStock\diffstock-tui\model_weights.onnx
+```
+
+Expected outputs:
+- `model_weights.onnx`
+- `model_weights.encoder.onnx`
+
+Recommended DirectML run command (release binary):
+
+```bash
+set ORT_DYLIB_PATH=d:\DiffStock\diffstock-tui\.runtime\ort_dml_1_24_1\onnxruntime\capi\onnxruntime.dll
+set DIFFSTOCK_ORT_MODEL=d:\DiffStock\diffstock-tui\model_weights.onnx
+cargo run --release --features directml -- --webui --webui-port 8099 --compute-backend directml
+```
 
 You can override exporter and script via env vars:
 ```bash
@@ -137,6 +180,44 @@ Validate performance on historical SPY data.
 ```bash
 cargo run --release -- --backtest
 ```
+
+## Portfolio Weights & Holdings Logic
+
+### Portfolio optimizer (target weights)
+
+`portfolio` mode outputs **target weights**, then paper trading executes those targets.
+
+High-level optimizer flow:
+1. Build per-asset MC return paths from diffusion forecasts
+2. Compute mean return vector + covariance matrix
+3. Sample many random weight vectors (`OPTIMIZER_SAMPLES`)
+4. Keep candidates that satisfy constraints:
+	- max single weight = `0.40`
+	- min non-zero weight = `0.02`
+5. Choose highest Sharpe candidate
+6. Local refinement around best candidate using score:
+	- `score = sharpe - 0.5 * cvar`
+7. Apply vol targeting (`0.5x` to `2.0x` leverage cap)
+
+Output is `PortfolioAllocation.weights` + risk/return stats.
+
+### Paper trading holdings execution
+
+Paper trading converts target weights into holdings at scheduled analysis times:
+
+1. Compute current portfolio value: `cash + sum(shares * price)`
+2. For each symbol:
+	- target dollar = `portfolio_value * target_weight`
+	- target shares = `floor(target_dollar / price)`
+	- delta = `target_shares - current_shares`
+3. Trade only if `|delta| >= 1` share
+4. Buy side:
+	- capped by cash affordability with fee (`TRADING_FEE_RATE = 0.0005`)
+5. Sell side:
+	- capped by available shares
+6. Update `cash_usd`, `holdings_shares`, append trade records and snapshots
+
+Default analysis schedule is local `02:30` and `23:30` (configurable from WebUI / API).
 
 ## Technical Architecture
 
