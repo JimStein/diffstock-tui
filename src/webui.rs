@@ -107,6 +107,7 @@ struct PaperRuntimeState {
     started_at: Option<String>,
     strategy_file: Option<String>,
     runtime_file: Option<String>,
+    target_weights: Vec<PaperTargetState>,
     latest_snapshot: Option<paper_trading::MinutePortfolioSnapshot>,
     snapshots: Vec<paper_trading::MinutePortfolioSnapshot>,
     last_analysis: Option<paper_trading::AnalysisRecord>,
@@ -124,6 +125,7 @@ impl Default for PaperRuntimeState {
             started_at: None,
             strategy_file: None,
             runtime_file: None,
+            target_weights: Vec::new(),
             latest_snapshot: None,
             snapshots: Vec::new(),
             last_analysis: None,
@@ -132,6 +134,12 @@ impl Default for PaperRuntimeState {
             cmd_tx: None,
         }
     }
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct PaperTargetState {
+    symbol: String,
+    weight: f64,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -511,6 +519,13 @@ async fn start_paper(
         paper_state.started_at = Some(chrono::Local::now().to_rfc3339());
         paper_state.strategy_file = None;
         paper_state.runtime_file = None;
+        paper_state.target_weights = weights
+            .iter()
+            .map(|(symbol, weight)| PaperTargetState {
+                symbol: symbol.clone(),
+                weight: *weight,
+            })
+            .collect();
         paper_state.latest_snapshot = None;
         paper_state.snapshots.clear();
         paper_state.last_analysis = None;
@@ -595,7 +610,15 @@ async fn load_paper(
 
     let (event_tx, mut event_rx) = mpsc::channel(1024);
     let (cmd_tx, cmd_rx) = mpsc::channel(64);
-    let historical_trades = collect_trade_history_from_strategy(&strategy_file);
+    let strategy_summary = load_strategy_summary(&strategy_file);
+    let historical_trades = strategy_summary
+        .as_ref()
+        .map(|summary| summary.trades.clone())
+        .unwrap_or_default();
+    let historical_targets = strategy_summary
+        .as_ref()
+        .map(|summary| summary.targets.clone())
+        .unwrap_or_default();
 
     {
         let mut paper_state = state.paper.lock().await;
@@ -604,6 +627,7 @@ async fn load_paper(
         paper_state.started_at = Some(chrono::Local::now().to_rfc3339());
         paper_state.strategy_file = Some(strategy_file.clone());
         paper_state.runtime_file = None;
+        paper_state.target_weights = historical_targets;
         paper_state.latest_snapshot = None;
         paper_state.snapshots.clear();
         paper_state.last_analysis = None;
@@ -735,7 +759,13 @@ async fn paper_stop(
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
-fn collect_trade_history_from_strategy(strategy_file: &str) -> Vec<paper_trading::TradeRecord> {
+#[derive(Clone)]
+struct StrategySummary {
+    trades: Vec<paper_trading::TradeRecord>,
+    targets: Vec<PaperTargetState>,
+}
+
+fn load_strategy_summary(strategy_file: &str) -> Option<StrategySummary> {
     let input = std::path::PathBuf::from(strategy_file);
     let resolved = if input.is_absolute() {
         input
@@ -746,17 +776,27 @@ fn collect_trade_history_from_strategy(strategy_file: &str) -> Vec<paper_trading
     };
 
     let Ok(raw) = std::fs::read_to_string(resolved) else {
-        return Vec::new();
+        return None;
     };
     let Ok(strategy_log) = serde_json::from_str::<paper_trading::StrategyLog>(&raw) else {
-        return Vec::new();
+        return None;
     };
 
     let mut trades = Vec::new();
-    for analysis in strategy_log.analyses {
-        trades.extend(analysis.trades);
+    for analysis in &strategy_log.analyses {
+        trades.extend(analysis.trades.clone());
     }
-    trades
+
+    let targets = strategy_log
+        .targets
+        .iter()
+        .map(|target| PaperTargetState {
+            symbol: target.symbol.clone(),
+            weight: target.target_weight,
+        })
+        .collect::<Vec<_>>();
+
+    Some(StrategySummary { trades, targets })
 }
 
 fn api_err(status: StatusCode, message: &str) -> (StatusCode, Json<ApiError>) {

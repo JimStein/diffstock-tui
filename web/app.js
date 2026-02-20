@@ -41,6 +41,14 @@ let lastForecastContext = null;
 let paperTradeHistory = [];
 let paperTradeSeenKeys = new Set();
 let paperCostBasis = new Map();
+let selectedPaperRangeDays = 0.5;
+let paperFullContext = {
+  portfolioSeries: [],
+  benchmarkSeries: [],
+  metricsByTime: new Map(),
+  latest: null,
+};
+const paperRangeButtons = Array.from(document.querySelectorAll('[data-paper-range-days]'));
 
 const ensureForecastLegendElements = () => {
   const chartHost = document.getElementById('forecastChart');
@@ -338,6 +346,115 @@ const buildPaperSeriesContext = (snapshots = []) => {
   }
 
   return { portfolioSeries, benchmarkSeries, metricsByTime, latest };
+};
+
+const buildFallbackPaperContext = (snapshot) => {
+  if (!snapshot) {
+    return {
+      portfolioSeries: [],
+      benchmarkSeries: [],
+      metricsByTime: new Map(),
+      latest: null,
+    };
+  }
+
+  const t = Math.floor(new Date(snapshot.timestamp).getTime() / 1000);
+  if (!Number.isFinite(t) || t <= 0) {
+    return {
+      portfolioSeries: [],
+      benchmarkSeries: [],
+      metricsByTime: new Map(),
+      latest: null,
+    };
+  }
+
+  const baseline = Math.max(1, snapshot.total_value - (snapshot.pnl_usd || 0));
+  const benchValue = baseline * (1 + (snapshot.benchmark_return_pct || 0) / 100);
+  const metrics = {
+    time: t,
+    updatedText: snapshot.timestamp,
+    portfolioValue: snapshot.total_value,
+    portfolioPnlUsd: snapshot.pnl_usd || 0,
+    portfolioPnlPct: snapshot.pnl_pct || 0,
+    benchmarkValue: benchValue,
+    benchmarkPnlUsd: benchValue - baseline,
+    benchmarkPnlPct: snapshot.benchmark_return_pct || 0,
+    spreadUsd: snapshot.total_value - benchValue,
+    spreadPct: benchValue !== 0 ? ((snapshot.total_value - benchValue) / benchValue) * 100 : 0,
+  };
+  const metricsByTime = new Map();
+  metricsByTime.set(t, metrics);
+
+  return {
+    portfolioSeries: [{ time: t, value: snapshot.total_value }],
+    benchmarkSeries: [{ time: t, value: benchValue }],
+    metricsByTime,
+    latest: metrics,
+  };
+};
+
+const filterPaperContextByRangeDays = (ctx, rangeDays) => {
+  const days = Number(rangeDays);
+  if (!ctx || !Array.isArray(ctx.portfolioSeries) || ctx.portfolioSeries.length === 0) {
+    return {
+      portfolioSeries: [],
+      benchmarkSeries: [],
+      metricsByTime: new Map(),
+      latest: null,
+    };
+  }
+
+  if (!Number.isFinite(days) || days <= 0) {
+    return ctx;
+  }
+
+  const latestTime = ctx.portfolioSeries[ctx.portfolioSeries.length - 1].time;
+  const cutoff = latestTime - Math.floor(days * 86400);
+
+  const portfolioSeries = ctx.portfolioSeries.filter((p) => p.time >= cutoff);
+  const benchmarkSeries = ctx.benchmarkSeries.filter((p) => p.time >= cutoff);
+  const metricsByTime = new Map();
+  for (const [time, metrics] of ctx.metricsByTime.entries()) {
+    if (time >= cutoff) {
+      metricsByTime.set(time, metrics);
+    }
+  }
+
+  let latest = null;
+  if (portfolioSeries.length > 0) {
+    const t = portfolioSeries[portfolioSeries.length - 1].time;
+    latest = metricsByTime.get(t) || ctx.latest;
+  }
+
+  return {
+    portfolioSeries,
+    benchmarkSeries,
+    metricsByTime,
+    latest,
+  };
+};
+
+const renderPaperChartFromCurrentContext = () => {
+  const filtered = filterPaperContextByRangeDays(paperFullContext, selectedPaperRangeDays);
+  paperMetricsByTime = filtered.metricsByTime;
+
+  if (filtered.portfolioSeries.length > 0) {
+    lastPaperSeries = filtered.portfolioSeries;
+    portfolioLine.setData(ensureVisibleSeries(filtered.portfolioSeries));
+    benchmarkLine.setData(filtered.benchmarkSeries.length > 0 ? ensureVisibleSeries(filtered.benchmarkSeries) : []);
+    paperChart.fit();
+    setLegendText(filtered.latest || paperFullContext.latest || null);
+  } else {
+    lastPaperSeries = [];
+    portfolioLine.setData([]);
+    benchmarkLine.setData([]);
+    setLegendText(null);
+  }
+
+  for (const btn of paperRangeButtons) {
+    const days = Number(btn.dataset.paperRangeDays);
+    btn.classList.toggle('active', days === selectedPaperRangeDays);
+  }
 };
 
 const ensureVisibleSeries = (series = []) => {
@@ -751,7 +868,21 @@ const fillHoldingsTable = (paperStatus) => {
   const holdingsSet = new Set(snapshot?.holdings_symbols || []);
   const snapshotMap = new Map((snapshot?.symbols || []).map(x => [x.symbol, x]));
   const holdingsMap = new Map((snapshot?.holdings || []).map(x => [x.symbol, x]));
-  const targetMap = new Map((lastPortfolio?.weights || []).map(([symbol, weight]) => [symbol, weight]));
+  const targetMap = new Map();
+  for (const t of (paperStatus?.target_weights || [])) {
+    const symbol = String(t?.symbol || '').toUpperCase();
+    const weight = Number(t?.weight);
+    if (!symbol || !Number.isFinite(weight)) continue;
+    targetMap.set(symbol, weight);
+  }
+  for (const [symbol, weight] of (lastPortfolio?.weights || [])) {
+    const normalized = String(symbol || '').toUpperCase();
+    const w = Number(weight);
+    if (!normalized || !Number.isFinite(w)) continue;
+    if (!targetMap.has(normalized)) {
+      targetMap.set(normalized, w);
+    }
+  }
 
   const symbols = new Set();
   for (const symbol of holdingsSet) symbols.add(symbol);
@@ -815,32 +946,72 @@ const fillHoldingsTable = (paperStatus) => {
     tb.appendChild(tr);
   }
 
-  const cashUsd = snapshot?.cash_usd;
-  const totalAssets = snapshot?.total_value;
+};
+
+const fillCapitalSummaryTable = (paperStatus) => {
+  const tb = document.querySelector('#capitalSummaryTable tbody');
+  if (!tb) return;
+
+  tb.innerHTML = '';
+
+  const snapshot = paperStatus?.latest_snapshot;
+  if (!snapshot) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td colspan='8' class='small'>No capital snapshot yet. Start or load paper trading first.</td>`;
+    tb.appendChild(tr);
+    return;
+  }
+
+  const totalAssets = Number(snapshot?.total_value);
+  const cashUsd = Number(snapshot?.cash_usd);
+  const totalPnlUsd = Number(snapshot?.pnl_usd);
+  const totalPnlPct = Number(snapshot?.pnl_pct);
+  const hasHoldings = (snapshot?.holdings_symbols?.length || 0) > 0;
+
+  const safeTotal = Number.isFinite(totalAssets) && totalAssets > 0 ? totalAssets : 0;
+  const safeCash = Number.isFinite(cashUsd) ? cashUsd : 0;
+  const investedValue = safeTotal - safeCash;
+  const cashWeightPct = safeTotal > 0 ? (safeCash / safeTotal) * 100 : 0;
+  const investedWeightPct = safeTotal > 0 ? (investedValue / safeTotal) * 100 : 0;
 
   const cashTr = document.createElement('tr');
   cashTr.innerHTML = `
     <td><strong>CASH</strong></td>
     <td>Balance</td>
-    <td class='num'>--</td>
-    <td class='num'>--</td>
-    <td class='num'>--</td>
-    <td class='num'>${cashUsd == null ? '--' : '$' + cashUsd.toFixed(2)}</td>
+    <td class='num'>${safeTotal > 0 ? `${cashWeightPct.toFixed(2)}%` : '--'}</td>
+    <td class='num'>${Number.isFinite(cashUsd) ? '$' + cashUsd.toFixed(2) : '--'}</td>
+    <td class='num'>${safeTotal > 0 ? `$${investedValue.toFixed(2)} (${investedWeightPct.toFixed(2)}%)` : '--'}</td>
+    <td class='num'>${Number.isFinite(totalAssets) ? '$' + totalAssets.toFixed(2) : '--'}</td>
     <td class='num'>--</td>
     <td class='num'>--</td>
   `;
   tb.appendChild(cashTr);
 
+  const totalPnlClass = Number.isFinite(totalPnlUsd)
+    ? (totalPnlUsd >= 0 ? 'up' : 'down')
+    : '';
+  const returnText = Number.isFinite(totalPnlPct)
+    ? `${totalPnlPct >= 0 ? '+' : ''}${totalPnlPct.toFixed(2)}%`
+    : '--';
+  const pnlText = Number.isFinite(totalPnlUsd) && Number.isFinite(totalPnlPct)
+    ? (!hasHoldings
+      ? returnText
+      : `${formatSignedMoney(totalPnlUsd)} (${returnText})`)
+    : '--';
+  const pnlTitle = !hasHoldings
+    ? 'Realized return vs initial capital (all positions closed).'
+    : 'Portfolio PnL vs initial capital (includes open positions).';
+
   const totalTr = document.createElement('tr');
   totalTr.innerHTML = `
     <td><strong>TOTAL ASSETS</strong></td>
     <td>Portfolio</td>
-    <td class='num'>--</td>
-    <td class='num'>--</td>
-    <td class='num'>--</td>
-    <td class='num'>${totalAssets == null ? '--' : '$' + totalAssets.toFixed(2)}</td>
-    <td class='num'>--</td>
-    <td class='num'>--</td>
+    <td class='num'>${safeTotal > 0 ? `${cashWeightPct.toFixed(2)}% cash` : '--'}</td>
+    <td class='num'>${Number.isFinite(cashUsd) ? '$' + cashUsd.toFixed(2) : '--'}</td>
+    <td class='num'>${safeTotal > 0 ? `$${investedValue.toFixed(2)} (${investedWeightPct.toFixed(2)}%)` : '--'}</td>
+    <td class='num'>${Number.isFinite(totalAssets) ? '$' + totalAssets.toFixed(2) : '--'}</td>
+    <td class='num ${totalPnlClass}'>${returnText}</td>
+    <td class='num ${totalPnlClass}' title='${pnlTitle}'>${pnlText}</td>
   `;
   tb.appendChild(totalTr);
 };
@@ -884,6 +1055,15 @@ const paperChart = createChartCompat('paperChart');
 const portfolioLine = paperChart.addLineSeries({ color: '#00d4aa', lineWidth: 2 });
 const benchmarkLine = paperChart.addLineSeries({ color: '#f59e0b', lineWidth: 2 });
 attachChartAutoResize(paperChart);
+
+for (const btn of paperRangeButtons) {
+  btn.addEventListener('click', () => {
+    const days = Number(btn.dataset.paperRangeDays);
+    if (!Number.isFinite(days) || days <= 0) return;
+    selectedPaperRangeDays = days;
+    renderPaperChartFromCurrentContext();
+  });
+}
 
 if (paperChart?.container) {
   paperChart.container.addEventListener('mouseenter', showPaperLegend);
@@ -933,48 +1113,8 @@ const refreshPaper = async () => {
     syncPaperButtons(st);
 
     const ctx = buildPaperSeriesContext(st.snapshots || []);
-    paperMetricsByTime = ctx.metricsByTime;
-
-    const series = ctx.portfolioSeries;
-    const benchmarkSeries = ctx.benchmarkSeries;
-    if (series.length > 0) {
-      lastPaperSeries = series;
-      portfolioLine.setData(ensureVisibleSeries(lastPaperSeries));
-      if (benchmarkSeries.length > 0) {
-        benchmarkLine.setData(ensureVisibleSeries(benchmarkSeries));
-      }
-      paperChart.fit();
-
-      setLegendText(ctx.latest);
-    } else if (st.latest_snapshot) {
-      const t = Math.floor(new Date(st.latest_snapshot.timestamp).getTime() / 1000);
-      if (Number.isFinite(t) && t > 0) {
-        const single = [{ time: t, value: st.latest_snapshot.total_value }];
-        const baseline = Math.max(1, st.latest_snapshot.total_value - (st.latest_snapshot.pnl_usd || 0));
-        const benchValue = baseline * (1 + (st.latest_snapshot.benchmark_return_pct || 0) / 100);
-        const singleBench = [{ time: t, value: benchValue }];
-        lastPaperSeries = single;
-        portfolioLine.setData(ensureVisibleSeries(single));
-        benchmarkLine.setData(ensureVisibleSeries(singleBench));
-        paperChart.fit();
-
-        const fallbackMetrics = {
-          time: t,
-          updatedText: st.latest_snapshot.timestamp,
-          portfolioValue: st.latest_snapshot.total_value,
-          portfolioPnlUsd: st.latest_snapshot.pnl_usd || 0,
-          portfolioPnlPct: st.latest_snapshot.pnl_pct || 0,
-          benchmarkValue: benchValue,
-          benchmarkPnlUsd: benchValue - baseline,
-          benchmarkPnlPct: st.latest_snapshot.benchmark_return_pct || 0,
-          spreadUsd: st.latest_snapshot.total_value - benchValue,
-          spreadPct: benchValue !== 0 ? ((st.latest_snapshot.total_value - benchValue) / benchValue) * 100 : 0,
-        };
-        setLegendText(fallbackMetrics);
-      }
-    } else {
-      setLegendText(null);
-    }
+    paperFullContext = ctx.portfolioSeries.length > 0 ? ctx : buildFallbackPaperContext(st.latest_snapshot);
+    renderPaperChartFromCurrentContext();
 
     const rtTb = document.querySelector('#rtTable tbody');
     const chTb = document.querySelector('#chTable tbody');
@@ -1015,6 +1155,7 @@ const refreshPaper = async () => {
     ingestPaperTrades(st);
     renderTradeHistory();
     fillHoldingsTable(st);
+    fillCapitalSummaryTable(st);
 
     if (lastPortfolio) fillAssetTable(lastPortfolio, st);
     await refreshRealtimeQuotes();
@@ -1172,41 +1313,13 @@ const restoreState = async () => {
         document.getElementById('paperLoadPath').value = state.paper.strategy_file;
       }
       const ctx = buildPaperSeriesContext(state.paper.snapshots || []);
-      paperMetricsByTime = ctx.metricsByTime;
-
-      const series = ctx.portfolioSeries;
-      const benchmarkSeries = ctx.benchmarkSeries;
-      if (series.length > 0) {
-        lastPaperSeries = series;
-        portfolioLine.setData(ensureVisibleSeries(lastPaperSeries));
-        if (benchmarkSeries.length > 0) {
-          benchmarkLine.setData(ensureVisibleSeries(benchmarkSeries));
-        }
-        paperChart.fit();
-
-        setLegendText(ctx.latest);
-      } else if (state.paper.latest_snapshot) {
-        const baseline = Math.max(1, state.paper.latest_snapshot.total_value - (state.paper.latest_snapshot.pnl_usd || 0));
-        const benchValue = baseline * (1 + (state.paper.latest_snapshot.benchmark_return_pct || 0) / 100);
-        setLegendText({
-          time: Math.floor(new Date(state.paper.latest_snapshot.timestamp).getTime() / 1000),
-          updatedText: state.paper.latest_snapshot.timestamp,
-          portfolioValue: state.paper.latest_snapshot.total_value,
-          portfolioPnlUsd: state.paper.latest_snapshot.pnl_usd || 0,
-          portfolioPnlPct: state.paper.latest_snapshot.pnl_pct || 0,
-          benchmarkValue: benchValue,
-          benchmarkPnlUsd: benchValue - baseline,
-          benchmarkPnlPct: state.paper.latest_snapshot.benchmark_return_pct || 0,
-          spreadUsd: state.paper.latest_snapshot.total_value - benchValue,
-          spreadPct: benchValue !== 0 ? ((state.paper.latest_snapshot.total_value - benchValue) / benchValue) * 100 : 0,
-        });
-      } else {
-        setLegendText(null);
-      }
+      paperFullContext = ctx.portfolioSeries.length > 0 ? ctx : buildFallbackPaperContext(state.paper.latest_snapshot);
+      renderPaperChartFromCurrentContext();
 
       ingestPaperTrades(state.paper);
       renderTradeHistory();
       fillHoldingsTable(state.paper);
+      fillCapitalSummaryTable(state.paper);
     }
 
     if (state.train) {

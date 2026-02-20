@@ -610,6 +610,24 @@
       align-items: flex-end;
     }
 
+    .range-group {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
+    }
+    .range-btn {
+      padding: 4px 10px;
+      font-size: 11px;
+      min-height: 28px;
+    }
+    .range-btn.active {
+      background: var(--accent-bg);
+      color: var(--accent-2);
+      border-color: rgba(59,130,246,.35);
+    }
+
     /* ─── Responsive ─── */
     @media (max-width: 900px) {
       .shell { grid-template-columns: 1fr; }
@@ -789,6 +807,15 @@
           <div class="small">Uses current portfolio symbols/weights as targets.</div>
         </div>
         <div class="panel" style="padding:12px;">
+          <div class="range-group" id="paperRangeGroup">
+            <button class="range-btn" data-paper-range-days="0.25">6h</button>
+            <button class="range-btn" data-paper-range-days="0.5">12h</button>
+            <button class="range-btn" data-paper-range-days="1">1d</button>
+            <button class="range-btn" data-paper-range-days="7">7d</button>
+            <button class="range-btn active" data-paper-range-days="30">30d</button>
+            <button class="range-btn" data-paper-range-days="60">60d</button>
+            <button class="range-btn" data-paper-range-days="180">180d</button>
+          </div>
           <div class="chart-wrap">
             <div id="paperChart"></div>
             <div class="chart-legend" id="paperLegend">
@@ -817,6 +844,24 @@
                 <th class="num">Asset Value</th>
                 <th class="num">Target Weight</th>
                 <th class="num">Floating PnL</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <div class="panel-header" style="margin-top: 12px;">
+            <div class="panel-title"><span class="panel-title-icon">&#128181;</span> Capital Summary</div>
+          </div>
+          <table id="capitalSummaryTable">
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Status</th>
+                <th class="num">Cash Weight</th>
+                <th class="num">Cash Balance</th>
+                <th class="num">Invested Value</th>
+                <th class="num">Total Assets</th>
+                <th class="num">Return</th>
+                <th class="num">PnL</th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -879,6 +924,6 @@
   </div>
 
   <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
-  <script src="/app.js?v=20260220c"></script>
+  <script src="/app.js?v=20260220f"></script>
 </body>
 </html>
