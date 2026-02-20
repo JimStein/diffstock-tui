@@ -521,15 +521,6 @@
     }
 
     /* ─── Log Box ─── */
-    #logBox {
-      max-height: 200px;
-      overflow: auto;
-      font-size: 11px;
-      font-family: var(--mono);
-      line-height: 1.7;
-      color: var(--muted);
-      padding: 4px 0;
-    }
     #logBox div {
       padding: 2px 4px;
       border-radius: 3px;
@@ -628,6 +619,187 @@
       border-color: rgba(59,130,246,.35);
     }
 
+    /* ─── Stat Cards ─── */
+    .stat-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .stat-card {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      transition: border-color var(--transition);
+    }
+    .stat-card:hover { border-color: var(--border-2); }
+    .stat-card-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .5px;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .stat-card-value {
+      font-family: var(--mono);
+      font-size: 18px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    .stat-card-sub {
+      font-size: 10px;
+      color: var(--muted);
+      font-family: var(--mono);
+    }
+
+    /* ─── Weight Bar ─── */
+    .weight-bar-wrap {
+      margin-top: 10px;
+      margin-bottom: 4px;
+    }
+    .weight-bar-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .5px;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .weight-bar {
+      display: flex;
+      height: 22px;
+      border-radius: 6px;
+      overflow: hidden;
+      background: var(--surface);
+      border: 1px solid var(--border);
+    }
+    .weight-bar-seg {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 9px;
+      font-weight: 600;
+      font-family: var(--mono);
+      color: rgba(255,255,255,.85);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      padding: 0 4px;
+      min-width: 0;
+      transition: flex-basis var(--transition);
+    }
+    .weight-bar-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+      margin-top: 6px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .weight-bar-legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .weight-bar-legend-dot {
+      width: 8px; height: 8px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+
+    /* ─── Button Group Separator ─── */
+    .btn-sep {
+      width: 1px;
+      height: 28px;
+      background: var(--border-2);
+      margin: 0 4px;
+      flex-shrink: 0;
+      align-self: center;
+    }
+
+    /* ─── Sidebar Badge ─── */
+    .tab-badge {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--muted-2);
+      margin-left: auto;
+      flex-shrink: 0;
+      transition: var(--transition);
+    }
+    .tab-badge.running {
+      background: var(--up);
+      box-shadow: 0 0 6px rgba(0,212,170,.5);
+      animation: pulse-dot 2s ease-in-out infinite;
+    }
+    .tab-badge.paused {
+      background: var(--gold);
+      box-shadow: 0 0 6px rgba(245,158,11,.4);
+    }
+
+    /* ─── Empty State ─── */
+    .empty-state {
+      text-align: center;
+      padding: 20px 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .empty-state-icon {
+      font-size: 24px;
+      opacity: .5;
+      margin-bottom: 6px;
+    }
+
+    /* ─── Train Card Grid ─── */
+    .train-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .train-progress-wrap {
+      margin-bottom: 12px;
+    }
+    .train-progress-bar {
+      height: 6px;
+      background: var(--surface);
+      border-radius: 3px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .train-progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), #8b5cf6);
+      border-radius: 3px;
+      transition: width .4s ease;
+      width: 0%;
+    }
+    .train-progress-text {
+      font-size: 11px;
+      color: var(--muted);
+      font-family: var(--mono);
+      margin-top: 4px;
+      display: flex;
+      justify-content: space-between;
+    }
+    .train-raw-json {
+      font-family: var(--mono);
+      font-size: 11px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-all;
+      color: var(--muted);
+      max-height: 200px;
+      overflow: auto;
+      padding: 10px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+
     /* ─── Responsive ─── */
     @media (max-width: 900px) {
       .shell { grid-template-columns: 1fr; }
@@ -661,8 +833,16 @@
         <span id="clockChip">--:--:--</span>
       </span>
       <span class="chip">
+        <span class="chip-dot" id="backendDot"></span>
+        <span id="backendChip">Backend: --</span>
+      </span>
+      <span class="chip">
         <span class="chip-dot" id="systemDot"></span>
         <span id="paperStatusChip">IDLE</span>
+      </span>
+      <span class="chip">
+        <span class="chip-dot"></span>
+        <span id="nextRunChip">Next: --</span>
       </span>
     </div>
   </header>
@@ -682,10 +862,12 @@
       <div class="sidebar-section">Trading</div>
       <button class="tab-btn" data-tab="paper">
         <span class="tab-icon">📄</span> Paper Trade
+        <span class="tab-badge" id="paperTabBadge"></span>
       </button>
       <div class="sidebar-section">System</div>
       <button class="tab-btn" data-tab="train">
         <span class="tab-icon">🧠</span> Train Model
+        <span class="tab-badge" id="trainTabBadge"></span>
       </button>
     </aside>
 
@@ -718,7 +900,7 @@
         <div class="panel" style="padding: 12px 12px 8px;">
           <div class="chart-wrap">
             <div id="forecastChart"></div>
-            <div class="chart-legend visible" id="forecastLegend">
+            <div class="chart-legend" id="forecastLegend">
               <div class="legend-title">Forecast Metrics</div>
               <div class="legend-row"><span class="legend-key">Current Date</span><span class="legend-val" id="legendForecastCurrentDate">--</span></div>
               <div class="legend-row"><span class="legend-key">Current Price</span><span class="legend-val" id="legendForecastCurrentPrice">--</span></div>
@@ -751,6 +933,7 @@
             </div>
           </div>
         </div>
+        <div id="portfolioStatsPanel" class="stat-cards" style="display:none;"></div>
         <div class="panel">
           <div class="panel-header">
             <div class="panel-title">
@@ -762,11 +945,12 @@
             <thead>
               <tr>
                 <th>Symbol</th><th class="num" title="Model-implied expected price over default portfolio horizon.">Model Price (10d E)</th><th class="num">Current Price</th><th class="num">Deviation</th>
-                <th class="num">E[Ret]</th><th class="num">Vol</th><th class="num">Sharpe</th><th class="num">P50 Target</th>
+                <th class="num">E[Ret]</th><th class="num">Vol</th><th class="num">Sharpe</th><th class="num">Opt Wt</th><th class="num">P50 Target</th>
               </tr>
             </thead>
             <tbody></tbody>
           </table>
+          <div id="portfolioWeightBar" class="weight-bar-wrap" style="display:none;"></div>
         </div>
       </section>
 
@@ -791,6 +975,7 @@
               <div class="btn-group">
                 <button class="primary" id="paperStart">&#9654; Start</button>
                 <button id="paperLoad">&#128194; Load</button>
+                <span class="btn-sep"></span>
                 <button class="warn" id="paperPause">&#9208; Pause</button>
                 <button class="success" id="paperResume">&#9654; Resume</button>
                 <button class="danger" id="paperStop">&#9209; Stop</button>
@@ -809,10 +994,10 @@
         <div class="panel" style="padding:12px;">
           <div class="range-group" id="paperRangeGroup">
             <button class="range-btn" data-paper-range-days="0.25">6h</button>
-            <button class="range-btn" data-paper-range-days="0.5">12h</button>
+            <button class="range-btn active" data-paper-range-days="0.5">12h</button>
             <button class="range-btn" data-paper-range-days="1">1d</button>
             <button class="range-btn" data-paper-range-days="7">7d</button>
-            <button class="range-btn active" data-paper-range-days="30">30d</button>
+            <button class="range-btn" data-paper-range-days="30">30d</button>
             <button class="range-btn" data-paper-range-days="60">60d</button>
             <button class="range-btn" data-paper-range-days="180">180d</button>
           </div>
@@ -888,7 +1073,13 @@
             <table id="chTable"><thead><tr><th>Symbol</th><th class="num">Current</th><th class="num">1m &#916;</th><th class="num">1m &#916;%</th></tr></thead><tbody></tbody></table>
           </div>
         </div>
-        <div class="panel" id="logBox"></div>
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title"><span class="panel-title-icon">&#128203;</span> Runtime Logs</div>
+            <div class="panel-subtitle">Last 20 entries</div>
+          </div>
+          <div id="logBox" style="max-height:200px;overflow:auto;font-size:11px;font-family:var(--mono);line-height:1.7;color:var(--muted);padding:4px 0;"></div>
+        </div>
       </section>
 
       <!-- ══════ Train Tab ══════ -->
@@ -917,13 +1108,27 @@
             </div>
           </div>
         </div>
-        <div class="panel" id="trainStatus">Idle</div>
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title"><span class="panel-title-icon">&#128200;</span> Training Progress</div>
+            <div class="panel-subtitle" id="trainPhaseLabel">Idle</div>
+          </div>
+          <div id="trainProgressWrap" class="train-progress-wrap" style="display:none;">
+            <div class="train-progress-bar"><div class="train-progress-fill" id="trainProgressFill"></div></div>
+            <div class="train-progress-text"><span id="trainProgressLeft">--</span><span id="trainProgressRight">--</span></div>
+          </div>
+          <div id="trainCards" class="train-cards" style="display:none;"></div>
+          <details style="margin-top:8px;">
+            <summary style="cursor:pointer;font-size:11px;color:var(--muted);user-select:none;">Raw JSON</summary>
+            <div id="trainRawJson" class="train-raw-json" style="margin-top:6px;">Idle</div>
+          </details>
+        </div>
       </section>
 
     </main>
   </div>
 
   <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
-  <script src="/app.js?v=20260220g"></script>
+  <script src="/app.js?v=20260220h"></script>
 </body>
 </html>

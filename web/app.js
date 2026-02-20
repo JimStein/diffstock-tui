@@ -629,7 +629,7 @@ const renderTradeHistory = () => {
   if (!box) return;
 
   if (!paperTradeHistory.length) {
-    box.innerHTML = `<div class='small'>No trades yet. Start paper trading to see execution history.</div>`;
+    box.innerHTML = `<div class='empty-state'><div class='empty-state-icon'>📝</div>No trades yet.<br>Start paper trading to see execution history.</div>`;
     return;
   }
 
@@ -839,6 +839,7 @@ document.getElementById('runForecast').addEventListener('click', async () => {
 const fillAssetTable = (alloc, paperStatus) => {
   const MODEL_PRICE_HORIZON_DAYS = 10;
   const paperMap = new Map((paperStatus?.latest_snapshot?.symbols || []).map(x => [x.symbol, x.price]));
+  const weightMap = new Map((alloc.weights || []).map(([s, w]) => [s, w]));
   const tb = document.querySelector('#assetTable tbody');
   tb.innerHTML = '';
   for (const f of alloc.asset_forecasts) {
@@ -848,6 +849,7 @@ const fillAssetTable = (alloc, paperStatus) => {
     const current = latestQuoteMap.get(f.symbol) ?? paperMap.get(f.symbol);
     const dev = current == null ? null : (current - modelPrice);
     const devPct = current == null ? null : (dev / modelPrice * 100);
+    const optWeight = weightMap.get(f.symbol);
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${f.symbol}</td>
@@ -857,8 +859,67 @@ const fillAssetTable = (alloc, paperStatus) => {
       <td class='num ${f.annual_return >=0 ? 'up' : 'down'}'>${(f.annual_return*100).toFixed(1)}%</td>
       <td class='num'>${(f.annual_vol*100).toFixed(1)}%</td>
       <td class='num ${f.sharpe >= 0 ? 'up':'down'}'>${f.sharpe.toFixed(2)}</td>
+      <td class='num'>${optWeight == null ? '--' : `${(optWeight * 100).toFixed(1)}%`}</td>
       <td class='num ${f.p50_price >= f.current_price ? 'up':'down'}'>$${f.p50_price.toFixed(2)}</td>`;
     tb.appendChild(tr);
+  }
+
+  // Portfolio stat cards
+  const statsPanel = document.getElementById('portfolioStatsPanel');
+  if (statsPanel) {
+    const retClass = alloc.expected_annual_return >= 0 ? 'up' : 'down';
+    const sharpeClass = alloc.sharpe_ratio >= 0 ? 'up' : 'down';
+    statsPanel.style.display = '';
+    statsPanel.innerHTML = `
+      <div class='stat-card'>
+        <div class='stat-card-label'>Expected Return</div>
+        <div class='stat-card-value ${retClass}'>${(alloc.expected_annual_return * 100).toFixed(1)}%</div>
+        <div class='stat-card-sub'>Annualized</div>
+      </div>
+      <div class='stat-card'>
+        <div class='stat-card-label'>Volatility</div>
+        <div class='stat-card-value'>${(alloc.expected_annual_vol * 100).toFixed(1)}%</div>
+        <div class='stat-card-sub'>Annualized</div>
+      </div>
+      <div class='stat-card'>
+        <div class='stat-card-label'>Sharpe Ratio</div>
+        <div class='stat-card-value ${sharpeClass}'>${alloc.sharpe_ratio.toFixed(2)}</div>
+        <div class='stat-card-sub'>Risk-adjusted</div>
+      </div>
+      <div class='stat-card'>
+        <div class='stat-card-label'>CVaR 95%</div>
+        <div class='stat-card-value down'>${(alloc.cvar_95 * 100).toFixed(2)}%</div>
+        <div class='stat-card-sub'>Tail risk</div>
+      </div>
+      <div class='stat-card'>
+        <div class='stat-card-label'>Leverage</div>
+        <div class='stat-card-value'>${alloc.leverage.toFixed(2)}x</div>
+        <div class='stat-card-sub'>Vol-target</div>
+      </div>
+    `;
+  }
+
+  // Weight allocation bar
+  const WEIGHT_COLORS = ['#3b82f6','#8b5cf6','#00d4aa','#f59e0b','#ff4757','#ec4899','#06b6d4','#84cc16','#f97316','#a78bfa'];
+  const barWrap = document.getElementById('portfolioWeightBar');
+  if (barWrap && alloc.weights && alloc.weights.length > 0) {
+    barWrap.style.display = '';
+    const sorted = [...alloc.weights].sort((a, b) => b[1] - a[1]);
+    let segments = '';
+    let legendItems = '';
+    sorted.forEach(([sym, w], i) => {
+      const color = WEIGHT_COLORS[i % WEIGHT_COLORS.length];
+      const pct = (w * 100).toFixed(1);
+      segments += `<div class='weight-bar-seg' style='flex-basis:${pct}%;background:${color};' title='${sym}: ${pct}%'>${w > 0.06 ? sym : ''}</div>`;
+      legendItems += `<span class='weight-bar-legend-item'><span class='weight-bar-legend-dot' style='background:${color}'></span>${sym} ${pct}%</span>`;
+    });
+    barWrap.innerHTML = `
+      <div class='weight-bar-label'>Optimal Weight Allocation</div>
+      <div class='weight-bar'>${segments}</div>
+      <div class='weight-bar-legend'>${legendItems}</div>
+    `;
+  } else if (barWrap) {
+    barWrap.style.display = 'none';
   }
 };
 
@@ -895,7 +956,7 @@ const fillHoldingsTable = (paperStatus) => {
   const orderedSymbols = Array.from(symbols).sort();
   if (orderedSymbols.length === 0) {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td colspan='8' class='small'>No holdings data yet. Run portfolio optimization and start paper trading.</td>`;
+    tr.innerHTML = `<td colspan='8'><div class='empty-state'><div class='empty-state-icon'>📊</div>No holdings data yet.<br>Run portfolio optimization and start paper trading.</div></td>`;
     tb.appendChild(tr);
     return;
   }
@@ -961,7 +1022,7 @@ const fillCapitalSummaryTable = (paperStatus) => {
   const snapshot = paperStatus?.latest_snapshot;
   if (!snapshot) {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td colspan='8' class='small'>No capital snapshot yet. Start or load paper trading first.</td>`;
+    tr.innerHTML = `<td colspan='8'><div class='empty-state'><div class='empty-state-icon'>💰</div>No capital snapshot yet.<br>Start or load paper trading first.</div></td>`;
     tb.appendChild(tr);
     return;
   }
@@ -1098,15 +1159,33 @@ window.addEventListener('resize', () => {
 const setPaperStatusChip = (status) => {
   const chip = document.getElementById('paperStatusChip');
   const dot = document.getElementById('systemDot');
+  const badge = document.getElementById('paperTabBadge');
   if (!status.running) {
     chip.textContent = 'IDLE';
     if (dot) { dot.classList.remove('active', 'paused'); }
+    if (badge) { badge.classList.remove('running', 'paused'); }
   } else if (status.paused) {
     chip.textContent = 'PAUSED';
     if (dot) { dot.classList.remove('active'); dot.classList.add('paused'); }
+    if (badge) { badge.classList.remove('running'); badge.classList.add('paused'); }
   } else {
     chip.textContent = 'RUNNING';
     if (dot) { dot.classList.remove('paused'); dot.classList.add('active'); }
+    if (badge) { badge.classList.remove('paused'); badge.classList.add('running'); }
+  }
+
+  // Next run chip
+  const nextRunChip = document.getElementById('nextRunChip');
+  if (nextRunChip) {
+    if (status.running && !status.paused && status.next_run_at) {
+      nextRunChip.textContent = `Next: ${status.next_run_at}`;
+    } else if (status.running && !status.paused) {
+      const t1 = document.getElementById('paperTime1')?.value || '--';
+      const t2 = document.getElementById('paperTime2')?.value || '--';
+      nextRunChip.textContent = `Sched: ${t1} / ${t2}`;
+    } else {
+      nextRunChip.textContent = 'Next: --';
+    }
   }
 };
 
@@ -1155,7 +1234,7 @@ const refreshPaper = async () => {
     }
 
     const logBox = document.getElementById('logBox');
-    logBox.innerHTML = (st.logs || []).slice(-20).map(x => `<div>${x}</div>`).join('');
+    if (logBox) logBox.innerHTML = (st.logs || []).slice(-20).map(x => `<div>${x}</div>`).join('');
     ingestPaperTrades(st);
     renderTradeHistory();
     fillHoldingsTable(st);
@@ -1259,7 +1338,75 @@ document.getElementById('paperStop').addEventListener('click', () => paperContro
 const refreshTrain = async () => {
   try {
     const st = await api('/api/train/status');
-    document.getElementById('trainStatus').textContent = JSON.stringify(st, null, 2);
+    const rawBox = document.getElementById('trainRawJson');
+    if (rawBox) rawBox.textContent = JSON.stringify(st, null, 2);
+
+    const phaseLabel = document.getElementById('trainPhaseLabel');
+    const progressWrap = document.getElementById('trainProgressWrap');
+    const progressFill = document.getElementById('trainProgressFill');
+    const progressLeft = document.getElementById('trainProgressLeft');
+    const progressRight = document.getElementById('trainProgressRight');
+    const cardsEl = document.getElementById('trainCards');
+    const trainBadge = document.getElementById('trainTabBadge');
+
+    const running = !!st.running;
+    const epoch = st.epoch || st.current_epoch || 0;
+    const totalEpochs = st.total_epochs || st.epochs || Number(document.getElementById('tEpochs')?.value) || 200;
+    const loss = st.loss ?? st.train_loss ?? null;
+    const bestLoss = st.best_loss ?? st.best_val_loss ?? null;
+    const lr = st.learning_rate ?? st.lr ?? null;
+    const elapsed = st.elapsed ?? st.elapsed_secs ?? null;
+
+    if (phaseLabel) {
+      phaseLabel.textContent = running ? `Epoch ${epoch} / ${totalEpochs}` : (epoch > 0 ? `Finished (${epoch} epochs)` : 'Idle');
+    }
+
+    if (trainBadge) {
+      trainBadge.classList.toggle('running', running);
+      if (!running) trainBadge.classList.remove('running');
+    }
+
+    if (progressWrap && progressFill) {
+      if (running || epoch > 0) {
+        progressWrap.style.display = '';
+        const pct = totalEpochs > 0 ? Math.min(100, (epoch / totalEpochs) * 100) : 0;
+        progressFill.style.width = `${pct.toFixed(1)}%`;
+        if (progressLeft) progressLeft.textContent = `${pct.toFixed(0)}%`;
+        if (progressRight) {
+          if (running && elapsed && epoch > 0) {
+            const secPerEpoch = elapsed / epoch;
+            const remaining = (totalEpochs - epoch) * secPerEpoch;
+            const mins = Math.floor(remaining / 60);
+            const secs = Math.floor(remaining % 60);
+            progressRight.textContent = `ETA ~${mins}m ${secs}s`;
+          } else progressRight.textContent = running ? '...' : 'Done';
+        }
+      } else {
+        progressWrap.style.display = 'none';
+      }
+    }
+
+    if (cardsEl) {
+      if (running || epoch > 0) {
+        cardsEl.style.display = '';
+        const fmtLoss = (v) => v != null && Number.isFinite(v) ? v.toFixed(6) : '--';
+        const fmtLr = (v) => v != null && Number.isFinite(v) ? v.toExponential(2) : '--';
+        const fmtTime = (secs) => {
+          if (!Number.isFinite(secs)) return '--';
+          if (secs < 60) return `${secs.toFixed(0)}s`;
+          return `${Math.floor(secs/60)}m ${Math.floor(secs%60)}s`;
+        };
+        cardsEl.innerHTML = `
+          <div class='stat-card'><div class='stat-card-label'>Epoch</div><div class='stat-card-value'>${epoch}<span style='font-size:12px;color:var(--muted);'> / ${totalEpochs}</span></div></div>
+          <div class='stat-card'><div class='stat-card-label'>Loss</div><div class='stat-card-value'>${fmtLoss(loss)}</div></div>
+          <div class='stat-card'><div class='stat-card-label'>Best Loss</div><div class='stat-card-value up'>${fmtLoss(bestLoss)}</div></div>
+          <div class='stat-card'><div class='stat-card-label'>Learning Rate</div><div class='stat-card-value'>${fmtLr(lr)}</div></div>
+          <div class='stat-card'><div class='stat-card-label'>Elapsed</div><div class='stat-card-value'>${fmtTime(elapsed)}</div></div>
+        `;
+      } else {
+        cardsEl.style.display = 'none';
+      }
+    }
   } catch {}
 };
 setInterval(refreshTrain, 5000);
@@ -1327,7 +1474,8 @@ const restoreState = async () => {
     }
 
     if (state.train) {
-      document.getElementById('trainStatus').textContent = JSON.stringify(state.train, null, 2);
+      const rawBox = document.getElementById('trainRawJson');
+      if (rawBox) rawBox.textContent = JSON.stringify(state.train, null, 2);
     }
 
     setStatus('State restored from backend', 'ok');
@@ -1339,3 +1487,23 @@ const restoreState = async () => {
 restoreState();
 renderQuotesAsOf();
 renderTradeHistory();
+
+// Backend chip: detect compute backend from /api/state
+(async () => {
+  const backendChip = document.getElementById('backendChip');
+  const backendDot = document.getElementById('backendDot');
+  if (!backendChip) return;
+  try {
+    const st = await api('/api/state');
+    const backend = st?.forecast?.last_request?.compute_backend || st?.compute_backend || null;
+    if (backend) {
+      const label = backend.charAt(0).toUpperCase() + backend.slice(1);
+      backendChip.textContent = `Backend: ${label}`;
+      if (backendDot) { backendDot.style.background = backend === 'cpu' ? 'var(--muted)' : 'var(--accent)'; }
+    } else {
+      backendChip.textContent = 'Backend: CPU';
+    }
+  } catch {
+    backendChip.textContent = 'Backend: --';
+  }
+})();
