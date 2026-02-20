@@ -41,7 +41,10 @@ let lastForecastContext = null;
 let paperTradeHistory = [];
 let paperTradeSeenKeys = new Set();
 let paperCostBasis = new Map();
+let selectedTradeFilter = 'all';
+let tradeSearchText = '';
 let selectedPaperRangeDays = 0.5;
+let paperSessionStartMs = null;
 let paperFullContext = {
   portfolioSeries: [],
   benchmarkSeries: [],
@@ -49,6 +52,9 @@ let paperFullContext = {
   latest: null,
 };
 const paperRangeButtons = Array.from(document.querySelectorAll('[data-paper-range-days]'));
+
+const tradeFilterButtons = Array.from(document.querySelectorAll('[data-trade-filter]'));
+const tradeSearchInput = document.getElementById('tradeSearchInput');
 
 const ensureForecastLegendElements = () => {
   const chartHost = document.getElementById('forecastChart');
@@ -628,12 +634,22 @@ const renderTradeHistory = () => {
   const box = document.getElementById('tradeHistory');
   if (!box) return;
 
-  if (!paperTradeHistory.length) {
+  const normalizedSearch = tradeSearchText.trim().toUpperCase();
+  const filteredTrades = paperTradeHistory.filter((tr) => {
+    if (selectedTradeFilter === 'buy' && tr.side !== 'BUY') return false;
+    if (selectedTradeFilter === 'sell' && tr.side !== 'SELL') return false;
+    if (selectedTradeFilter === 'profit' && !(tr.side === 'SELL' && tr.realizedUsd > 0)) return false;
+    if (selectedTradeFilter === 'loss' && !(tr.side === 'SELL' && tr.realizedUsd < 0)) return false;
+    if (normalizedSearch && !String(tr.symbol || '').toUpperCase().includes(normalizedSearch)) return false;
+    return true;
+  });
+
+  if (!filteredTrades.length) {
     box.innerHTML = `<div class='empty-state'><div class='empty-state-icon'>📝</div>No trades yet.<br>Start paper trading to see execution history.</div>`;
     return;
   }
 
-  box.innerHTML = paperTradeHistory.map((tr) => {
+  box.innerHTML = filteredTrades.map((tr) => {
     const sideClass = tr.side === 'BUY' ? 'buy' : (tr.side === 'SELL' ? 'sell' : '');
     const sideText = tr.side === 'BUY' ? 'BUY' : (tr.side === 'SELL' ? 'SELL' : tr.side);
     const feeText = Number.isFinite(tr.fee) ? `$${tr.fee.toFixed(2)}` : '--';
@@ -661,6 +677,187 @@ const resetPaperTradeState = () => {
   paperTradeSeenKeys = new Set();
   paperCostBasis = new Map();
   renderTradeHistory();
+  if (typeof portfolioLine?.setMarkers === 'function') {
+    portfolioLine.setMarkers([]);
+  }
+};
+
+const setPaperTradeMarkers = () => {
+  if (typeof portfolioLine?.setMarkers !== 'function') return;
+
+  const markers = [];
+  const seen = new Set();
+  for (const tr of paperTradeHistory) {
+    const t = Math.floor(Number(tr.timestampMs) / 1000);
+    if (!Number.isFinite(t) || t <= 0) continue;
+    const markerKey = `${t}-${tr.side}-${tr.symbol}`;
+    if (seen.has(markerKey)) continue;
+    seen.add(markerKey);
+
+    const isBuy = tr.side === 'BUY';
+    markers.push({
+      time: t,
+      position: isBuy ? 'belowBar' : 'aboveBar',
+      color: isBuy ? '#00d4aa' : '#ff4757',
+      shape: isBuy ? 'arrowUp' : 'arrowDown',
+      text: `${tr.side} ${tr.symbol}`,
+    });
+  }
+
+  markers.sort((a, b) => a.time - b.time);
+  portfolioLine.setMarkers(markers);
+};
+
+const computeMaxDrawdownPct = (series = []) => {
+  if (!Array.isArray(series) || series.length === 0) return null;
+  let peak = -Infinity;
+  let maxDrawdown = 0;
+  for (const point of series) {
+    const value = Number(point?.value);
+    if (!Number.isFinite(value) || value <= 0) continue;
+    peak = Math.max(peak, value);
+    if (peak > 0) {
+      const drawdown = ((value - peak) / peak) * 100;
+      maxDrawdown = Math.min(maxDrawdown, drawdown);
+    }
+  }
+  return maxDrawdown;
+};
+
+const renderPaperKpis = (paperStatus) => {
+  const grid = document.getElementById('paperKpiGrid');
+  if (!grid) return;
+
+  const snapshot = paperStatus?.latest_snapshot;
+  if (!snapshot) {
+    grid.innerHTML = `<div class='empty-state'><div class='empty-state-icon'>📉</div>No live paper snapshot yet.</div>`;
+    return;
+  }
+
+  const totalAssets = Number(snapshot.total_value);
+  const pnlUsd = Number(snapshot.pnl_usd);
+  const pnlPct = Number(snapshot.pnl_pct);
+  const cashUsd = Number(snapshot.cash_usd);
+  const investedPct = Number.isFinite(totalAssets) && totalAssets > 0 && Number.isFinite(cashUsd)
+    ? ((totalAssets - cashUsd) / totalAssets) * 100
+    : null;
+
+  const maxDrawdownPct = computeMaxDrawdownPct(paperFullContext?.portfolioSeries || []);
+  const sellTrades = paperTradeHistory.filter((x) => x.side === 'SELL');
+  const winners = sellTrades.filter((x) => Number(x.realizedUsd) > 0).length;
+  const winRate = sellTrades.length > 0 ? (winners / sellTrades.length) * 100 : null;
+  const spreadPct = Number(paperFullContext?.latest?.spreadPct);
+
+  const investedClass = Number.isFinite(investedPct) && investedPct > 90 ? 'down' : 'up';
+  const spreadClass = Number.isFinite(spreadPct) && spreadPct < 0 ? 'down' : 'up';
+
+  // Determine card mood classes for glassmorphism
+  const pnlMood = Number.isFinite(pnlUsd) ? (pnlUsd >= 0 ? 'kpi-positive' : 'kpi-negative') : 'kpi-neutral';
+  const investedMood = Number.isFinite(investedPct) && investedPct > 90 ? 'kpi-warn' : 'kpi-neutral';
+  const ddMood = Number.isFinite(maxDrawdownPct) && maxDrawdownPct < -5 ? 'kpi-negative' : (Number.isFinite(maxDrawdownPct) ? 'kpi-neutral' : 'kpi-neutral');
+  const winMood = Number.isFinite(winRate) ? (winRate >= 50 ? 'kpi-positive' : 'kpi-negative') : 'kpi-neutral';
+  const spreadMood = Number.isFinite(spreadPct) ? (spreadPct >= 0 ? 'kpi-positive' : 'kpi-negative') : 'kpi-neutral';
+
+  grid.innerHTML = `
+    <div class='paper-kpi-card kpi-neutral'>
+      <div class='paper-kpi-label'>Total Assets</div>
+      <div class='paper-kpi-value'>${Number.isFinite(totalAssets) ? `$${totalAssets.toFixed(2)}` : '--'}</div>
+    </div>
+    <div class='paper-kpi-card ${pnlMood}'>
+      <div class='paper-kpi-label'>Session PnL</div>
+      <div class='paper-kpi-value ${Number.isFinite(pnlUsd) && pnlUsd < 0 ? 'down' : 'up'}'>${Number.isFinite(pnlUsd) ? `${formatSignedMoney(pnlUsd)} (${formatPct(pnlPct)})` : '--'}</div>
+    </div>
+    <div class='paper-kpi-card ${investedMood}'>
+      <div class='paper-kpi-label'>Open Risk</div>
+      <div class='paper-kpi-value ${investedClass}'>${Number.isFinite(investedPct) ? `${investedPct.toFixed(1)}%` : '--'}</div>
+    </div>
+    <div class='paper-kpi-card ${ddMood}'>
+      <div class='paper-kpi-label'>Max Drawdown</div>
+      <div class='paper-kpi-value ${Number.isFinite(maxDrawdownPct) && maxDrawdownPct < 0 ? 'down' : ''}'>${Number.isFinite(maxDrawdownPct) ? `${maxDrawdownPct.toFixed(2)}%` : '--'}</div>
+    </div>
+    <div class='paper-kpi-card ${winMood}'>
+      <div class='paper-kpi-label'>Win Rate (SELL)</div>
+      <div class='paper-kpi-value'>${Number.isFinite(winRate) ? `${winRate.toFixed(1)}%` : '--'}</div>
+    </div>
+    <div class='paper-kpi-card ${spreadMood}'>
+      <div class='paper-kpi-label'>vs Benchmark</div>
+      <div class='paper-kpi-value ${spreadClass}'>${Number.isFinite(spreadPct) ? `${spreadPct >= 0 ? '+' : ''}${spreadPct.toFixed(2)}%` : '--'}</div>
+    </div>
+  `;
+
+  // Session duration badge
+  const badge = document.getElementById('kpiDurationBadge');
+  if (badge) {
+    if (paperSessionStartMs && paperStatus?.running) {
+      const elapsed = Date.now() - paperSessionStartMs;
+      const h = Math.floor(elapsed / 3600000);
+      const m = Math.floor((elapsed % 3600000) / 60000);
+      badge.textContent = `⏱ ${h > 0 ? h + 'h ' : ''}${m}m`;
+      badge.style.display = '';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+};
+
+const renderPaperRiskAlerts = (paperStatus) => {
+  const panel = document.getElementById('paperRiskPanel');
+  const list = document.getElementById('paperRiskList');
+  if (!panel || !list) return;
+
+  const alerts = [];
+  const snapshot = paperStatus?.latest_snapshot;
+  if (snapshot) {
+    const totalAssets = Number(snapshot.total_value);
+    const cashUsd = Number(snapshot.cash_usd);
+    const cashPct = Number.isFinite(totalAssets) && totalAssets > 0 && Number.isFinite(cashUsd)
+      ? (cashUsd / totalAssets) * 100
+      : null;
+
+    if (Number.isFinite(cashPct) && cashPct < 5) {
+      alerts.push({ level: 'warn', label: 'Low cash buffer', value: `${cashPct.toFixed(2)}% cash remaining` });
+    }
+
+    const holdings = Array.isArray(snapshot.holdings) ? snapshot.holdings : [];
+    let maxSinglePos = 0;
+    let maxSingleSym = '--';
+    for (const holding of holdings) {
+      const assetValue = Number(holding?.asset_value);
+      if (!Number.isFinite(assetValue) || !Number.isFinite(totalAssets) || totalAssets <= 0) continue;
+      const weight = (assetValue / totalAssets) * 100;
+      if (weight > maxSinglePos) {
+        maxSinglePos = weight;
+        maxSingleSym = String(holding?.symbol || '--');
+      }
+    }
+    if (maxSinglePos > 45) {
+      alerts.push({ level: 'warn', label: 'Concentration risk', value: `${maxSingleSym} at ${maxSinglePos.toFixed(1)}%` });
+    }
+  }
+
+  const maxDd = computeMaxDrawdownPct(paperFullContext?.portfolioSeries || []);
+  if (Number.isFinite(maxDd) && maxDd <= -8) {
+    alerts.push({ level: 'danger', label: 'Drawdown pressure', value: `Peak-to-trough ${maxDd.toFixed(2)}%` });
+  }
+
+  const spreadPct = Number(paperFullContext?.latest?.spreadPct);
+  if (Number.isFinite(spreadPct) && spreadPct < -5) {
+    alerts.push({ level: 'danger', label: 'Benchmark underperformance', value: `${spreadPct.toFixed(2)}% vs QQQ` });
+  }
+
+  if (!alerts.length) {
+    panel.style.display = 'none';
+    list.innerHTML = '';
+    return;
+  }
+
+  panel.style.display = '';
+  list.innerHTML = alerts.map((alert) => `
+    <div class='paper-risk-item ${alert.level === 'danger' ? 'danger' : ''}'>
+      <strong>${alert.label}</strong>
+      <span>${alert.value}</span>
+    </div>
+  `).join('');
 };
 
 const setForecastDeltaText = (el, targetValue, currentValue) => {
@@ -1006,7 +1203,13 @@ const fillHoldingsTable = (paperStatus) => {
       <td class='num'>${avgCost == null ? '--' : '$' + avgCost.toFixed(2)}</td>
       <td class='num'>${assetValue == null ? '--' : '$' + assetValue.toFixed(2)}</td>
       <td class='num'>${targetWeight == null ? '--' : `${(targetWeight * 100).toFixed(2)}%`}</td>
-      <td class='num ${unrealizedClass}'>${unrealizedText}</td>
+      <td class='num ${unrealizedClass}'>${(() => {
+        if (unrealizedText === '--') return '--';
+        const uPct = avgCost !== 0 && quantity > 0 ? Math.abs(((currentPrice - avgCost) / avgCost) * 100) : 0;
+        const barW = Math.min(uPct * 2, 100);
+        const barCls = unrealizedClass === 'up' ? 'bar-up' : 'bar-down';
+        return `<div class='pnl-cell-wrap'><span>${unrealizedText}</span><div class='pnl-mini-bar ${barCls}' style='width:${barW}%'></div></div>`;
+      })()}</td>
     `;
     tb.appendChild(tr);
   }
@@ -1055,6 +1258,9 @@ const fillCapitalSummaryTable = (paperStatus) => {
   const totalPnlClass = Number.isFinite(totalPnlUsd)
     ? (totalPnlUsd >= 0 ? 'up' : 'down')
     : '';
+  const returnBgClass = Number.isFinite(totalPnlUsd)
+    ? (totalPnlUsd >= 0 ? 'pnl-bg-up' : 'pnl-bg-down')
+    : '';
   const returnText = Number.isFinite(totalPnlPct)
     ? `${totalPnlPct >= 0 ? '+' : ''}${totalPnlPct.toFixed(2)}%`
     : '--';
@@ -1075,8 +1281,8 @@ const fillCapitalSummaryTable = (paperStatus) => {
     <td class='num'>${Number.isFinite(cashUsd) ? '$' + cashUsd.toFixed(2) : '--'}</td>
     <td class='num'>${safeTotal > 0 ? `$${investedValue.toFixed(2)} (${investedWeightPct.toFixed(2)}%)` : '--'}</td>
     <td class='num'>${Number.isFinite(totalAssets) ? '$' + totalAssets.toFixed(2) : '--'}</td>
-    <td class='num ${totalPnlClass}'>${returnText}</td>
-    <td class='num ${totalPnlClass}' title='${pnlTitle}'>${pnlText}</td>
+    <td class='num ${totalPnlClass} ${returnBgClass}'>${returnText}</td>
+    <td class='num ${totalPnlClass} ${returnBgClass}' title='${pnlTitle}'>${pnlText}</td>
   `;
   tb.appendChild(totalTr);
 };
@@ -1121,12 +1327,29 @@ const portfolioLine = paperChart.addLineSeries({ color: '#00d4aa', lineWidth: 2 
 const benchmarkLine = paperChart.addLineSeries({ color: '#f59e0b', lineWidth: 2 });
 attachChartAutoResize(paperChart);
 
+for (const btn of tradeFilterButtons) {
+  btn.addEventListener('click', () => {
+    for (const b of tradeFilterButtons) b.classList.remove('active');
+    btn.classList.add('active');
+    selectedTradeFilter = String(btn.dataset.tradeFilter || 'all');
+    renderTradeHistory();
+  });
+}
+
+if (tradeSearchInput) {
+  tradeSearchInput.addEventListener('input', () => {
+    tradeSearchText = tradeSearchInput.value || '';
+    renderTradeHistory();
+  });
+}
+
 for (const btn of paperRangeButtons) {
   btn.addEventListener('click', () => {
     const days = Number(btn.dataset.paperRangeDays);
     if (!Number.isFinite(days) || days <= 0) return;
     selectedPaperRangeDays = days;
     renderPaperChartFromCurrentContext();
+    renderChartSummaryStrip();
   });
 }
 
@@ -1164,6 +1387,7 @@ const setPaperStatusChip = (status) => {
     chip.textContent = 'IDLE';
     if (dot) { dot.classList.remove('active', 'paused'); }
     if (badge) { badge.classList.remove('running', 'paused'); }
+    paperSessionStartMs = null;
   } else if (status.paused) {
     chip.textContent = 'PAUSED';
     if (dot) { dot.classList.remove('active'); dot.classList.add('paused'); }
@@ -1172,6 +1396,7 @@ const setPaperStatusChip = (status) => {
     chip.textContent = 'RUNNING';
     if (dot) { dot.classList.remove('paused'); dot.classList.add('active'); }
     if (badge) { badge.classList.remove('paused'); badge.classList.add('running'); }
+    if (!paperSessionStartMs) paperSessionStartMs = Date.now();
   }
 
   // Next run chip
@@ -1189,6 +1414,56 @@ const setPaperStatusChip = (status) => {
   }
 };
 
+const renderChartSummaryStrip = () => {
+  const strip = document.getElementById('chartSummaryStrip');
+  if (!strip) return;
+
+  const latest = paperFullContext?.latest;
+  const series = paperFullContext?.portfolioSeries || [];
+  if (!latest || series.length === 0) {
+    strip.style.display = 'none';
+    return;
+  }
+
+  const nav = Number(latest.portfolioValue);
+  const pnlPct = Number(latest.portfolioPnlPct);
+  const spreadPct = Number(latest.spreadPct);
+
+  // compute session daily change from last two points
+  let dailyChange = null;
+  let dailyChangePct = null;
+  if (series.length >= 2) {
+    const cur = Number(series[series.length - 1]?.value);
+    const prev = Number(series[series.length - 2]?.value);
+    if (Number.isFinite(cur) && Number.isFinite(prev) && prev > 0) {
+      dailyChange = cur - prev;
+      dailyChangePct = ((cur - prev) / prev) * 100;
+    }
+  }
+
+  const upDown = (v) => Number.isFinite(v) ? (v >= 0 ? 'up' : 'down') : '';
+
+  strip.style.display = '';
+  strip.innerHTML = `
+    <div class='strip-item'>
+      <span class='strip-label'>NAV</span>
+      <span class='strip-val'>${Number.isFinite(nav) ? '$' + nav.toFixed(2) : '--'}</span>
+    </div>
+    <div class='strip-item'>
+      <span class='strip-label'>PnL</span>
+      <span class='strip-val ${upDown(pnlPct)}'>${Number.isFinite(pnlPct) ? `${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%` : '--'}</span>
+    </div>
+    <div class='strip-item'>
+      <span class='strip-label'>Last \u0394</span>
+      <span class='strip-val ${upDown(dailyChange)}'>${Number.isFinite(dailyChange) ? `${dailyChange >= 0 ? '+' : ''}$${dailyChange.toFixed(2)} (${dailyChangePct.toFixed(2)}%)` : '--'}</span>
+    </div>
+    <div class='strip-item'>
+      <span class='strip-label'>vs Bench</span>
+      <span class='strip-val ${upDown(spreadPct)}'>${Number.isFinite(spreadPct) ? `${spreadPct >= 0 ? '+' : ''}${spreadPct.toFixed(2)}%` : '--'}</span>
+    </div>
+  `;
+};
+
 const refreshPaper = async () => {
   try {
     const st = await api('/api/paper/status');
@@ -1198,6 +1473,7 @@ const refreshPaper = async () => {
     const ctx = buildPaperSeriesContext(st.snapshots || []);
     paperFullContext = ctx.portfolioSeries.length > 0 ? ctx : buildFallbackPaperContext(st.latest_snapshot);
     renderPaperChartFromCurrentContext();
+    renderChartSummaryStrip();
 
     const rtTb = document.querySelector('#rtTable tbody');
     const chTb = document.querySelector('#chTable tbody');
@@ -1237,8 +1513,11 @@ const refreshPaper = async () => {
     if (logBox) logBox.innerHTML = (st.logs || []).slice(-20).map(x => `<div>${x}</div>`).join('');
     ingestPaperTrades(st);
     renderTradeHistory();
+    setPaperTradeMarkers();
     fillHoldingsTable(st);
     fillCapitalSummaryTable(st);
+    renderPaperKpis(st);
+    renderPaperRiskAlerts(st);
 
     if (lastPortfolio) fillAssetTable(lastPortfolio, st);
     await refreshRealtimeQuotes();
@@ -1466,11 +1745,15 @@ const restoreState = async () => {
       const ctx = buildPaperSeriesContext(state.paper.snapshots || []);
       paperFullContext = ctx.portfolioSeries.length > 0 ? ctx : buildFallbackPaperContext(state.paper.latest_snapshot);
       renderPaperChartFromCurrentContext();
+      renderChartSummaryStrip();
 
       ingestPaperTrades(state.paper);
       renderTradeHistory();
+      setPaperTradeMarkers();
       fillHoldingsTable(state.paper);
       fillCapitalSummaryTable(state.paper);
+      renderPaperKpis(state.paper);
+      renderPaperRiskAlerts(state.paper);
     }
 
     if (state.train) {

@@ -405,7 +405,15 @@
       align-items: center;
       font-size: 12px;
       border-bottom: 1px solid var(--border);
-      padding: 8px 2px;
+      padding: 8px 4px;
+      border-radius: 4px;
+      transition: background var(--transition);
+    }
+    .trade-item:nth-child(even) {
+      background: rgba(255,255,255,.02);
+    }
+    .trade-item:hover {
+      background: rgba(59,130,246,.06);
     }
     .trade-item:last-child { border-bottom: none; }
     .trade-time {
@@ -454,6 +462,81 @@
       font-family: var(--mono);
       font-size: 11px;
       text-align: right;
+    }
+
+    /* ─── Holdings PnL Mini Bar ─── */
+    .pnl-cell-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      align-items: flex-end;
+    }
+    .pnl-mini-bar {
+      height: 3px;
+      border-radius: 2px;
+      min-width: 4px;
+      max-width: 100%;
+      opacity: .7;
+    }
+    .pnl-mini-bar.bar-up {
+      background: linear-gradient(90deg, rgba(0,212,170,.3), var(--up));
+    }
+    .pnl-mini-bar.bar-down {
+      background: linear-gradient(90deg, var(--down), rgba(255,71,87,.3));
+    }
+
+    /* ─── Chart Sparkline Summary Strip ─── */
+    .chart-summary-strip {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 6px 0 4px;
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--text-2);
+      flex-wrap: wrap;
+    }
+    .strip-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .strip-label {
+      color: var(--muted);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: .4px;
+      font-family: var(--font);
+      font-weight: 600;
+    }
+    .strip-val {
+      font-weight: 600;
+    }
+
+    /* ─── Session Duration Badge ─── */
+    .kpi-duration-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(59,130,246,.1);
+      color: var(--accent-2);
+      border: 1px solid rgba(59,130,246,.2);
+      border-radius: 999px;
+      padding: 2px 9px;
+      font-size: 10px;
+      font-weight: 600;
+      font-family: var(--mono);
+      letter-spacing: .3px;
+    }
+
+    /* ─── Capital Summary PnL background ─── */
+    td.num.pnl-bg-up {
+      background: rgba(0,212,170,.08);
+      border-radius: 4px;
+    }
+    td.num.pnl-bg-down {
+      background: rgba(255,71,87,.08);
+      border-radius: 4px;
     }
 
     /* ─── Charts ─── */
@@ -800,6 +883,117 @@
       border-radius: var(--radius);
     }
 
+    /* ─── Paper KPI & Alerts ─── */
+    .paper-kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px;
+    }
+    .paper-kpi-card {
+      background: rgba(21,28,44,.55);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--border-2);
+      border-radius: var(--radius);
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      transition: background var(--transition), border-color var(--transition), box-shadow var(--transition);
+    }
+    .paper-kpi-card.kpi-positive {
+      background: rgba(0,212,170,.07);
+      border-left-color: var(--up);
+      box-shadow: inset 0 0 24px rgba(0,212,170,.04);
+    }
+    .paper-kpi-card.kpi-negative {
+      background: rgba(255,71,87,.07);
+      border-left-color: var(--down);
+      box-shadow: inset 0 0 24px rgba(255,71,87,.04);
+    }
+    .paper-kpi-card.kpi-neutral {
+      background: rgba(59,130,246,.06);
+      border-left-color: var(--accent);
+      box-shadow: inset 0 0 24px rgba(59,130,246,.03);
+    }
+    .paper-kpi-card.kpi-warn {
+      background: rgba(245,158,11,.07);
+      border-left-color: var(--gold);
+      box-shadow: inset 0 0 24px rgba(245,158,11,.04);
+    }
+    .paper-kpi-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .paper-kpi-value {
+      font-family: var(--mono);
+      font-size: 17px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      color: var(--text);
+    }
+    .paper-risk-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .paper-risk-item {
+      border: 1px solid rgba(245,158,11,.35);
+      background: rgba(245,158,11,.08);
+      color: #f5c56b;
+      border-radius: var(--radius);
+      padding: 8px 10px;
+      font-size: 12px;
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .paper-risk-item.danger {
+      border-color: rgba(255,71,87,.35);
+      background: rgba(255,71,87,.08);
+      color: #ff8e98;
+    }
+
+    /* ─── Trade Toolbar ─── */
+    .trade-toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+      flex-wrap: wrap;
+    }
+    .trade-filter-chips {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .trade-chip {
+      padding: 4px 9px;
+      border: 1px solid var(--border-2);
+      border-radius: 999px;
+      font-size: 11px;
+      cursor: pointer;
+      color: var(--muted);
+      background: transparent;
+      min-height: 26px;
+    }
+    .trade-chip.active {
+      color: var(--accent-2);
+      border-color: rgba(59,130,246,.35);
+      background: var(--accent-bg);
+    }
+    #tradeSearchInput {
+      min-width: 180px;
+      max-width: 260px;
+      font-size: 12px;
+      padding: 6px 10px;
+    }
+
     /* ─── Responsive ─── */
     @media (max-width: 900px) {
       .shell { grid-template-columns: 1fr; }
@@ -815,6 +1009,7 @@
       .tab-btn { padding: 8px 14px; }
       .tab-btn.active::before { display: none; }
       .grid-2 { grid-template-columns: 1fr; }
+      #tradeSearchInput { min-width: 120px; max-width: 100%; width: 100%; }
     }
   </style>
 </head>
@@ -991,7 +1186,22 @@
           </div>
           <div class="small">Uses current portfolio symbols/weights as targets.</div>
         </div>
+        <div class="panel" id="paperRiskPanel" style="display:none;">
+          <div class="panel-header" style="margin-bottom:8px;">
+            <div class="panel-title"><span class="panel-title-icon">⚠️</span> Risk Alerts</div>
+            <div class="panel-subtitle">UI-only monitoring hints</div>
+          </div>
+          <div id="paperRiskList" class="paper-risk-list"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title"><span class="panel-title-icon">📊</span> Session KPI <span id="kpiDurationBadge" class="kpi-duration-badge" style="display:none;"></span></div>
+            <div class="panel-subtitle">Live paper performance snapshot</div>
+          </div>
+          <div id="paperKpiGrid" class="paper-kpi-grid"></div>
+        </div>
         <div class="panel" style="padding:12px;">
+          <div class="chart-summary-strip" id="chartSummaryStrip" style="display:none;"></div>
           <div class="range-group" id="paperRangeGroup">
             <button class="range-btn" data-paper-range-days="0.25">6h</button>
             <button class="range-btn active" data-paper-range-days="0.5">12h</button>
@@ -1056,6 +1266,16 @@
           <div class="panel-header">
             <div class="panel-title"><span class="panel-title-icon">&#128221;</span> Trade History</div>
             <div class="panel-subtitle">Latest first · Scrollable</div>
+          </div>
+          <div class="trade-toolbar">
+            <div id="tradeFilterChips" class="trade-filter-chips">
+              <button class="trade-chip active" data-trade-filter="all">All</button>
+              <button class="trade-chip" data-trade-filter="buy">Buy</button>
+              <button class="trade-chip" data-trade-filter="sell">Sell</button>
+              <button class="trade-chip" data-trade-filter="profit">Profit</button>
+              <button class="trade-chip" data-trade-filter="loss">Loss</button>
+            </div>
+            <input id="tradeSearchInput" placeholder="Search symbol..." />
           </div>
           <div id="tradeHistory" class="trade-history"></div>
         </div>
@@ -1129,6 +1349,6 @@
   </div>
 
   <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
-  <script src="/app.js?v=20260220h"></script>
+  <script src="/app.js?v=20260220j"></script>
 </body>
 </html>
