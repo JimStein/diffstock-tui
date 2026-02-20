@@ -837,17 +837,21 @@ document.getElementById('runForecast').addEventListener('click', async () => {
 });
 
 const fillAssetTable = (alloc, paperStatus) => {
+  const MODEL_PRICE_HORIZON_DAYS = 10;
   const paperMap = new Map((paperStatus?.latest_snapshot?.symbols || []).map(x => [x.symbol, x.price]));
   const tb = document.querySelector('#assetTable tbody');
   tb.innerHTML = '';
   for (const f of alloc.asset_forecasts) {
+    const modelPrice = Number.isFinite(f.expected_return)
+      ? f.current_price * Math.exp(f.expected_return * MODEL_PRICE_HORIZON_DAYS)
+      : f.current_price;
     const current = latestQuoteMap.get(f.symbol) ?? paperMap.get(f.symbol);
-    const dev = current == null ? null : (current - f.current_price);
-    const devPct = current == null ? null : (dev / f.current_price * 100);
+    const dev = current == null ? null : (current - modelPrice);
+    const devPct = current == null ? null : (dev / modelPrice * 100);
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${f.symbol}</td>
-      <td class='num'>$${f.current_price.toFixed(2)}</td>
+      <td class='num'>$${modelPrice.toFixed(2)}</td>
       <td class='num'>${current == null ? '--' : '$' + current.toFixed(2)}</td>
       <td class='num ${dev == null ? '' : (dev >= 0 ? 'up' : 'down')}'>${dev == null ? '--' : `${dev >=0 ? '+' : ''}${dev.toFixed(2)} (${devPct >=0 ? '+' : ''}${devPct.toFixed(2)}%)`}</td>
       <td class='num ${f.annual_return >=0 ? 'up' : 'down'}'>${(f.annual_return*100).toFixed(1)}%</td>
