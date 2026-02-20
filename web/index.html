@@ -987,6 +987,118 @@
       border-color: rgba(59,130,246,.35);
       background: var(--accent-bg);
     }
+    .source-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 42px;
+      border-radius: 999px;
+      padding: 1px 7px;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: .4px;
+      line-height: 1.4;
+      border: 1px solid transparent;
+    }
+    .source-badge.rt {
+      color: var(--up);
+      background: var(--up-bg);
+      border-color: rgba(0,212,170,.25);
+    }
+    .source-badge.forecast {
+      color: var(--accent-2);
+      background: rgba(59,130,246,.12);
+      border-color: rgba(59,130,246,.28);
+    }
+
+    /* ─── Realtime Market Card Grid ─── */
+    .rt-market-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(185px, 1fr));
+      gap: 10px;
+    }
+    .rt-card {
+      background: rgba(21,28,44,.55);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--border-2);
+      border-radius: var(--radius);
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      transition: background var(--transition), border-color var(--transition), transform .15s ease;
+      position: relative;
+    }
+    .rt-card:hover {
+      background: rgba(30,38,58,.7);
+      transform: translateY(-1px);
+    }
+    .rt-card.card-up {
+      border-left-color: var(--up);
+      box-shadow: inset 0 0 20px rgba(0,212,170,.04);
+    }
+    .rt-card.card-down {
+      border-left-color: var(--down);
+      box-shadow: inset 0 0 20px rgba(255,71,87,.04);
+    }
+    .rt-card.card-neutral {
+      border-left-color: var(--muted-2);
+    }
+    .rt-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+    .rt-card-symbol {
+      font-weight: 700;
+      font-size: 13px;
+      letter-spacing: .3px;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .rt-card-holding-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--up);
+      box-shadow: 0 0 4px rgba(0,212,170,.5);
+      flex-shrink: 0;
+    }
+    .rt-card-price {
+      font-family: var(--mono);
+      font-size: 19px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      color: var(--text);
+      line-height: 1.2;
+    }
+    .rt-card-change {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .rt-card-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      margin-top: 2px;
+    }
+    .rt-card-updated {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--muted-2);
+      white-space: nowrap;
+    }
+
     #tradeSearchInput {
       min-width: 180px;
       max-width: 260px;
@@ -1279,19 +1391,12 @@
           </div>
           <div id="tradeHistory" class="trade-history"></div>
         </div>
-        <div class="grid-2">
-          <div class="panel">
-            <div class="panel-header">
-              <div class="panel-title"><span class="panel-title-icon">&#128225;</span> Realtime Prices</div>
-            </div>
-            <table id="rtTable"><thead><tr><th>Symbol</th><th class="num">Price</th><th>Tag</th></tr></thead><tbody></tbody></table>
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title"><span class="panel-title-icon">&#128225;</span> Realtime Market</div>
+            <div class="panel-subtitle" id="rtMarketSubtitle">Prices &amp; 1m change · auto-refresh</div>
           </div>
-          <div class="panel">
-            <div class="panel-header">
-              <div class="panel-title"><span class="panel-title-icon">&#9889;</span> Per-Symbol 1m Change</div>
-            </div>
-            <table id="chTable"><thead><tr><th>Symbol</th><th class="num">Current</th><th class="num">1m &#916;</th><th class="num">1m &#916;%</th></tr></thead><tbody></tbody></table>
-          </div>
+          <div id="rtMarketGrid" class="rt-market-grid"></div>
         </div>
         <div class="panel">
           <div class="panel-header">
@@ -1349,6 +1454,6 @@
   </div>
 
   <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
-  <script src="/app.js?v=20260220j"></script>
+  <script src="/app.js?v=20260220k"></script>
 </body>
 </html>

@@ -1288,12 +1288,18 @@ const fillCapitalSummaryTable = (paperStatus) => {
 };
 
 const refreshRealtimeQuotes = async () => {
-  if (!lastPortfolio?.asset_forecasts?.length) return;
+  const typedSymbols = (document.getElementById('pSymbols')?.value || '')
+    .split(',')
+    .map((s) => s.trim().toUpperCase())
+    .filter(Boolean);
+  const portfolioSymbols = (lastPortfolio?.asset_forecasts || [])
+    .map((x) => String(x.symbol || '').toUpperCase())
+    .filter(Boolean);
+  const symbols = Array.from(new Set([...portfolioSymbols, ...typedSymbols]));
+  if (!symbols.length) return;
   const now = Date.now();
   if (now - lastQuotesAt < 25000) return;
   lastQuotesAt = now;
-
-  const symbols = lastPortfolio.asset_forecasts.map(x => x.symbol);
   try {
     const q = await api('/api/quotes', {
       method: 'POST',
@@ -1474,11 +1480,10 @@ const refreshPaper = async () => {
     paperFullContext = ctx.portfolioSeries.length > 0 ? ctx : buildFallbackPaperContext(st.latest_snapshot);
     renderPaperChartFromCurrentContext();
     renderChartSummaryStrip();
+    await refreshRealtimeQuotes();
 
-    const rtTb = document.querySelector('#rtTable tbody');
-    const chTb = document.querySelector('#chTable tbody');
-    rtTb.innerHTML = '';
-    chTb.innerHTML = '';
+    const rtGrid = document.getElementById('rtMarketGrid');
+    if (rtGrid) rtGrid.innerHTML = '';
 
     const snapshot = st.latest_snapshot;
     const holdings = new Set(snapshot?.holdings_symbols || []);
@@ -1492,21 +1497,52 @@ const refreshPaper = async () => {
     const allInputs = new Set([...(lastPortfolio?.asset_forecasts || []).map(x => x.symbol), ...typedInputs]);
     for (const s of (snapshot?.symbols || [])) allInputs.add(s.symbol);
 
-    for (const sym of allInputs) {
-      const row = snapshotMap.get(sym);
-      const fallback = forecastMap.get(sym);
-      const price = row?.price ?? fallback;
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${sym}</td><td class='num'>${price == null ? '--' : '$'+price.toFixed(2)}</td><td>${holdings.has(sym)?'Holding':'Input'}</td>`;
-      rtTb.appendChild(tr);
-    }
+    if (rtGrid) {
+      if (allInputs.size === 0) {
+        rtGrid.innerHTML = `<div class='empty-state'><div class='empty-state-icon'>📡</div>No symbols tracked yet.<br>Run portfolio optimization or start paper trading.</div>`;
+      } else {
+        for (const sym of allInputs) {
+          const row = snapshotMap.get(sym);
+          const forecastPx = Number(forecastMap.get(sym));
+          const quotePx = Number(latestQuoteMap.get(sym));
+          const fallback = Number.isFinite(forecastPx) ? forecastPx : null;
+          const rowPrice = Number(row?.price);
+          const rtPrice = Number.isFinite(rowPrice) ? rowPrice : (Number.isFinite(quotePx) ? quotePx : null);
+          const source = rtPrice != null ? 'rt' : 'forecast';
+          const price = rtPrice ?? fallback;
+          const isHolding = holdings.has(sym);
 
-    for (const sym of allInputs) {
-      const s = snapshotMap.get(sym);
-      if (!s) continue;
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${s.symbol}</td><td class='num'>$${s.price.toFixed(2)}</td><td class='num ${s.change_1m>=0?'up':'down'}'>${s.change_1m>=0?'+':''}${s.change_1m.toFixed(3)}</td><td class='num ${s.change_1m_pct>=0?'up':'down'}'>${s.change_1m_pct>=0?'+':''}${s.change_1m_pct.toFixed(3)}%</td>`;
-      chTb.appendChild(tr);
+          // 1m change from snapshot
+          const ch = row?.change_1m;
+          const chPct = row?.change_1m_pct;
+          const hasCh = Number.isFinite(ch);
+          const chSign = hasCh ? (ch >= 0 ? '+' : '') : '';
+          const chClass = hasCh ? (ch >= 0 ? 'up' : 'down') : '';
+          const cardMood = hasCh ? (ch >= 0 ? 'card-up' : 'card-down') : 'card-neutral';
+
+          const sourceBadge = source === 'rt'
+            ? `<span class='source-badge rt'>RT</span>`
+            : `<span class='source-badge forecast'>FC</span>`;
+          const updatedText = source === 'rt' ? lastQuotesStampText : '--';
+
+          const card = document.createElement('div');
+          card.className = `rt-card ${cardMood}`;
+          card.innerHTML = `
+            <div class='rt-card-header'>
+              <div class='rt-card-symbol'>${isHolding ? "<span class='rt-card-holding-dot' title='Holding'></span>" : ''}${sym}</div>
+              ${sourceBadge}
+            </div>
+            <div class='rt-card-price'>${price == null ? '--' : '$' + price.toFixed(2)}</div>
+            <div class='rt-card-change ${chClass}'>
+              ${hasCh ? `<span>${chSign}${ch.toFixed(3)}</span><span>(${chSign}${chPct.toFixed(3)}%)</span>` : '<span style="color:var(--muted-2)">1m: --</span>'}
+            </div>
+            <div class='rt-card-footer'>
+              <span class='rt-card-updated'>${updatedText}</span>
+            </div>
+          `;
+          rtGrid.appendChild(card);
+        }
+      }
     }
 
     const logBox = document.getElementById('logBox');
@@ -1519,8 +1555,6 @@ const refreshPaper = async () => {
     renderPaperKpis(st);
     renderPaperRiskAlerts(st);
 
-    if (lastPortfolio) fillAssetTable(lastPortfolio, st);
-    await refreshRealtimeQuotes();
     if (lastPortfolio) fillAssetTable(lastPortfolio, st);
   } catch (e) {
     console.warn(e);
