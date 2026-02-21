@@ -101,6 +101,21 @@ fn parse_hhmm_local_time(input: &str) -> Result<NaiveTime> {
         .map_err(|_| anyhow!("Invalid time '{}', use HH:MM local time", trimmed))
 }
 
+fn compute_optimization_last_run_date(
+    now_local: chrono::DateTime<Local>,
+    optimization_time_local: Option<NaiveTime>,
+    optimization_weekdays: &[u32],
+) -> Option<NaiveDate> {
+    optimization_time_local.and_then(|time| {
+        let weekday = now_local.weekday().number_from_monday();
+        if now_local.time() >= time && optimization_weekdays.contains(&weekday) {
+            Some(now_local.date_naive())
+        } else {
+            None
+        }
+    })
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TargetWeight {
     pub symbol: String,
@@ -199,6 +214,10 @@ pub enum PaperCommand {
     Pause,
     Resume,
     Stop,
+    UpdateOptimizationSchedule {
+        optimization_time_local: Option<NaiveTime>,
+        optimization_weekdays: Vec<u32>,
+    },
     UpdateTargets {
         targets: Vec<TargetWeight>,
         apply_now: bool,
@@ -290,16 +309,14 @@ pub async fn run_paper_trading(
         .iter()
         .map(|time| if now_local.time() >= *time { Some(today) } else { None })
         .collect();
-    let mut optimization_last_run_date = config
-        .optimization_time_local
-        .and_then(|time| {
-            let weekday = now_local.weekday().number_from_monday();
-            if now_local.time() >= time && config.optimization_weekdays.contains(&weekday) {
-                Some(today)
-            } else {
-                None
-            }
-        });
+    let mut optimization_time_local = config.optimization_time_local;
+    let mut optimization_weekdays = if config.optimization_weekdays.is_empty() {
+        vec![1, 2, 3, 4, 5]
+    } else {
+        config.optimization_weekdays.clone()
+    };
+    let mut optimization_last_run_date =
+        compute_optimization_last_run_date(now_local, optimization_time_local, &optimization_weekdays);
 
     let mut interval = tokio::time::interval(Duration::from_secs(PRICE_POLL_INTERVAL_SECS));
     interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -327,6 +344,39 @@ pub async fn run_paper_trading(
                         .send(PaperEvent::Info("Simulation stopped".to_string()))
                         .await;
                     return Ok(());
+                }
+                PaperCommand::UpdateOptimizationSchedule {
+                    optimization_time_local: next_opt_time,
+                    optimization_weekdays: next_opt_days,
+                } => {
+                    let mut normalized_days = next_opt_days
+                        .into_iter()
+                        .filter(|day| (1..=7).contains(day))
+                        .collect::<Vec<_>>();
+                    normalized_days.sort_unstable();
+                    normalized_days.dedup();
+                    if normalized_days.is_empty() {
+                        normalized_days = vec![1, 2, 3, 4, 5];
+                    }
+
+                    optimization_time_local = next_opt_time;
+                    optimization_weekdays = normalized_days.clone();
+                    runtime.strategy_log.optimization_time_local = optimization_time_local
+                        .map(|time| time.format("%H:%M").to_string());
+                    runtime.strategy_log.optimization_weekdays = normalized_days;
+                    write_strategy_json(&runtime.strategy_path, &runtime.strategy_log)?;
+
+                    optimization_last_run_date = compute_optimization_last_run_date(
+                        Local::now(),
+                        optimization_time_local,
+                        &optimization_weekdays,
+                    );
+
+                    let _ = event_tx
+                        .send(PaperEvent::Info(
+                            "Optimization schedule updated".to_string(),
+                        ))
+                        .await;
                 }
                 PaperCommand::UpdateTargets { targets: next_targets, apply_now } => {
                     let tuples = next_targets
@@ -433,12 +483,11 @@ pub async fn run_paper_trading(
             }
         }
 
-        if let Some(opt_time) = config.optimization_time_local {
+        if let Some(opt_time) = optimization_time_local {
             let already_optimized_today = optimization_last_run_date
                 .map(|date| date == now_date)
                 .unwrap_or(false);
-            let should_optimize_today = config
-                .optimization_weekdays
+            let should_optimize_today = optimization_weekdays
                 .contains(&now_local.weekday().number_from_monday());
 
             if should_optimize_today && !already_optimized_today && now_time >= opt_time {
@@ -636,16 +685,14 @@ pub async fn run_paper_trading_from_strategy_file(
         .iter()
         .map(|time| if now_local.time() >= *time { Some(today) } else { None })
         .collect();
-    let mut optimization_last_run_date = cfg
-        .optimization_time_local
-        .and_then(|time| {
-            let weekday = now_local.weekday().number_from_monday();
-            if now_local.time() >= time && cfg.optimization_weekdays.contains(&weekday) {
-                Some(today)
-            } else {
-                None
-            }
-        });
+    let mut optimization_time_local = cfg.optimization_time_local;
+    let mut optimization_weekdays = if cfg.optimization_weekdays.is_empty() {
+        vec![1, 2, 3, 4, 5]
+    } else {
+        cfg.optimization_weekdays.clone()
+    };
+    let mut optimization_last_run_date =
+        compute_optimization_last_run_date(now_local, optimization_time_local, &optimization_weekdays);
 
     let mut interval = tokio::time::interval(Duration::from_secs(PRICE_POLL_INTERVAL_SECS));
     interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -673,6 +720,39 @@ pub async fn run_paper_trading_from_strategy_file(
                         .send(PaperEvent::Info("Simulation stopped".to_string()))
                         .await;
                     return Ok(());
+                }
+                PaperCommand::UpdateOptimizationSchedule {
+                    optimization_time_local: next_opt_time,
+                    optimization_weekdays: next_opt_days,
+                } => {
+                    let mut normalized_days = next_opt_days
+                        .into_iter()
+                        .filter(|day| (1..=7).contains(day))
+                        .collect::<Vec<_>>();
+                    normalized_days.sort_unstable();
+                    normalized_days.dedup();
+                    if normalized_days.is_empty() {
+                        normalized_days = vec![1, 2, 3, 4, 5];
+                    }
+
+                    optimization_time_local = next_opt_time;
+                    optimization_weekdays = normalized_days.clone();
+                    runtime.strategy_log.optimization_time_local = optimization_time_local
+                        .map(|time| time.format("%H:%M").to_string());
+                    runtime.strategy_log.optimization_weekdays = normalized_days;
+                    write_strategy_json(&runtime.strategy_path, &runtime.strategy_log)?;
+
+                    optimization_last_run_date = compute_optimization_last_run_date(
+                        Local::now(),
+                        optimization_time_local,
+                        &optimization_weekdays,
+                    );
+
+                    let _ = event_tx
+                        .send(PaperEvent::Info(
+                            "Optimization schedule updated".to_string(),
+                        ))
+                        .await;
                 }
                 PaperCommand::UpdateTargets { targets: next_targets, apply_now } => {
                     let tuples = next_targets
@@ -779,12 +859,11 @@ pub async fn run_paper_trading_from_strategy_file(
             }
         }
 
-        if let Some(opt_time) = cfg.optimization_time_local {
+        if let Some(opt_time) = optimization_time_local {
             let already_optimized_today = optimization_last_run_date
                 .map(|date| date == now_date)
                 .unwrap_or(false);
-            let should_optimize_today = cfg
-                .optimization_weekdays
+            let should_optimize_today = optimization_weekdays
                 .contains(&now_local.weekday().number_from_monday());
 
             if should_optimize_today && !already_optimized_today && now_time >= opt_time {

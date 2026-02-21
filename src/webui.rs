@@ -140,6 +140,8 @@ struct PaperRuntimeState {
     running: bool,
     paused: bool,
     auto_optimizing: bool,
+    optimization_time_local: Option<String>,
+    optimization_weekdays: Vec<u32>,
     started_at: Option<String>,
     strategy_file: Option<String>,
     runtime_file: Option<String>,
@@ -159,6 +161,8 @@ impl Default for PaperRuntimeState {
             running: false,
             paused: false,
             auto_optimizing: false,
+            optimization_time_local: None,
+            optimization_weekdays: Vec::new(),
             started_at: None,
             strategy_file: None,
             runtime_file: None,
@@ -259,6 +263,12 @@ struct PaperTargetsUpdateRequest {
     apply_now: Option<bool>,
 }
 
+#[derive(Debug, Deserialize)]
+struct PaperOptimizationUpdateRequest {
+    optimization_time: Option<String>,
+    optimization_weekdays: Option<Vec<u32>>,
+}
+
 pub async fn run_webui_server(port: u16, backend_default: config::ComputeBackend) -> Result<()> {
     let forecast_state = match load_forecast_state() {
         Ok(state) => state,
@@ -290,6 +300,7 @@ pub async fn run_webui_server(port: u16, backend_default: config::ComputeBackend
         .route("/api/paper/load", post(load_paper))
         .route("/api/paper/status", get(paper_status))
         .route("/api/paper/targets", post(paper_targets_update))
+        .route("/api/paper/optimization", post(paper_optimization_update))
         .route("/api/paper/pause", post(paper_pause))
         .route("/api/paper/resume", post(paper_resume))
         .route("/api/paper/stop", post(paper_stop))
@@ -609,6 +620,10 @@ async fn start_paper(
         paper_state.running = true;
         paper_state.paused = false;
         paper_state.auto_optimizing = false;
+        paper_state.optimization_time_local = cfg
+            .optimization_time_local
+            .map(|time| time.format("%H:%M").to_string());
+        paper_state.optimization_weekdays = cfg.optimization_weekdays.clone();
         paper_state.started_at = Some(chrono::Local::now().to_rfc3339());
         paper_state.strategy_file = None;
         paper_state.runtime_file = None;
@@ -717,12 +732,21 @@ async fn load_paper(
         .as_ref()
         .map(|summary| summary.targets.clone())
         .unwrap_or_default();
+    let historical_optimization_time = strategy_summary
+        .as_ref()
+        .and_then(|summary| summary.optimization_time_local.clone());
+    let historical_optimization_weekdays = strategy_summary
+        .as_ref()
+        .map(|summary| summary.optimization_weekdays.clone())
+        .unwrap_or_default();
 
     {
         let mut paper_state = state.paper.lock().await;
         paper_state.running = true;
         paper_state.paused = false;
         paper_state.auto_optimizing = false;
+        paper_state.optimization_time_local = historical_optimization_time;
+        paper_state.optimization_weekdays = historical_optimization_weekdays;
         paper_state.started_at = Some(chrono::Local::now().to_rfc3339());
         paper_state.strategy_file = Some(strategy_file.clone());
         paper_state.runtime_file = None;
@@ -869,6 +893,89 @@ async fn paper_targets_update(
     Ok(Json(serde_json::json!({ "ok": true, "symbols": symbols, "apply_now": apply_now })))
 }
 
+async fn paper_optimization_update(
+    State(state): State<WebState>,
+    Json(req): Json<PaperOptimizationUpdateRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ApiError>)> {
+    let parsed_time = match req.optimization_time.as_deref().map(str::trim) {
+        Some("") => None,
+        Some(text) => Some(
+            chrono::NaiveTime::parse_from_str(text, "%H:%M")
+                .map_err(|_| api_err(StatusCode::BAD_REQUEST, "Invalid optimization_time, use HH:MM"))?,
+        ),
+        None => None,
+    };
+
+    let normalized_days_opt = req.optimization_weekdays.map(|days| {
+        let mut normalized = days
+            .into_iter()
+            .filter(|day| (1..=7).contains(day))
+            .collect::<Vec<_>>();
+        normalized.sort_unstable();
+        normalized.dedup();
+        if normalized.is_empty() {
+            vec![1, 2, 3, 4, 5]
+        } else {
+            normalized
+        }
+    });
+
+    let (tx, running, effective_time_text, effective_time_naive, effective_days) = {
+        let mut ps = state.paper.lock().await;
+
+        let next_time_text = if req.optimization_time.is_some() {
+            parsed_time.map(|time| time.format("%H:%M").to_string())
+        } else {
+            ps.optimization_time_local.clone()
+        };
+
+        let mut next_days = if let Some(days) = normalized_days_opt {
+            days
+        } else if !ps.optimization_weekdays.is_empty() {
+            ps.optimization_weekdays.clone()
+        } else {
+            vec![1, 2, 3, 4, 5]
+        };
+        next_days.sort_unstable();
+        next_days.dedup();
+        if next_days.is_empty() {
+            next_days = vec![1, 2, 3, 4, 5];
+        }
+
+        ps.optimization_time_local = next_time_text.clone();
+        ps.optimization_weekdays = next_days.clone();
+
+        let next_time_naive = next_time_text
+            .as_deref()
+            .and_then(|text| chrono::NaiveTime::parse_from_str(text, "%H:%M").ok());
+
+        (
+            ps.cmd_tx.clone(),
+            ps.running,
+            next_time_text,
+            next_time_naive,
+            next_days,
+        )
+    };
+
+    if running {
+        if let Some(tx) = tx {
+            tx.send(paper_trading::PaperCommand::UpdateOptimizationSchedule {
+                optimization_time_local: effective_time_naive,
+                optimization_weekdays: effective_days.clone(),
+            })
+            .await
+            .map_err(internal_err)?;
+        }
+    }
+
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "optimization_time": effective_time_text,
+        "optimization_weekdays": effective_days,
+    })))
+}
+
 async fn optimize_candidate_pool_targets(
     symbols: &[String],
     backend: config::ComputeBackend,
@@ -964,6 +1071,8 @@ async fn paper_stop(
 struct StrategySummary {
     trades: Vec<paper_trading::TradeRecord>,
     targets: Vec<PaperTargetState>,
+    optimization_time_local: Option<String>,
+    optimization_weekdays: Vec<u32>,
 }
 
 fn load_strategy_summary(strategy_file: &str) -> Option<StrategySummary> {
@@ -997,7 +1106,22 @@ fn load_strategy_summary(strategy_file: &str) -> Option<StrategySummary> {
         })
         .collect::<Vec<_>>();
 
-    Some(StrategySummary { trades, targets })
+    let optimization_time_local = strategy_log.optimization_time_local.clone();
+    let mut optimization_weekdays = strategy_log
+        .optimization_weekdays
+        .iter()
+        .copied()
+        .filter(|day| (1..=7).contains(day))
+        .collect::<Vec<_>>();
+    optimization_weekdays.sort_unstable();
+    optimization_weekdays.dedup();
+
+    Some(StrategySummary {
+        trades,
+        targets,
+        optimization_time_local,
+        optimization_weekdays,
+    })
 }
 
 fn api_err(status: StatusCode, message: &str) -> (StatusCode, Json<ApiError>) {

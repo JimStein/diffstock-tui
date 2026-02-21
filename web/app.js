@@ -61,6 +61,9 @@ let paperTargetsDirty = false;
 let paperStartOptimizing = false;
 let paperApplyManualOptimizing = false;
 let paperApplyAutoOptimizing = false;
+let paperOptSaveTimer = null;
+let paperOptSaveInFlight = false;
+let paperOptSavePending = false;
 const FORECAST_BATCH_CACHE_KEY = 'diffstock:forecast-batch:v2';
 const FORECAST_META_CACHE_KEY = 'diffstock:forecast-meta:v1';
 let paperFullContext = {
@@ -699,6 +702,26 @@ const hydratePaperTargetsFromStatus = (st) => {
     manualPaperTargets = [...new Set(fromStatus)].sort();
     renderPaperTargetChips();
   }
+};
+
+const hydratePaperOptimizationFromStatus = (st) => {
+  const timeText = String(st?.optimization_time_local || '').trim();
+  if (timeText && paperOptTimeInput && paperOptTimeInput.value !== timeText) {
+    paperOptTimeInput.value = timeText;
+  }
+
+  const days = Array.isArray(st?.optimization_weekdays)
+    ? st.optimization_weekdays.map(x => Number(x)).filter(x => x >= 1 && x <= 7)
+    : [];
+  if (days.length > 0 && paperOptWeekdayChecks.length > 0) {
+    const selected = new Set(days);
+    for (const el of paperOptWeekdayChecks) {
+      const day = Number(el.getAttribute('data-paper-opt-weekday') || 0);
+      el.checked = selected.has(day);
+    }
+  }
+
+  syncNextOptimizationBadge();
 };
 
 const forceSyncPaperTargetsFromStatus = async () => {
@@ -1993,6 +2016,7 @@ const refreshPaper = async () => {
   try {
     const st = await api('/api/paper/status');
     setPaperApplyAutoOptimizing(!!st?.auto_optimizing);
+    hydratePaperOptimizationFromStatus(st);
     setPaperStatusChip(st);
     syncPaperButtons(st);
     hydratePaperTargetsFromStatus(st);
@@ -2149,6 +2173,40 @@ const syncNextOptimizationBadge = () => {
   if (!el) return;
   const weekdays = getPaperOptimizationWeekdays();
   el.textContent = computeNextOptimizationLabel(paperOptTimeInput?.value || '22:00', weekdays);
+};
+
+const persistPaperOptimizationSettings = (delayMs = 250) => {
+  if (paperOptSaveTimer) {
+    clearTimeout(paperOptSaveTimer);
+  }
+
+  paperOptSaveTimer = setTimeout(async () => {
+    paperOptSaveTimer = null;
+
+    if (paperOptSaveInFlight) {
+      paperOptSavePending = true;
+      return;
+    }
+
+    paperOptSaveInFlight = true;
+    try {
+      await api('/api/paper/optimization', {
+        method: 'POST',
+        body: JSON.stringify({
+          optimization_time: (paperOptTimeInput?.value || '22:00').trim() || '22:00',
+          optimization_weekdays: getPaperOptimizationWeekdays(),
+        }),
+      });
+    } catch (e) {
+      setStatus(`Optimization settings sync failed: ${e.message || String(e)}`, 'err');
+    } finally {
+      paperOptSaveInFlight = false;
+      if (paperOptSavePending) {
+        paperOptSavePending = false;
+        persistPaperOptimizationSettings(0);
+      }
+    }
+  }, Math.max(0, Number(delayMs) || 0));
 };
 
 if (paperTargetAddBtn) {
@@ -2472,6 +2530,7 @@ const restoreState = async () => {
     }
 
     if (state.paper) {
+      hydratePaperOptimizationFromStatus(state.paper);
       setPaperStatusChip(state.paper);
       syncPaperButtons(state.paper);
       if (state.paper.strategy_file && document.getElementById('paperLoadPath')) {
@@ -2560,8 +2619,14 @@ const syncPaperCtrlBadges = () => {
 document.getElementById('paperCapital')?.addEventListener('input', syncPaperCtrlBadges);
 document.getElementById('paperTime1')?.addEventListener('input', syncPaperCtrlBadges);
 document.getElementById('paperTime2')?.addEventListener('input', syncPaperCtrlBadges);
-paperOptTimeInput?.addEventListener('input', syncNextOptimizationBadge);
-paperOptWeekdayChecks.forEach(el => el.addEventListener('change', syncNextOptimizationBadge));
+paperOptTimeInput?.addEventListener('input', () => {
+  syncNextOptimizationBadge();
+  persistPaperOptimizationSettings(250);
+});
+paperOptWeekdayChecks.forEach(el => el.addEventListener('change', () => {
+  syncNextOptimizationBadge();
+  persistPaperOptimizationSettings(120);
+}));
 syncPaperCtrlBadges();
 setInterval(syncNextOptimizationBadge, 60000);
 
