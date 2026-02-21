@@ -145,6 +145,7 @@ struct PaperRuntimeState {
     started_at: Option<String>,
     strategy_file: Option<String>,
     runtime_file: Option<String>,
+    candidate_symbols: Vec<String>,
     target_weights: Vec<PaperTargetState>,
     latest_snapshot: Option<paper_trading::MinutePortfolioSnapshot>,
     snapshots: Vec<paper_trading::MinutePortfolioSnapshot>,
@@ -166,6 +167,7 @@ impl Default for PaperRuntimeState {
             started_at: None,
             strategy_file: None,
             runtime_file: None,
+            candidate_symbols: Vec::new(),
             target_weights: Vec::new(),
             latest_snapshot: None,
             snapshots: Vec::new(),
@@ -627,6 +629,7 @@ async fn start_paper(
         paper_state.started_at = Some(chrono::Local::now().to_rfc3339());
         paper_state.strategy_file = None;
         paper_state.runtime_file = None;
+        paper_state.candidate_symbols = symbols.clone();
         paper_state.target_weights = optimized_targets
             .iter()
             .map(|target| PaperTargetState {
@@ -695,8 +698,9 @@ async fn start_paper(
     });
 
     let paper_state_runner = state.paper.clone();
+    let candidate_symbols = symbols.clone();
     tokio::spawn(async move {
-        let res = paper_trading::run_paper_trading(weights, cfg, event_tx, cmd_rx).await;
+        let res = paper_trading::run_paper_trading(candidate_symbols, weights, cfg, event_tx, cmd_rx).await;
         let mut ps = paper_state_runner.lock().await;
         ps.running = false;
         ps.paused = false;
@@ -732,6 +736,10 @@ async fn load_paper(
         .as_ref()
         .map(|summary| summary.targets.clone())
         .unwrap_or_default();
+    let historical_candidate_symbols = strategy_summary
+        .as_ref()
+        .map(|summary| summary.candidate_symbols.clone())
+        .unwrap_or_default();
     let historical_optimization_time = strategy_summary
         .as_ref()
         .and_then(|summary| summary.optimization_time_local.clone());
@@ -750,6 +758,7 @@ async fn load_paper(
         paper_state.started_at = Some(chrono::Local::now().to_rfc3339());
         paper_state.strategy_file = Some(strategy_file.clone());
         paper_state.runtime_file = None;
+        paper_state.candidate_symbols = historical_candidate_symbols;
         paper_state.target_weights = historical_targets;
         paper_state.latest_snapshot = None;
         paper_state.snapshots.clear();
@@ -877,12 +886,14 @@ async fn paper_targets_update(
 
     let tx = {
         let mut ps = state.paper.lock().await;
+        ps.candidate_symbols = symbols.clone();
         ps.target_weights = next_target_state;
         ps.cmd_tx.clone()
     };
 
     if let Some(tx) = tx {
         tx.send(paper_trading::PaperCommand::UpdateTargets {
+            candidate_symbols: symbols.clone(),
             targets: next_target_cmd,
             apply_now,
         })
@@ -1070,6 +1081,7 @@ async fn paper_stop(
 #[derive(Clone)]
 struct StrategySummary {
     trades: Vec<paper_trading::TradeRecord>,
+    candidate_symbols: Vec<String>,
     targets: Vec<PaperTargetState>,
     optimization_time_local: Option<String>,
     optimization_weekdays: Vec<u32>,
@@ -1106,6 +1118,23 @@ fn load_strategy_summary(strategy_file: &str) -> Option<StrategySummary> {
         })
         .collect::<Vec<_>>();
 
+    let mut candidate_symbols = if strategy_log.candidate_symbols.is_empty() {
+        strategy_log
+            .targets
+            .iter()
+            .map(|target| target.symbol.clone())
+            .collect::<Vec<_>>()
+    } else {
+        strategy_log.candidate_symbols.clone()
+    };
+    candidate_symbols = candidate_symbols
+        .into_iter()
+        .map(|s| s.trim().to_uppercase())
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>();
+    candidate_symbols.sort_unstable();
+    candidate_symbols.dedup();
+
     let optimization_time_local = strategy_log.optimization_time_local.clone();
     let mut optimization_weekdays = strategy_log
         .optimization_weekdays
@@ -1118,6 +1147,7 @@ fn load_strategy_summary(strategy_file: &str) -> Option<StrategySummary> {
 
     Some(StrategySummary {
         trades,
+        candidate_symbols,
         targets,
         optimization_time_local,
         optimization_weekdays,

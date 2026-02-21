@@ -2032,7 +2032,7 @@
               <div class="paper-target-header">
                 <div class="paper-target-title">
                   <span>🎯</span>
-                  <span>Candidate Pool</span>
+                  <span>Persistent Candidate Pool (Universe)</span>
                   <span id="paperTargetCount" class="paper-target-count">0 symbols</span>
                 </div>
                 <span id="paperTargetDirtyBadge" class="paper-target-dirty-badge" style="display:none">● Unsaved</span>
@@ -2043,11 +2043,11 @@
               </div>
               <div id="paperTargetChips" class="paper-target-chips"></div>
               <div class="paper-target-apply-row">
-                <button id="paperTargetApply" class="primary">⚡ Apply Candidate Pool</button>
+                <button id="paperTargetApply" class="primary">⚡ Apply Candidate Universe</button>
                 <label class="paper-toggle"><input id="paperApplyNow" type="checkbox" checked /> Rebalance immediately</label>
               </div>
             </div>
-            <div class="small" style="margin-top:8px;">这是候选股票池（universe），算法可选择不持有其中部分标的；Apply 时会先对候选池做一次最新组合优化，再按勾选决定是否立即再平衡。定时优化会按上面的时间+周几自动刷新权重。</div>
+            <div class="small" style="margin-top:8px;">这是持久候选股票池（universe），不会因某次优化权重为 0 而丢失；算法可选择暂时不持有其中部分标的。Apply 时会先对候选池做一次最新组合优化，再按勾选决定是否立即再平衡。定时优化会按上面的时间+周几自动刷新权重。</div>
           </div>
         </div>
         <div class="panel" id="paperRiskPanel" style="display:none;">

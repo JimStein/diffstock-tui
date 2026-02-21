@@ -695,9 +695,14 @@ const renderPaperTargetChips = () => {
 
 const hydratePaperTargetsFromStatus = (st) => {
   if (paperTargetsDirty) return;
-  const fromStatus = (st?.target_weights || [])
-    .map(x => String(x?.symbol || '').toUpperCase())
+  const fromCandidatePool = (st?.candidate_symbols || [])
+    .map(x => String(x || '').toUpperCase())
     .filter(Boolean);
+  const fromStatus = fromCandidatePool.length
+    ? fromCandidatePool
+    : (st?.target_weights || [])
+      .map(x => String(x?.symbol || '').toUpperCase())
+      .filter(Boolean);
   if (fromStatus.length) {
     manualPaperTargets = [...new Set(fromStatus)].sort();
     renderPaperTargetChips();
@@ -727,9 +732,14 @@ const hydratePaperOptimizationFromStatus = (st) => {
 const forceSyncPaperTargetsFromStatus = async () => {
   try {
     const st = await api('/api/paper/status');
-    const fromStatus = (st?.target_weights || [])
-      .map(x => String(x?.symbol || '').toUpperCase())
+    const fromCandidatePool = (st?.candidate_symbols || [])
+      .map(x => String(x || '').toUpperCase())
       .filter(Boolean);
+    const fromStatus = fromCandidatePool.length
+      ? fromCandidatePool
+      : (st?.target_weights || [])
+        .map(x => String(x?.symbol || '').toUpperCase())
+        .filter(Boolean);
     if (fromStatus.length) {
       manualPaperTargets = [...new Set(fromStatus)].sort();
       paperTargetsDirty = false;
@@ -1268,7 +1278,7 @@ const syncPaperApplyButtonState = () => {
   const busy = !!(paperApplyManualOptimizing || paperApplyAutoOptimizing);
   if (!paperTargetApplyBtn) return;
   paperTargetApplyBtn.disabled = busy;
-  paperTargetApplyBtn.textContent = busy ? 'Optimizing...' : '⚡ Apply Candidate Pool';
+  paperTargetApplyBtn.textContent = busy ? 'Optimizing...' : '⚡ Apply Candidate Universe';
   if (paperApplyNowCheckbox) paperApplyNowCheckbox.disabled = busy;
 };
 
@@ -2230,11 +2240,11 @@ if (paperTargetInput) {
 if (paperTargetApplyBtn) {
   paperTargetApplyBtn.addEventListener('click', async () => {
     if (manualPaperTargets.length === 0) {
-      alert('Candidate pool cannot be empty.');
+      alert('Candidate universe cannot be empty.');
       return;
     }
     setPaperApplyOptimizing(true);
-    setStatus('Optimizing candidate pool...');
+    setStatus('Optimizing candidate universe...');
     try {
       const applyNow = paperApplyNowCheckbox ? !!paperApplyNowCheckbox.checked : true;
       await api('/api/paper/targets', {
@@ -2244,8 +2254,8 @@ if (paperTargetApplyBtn) {
       paperTargetsDirty = false;
       renderPaperTargetChips();
       setStatus(applyNow
-        ? 'Candidate pool optimized and rebalanced immediately'
-        : 'Candidate pool optimized (rebalance will use latest optimized weights)', 'ok');
+        ? 'Candidate universe optimized and rebalanced immediately'
+        : 'Candidate universe optimized (rebalance will use latest optimized weights)', 'ok');
       await refreshPaper();
     } catch (e) {
       setStatus(e.message || String(e), 'err');
@@ -2262,7 +2272,7 @@ document.getElementById('paperStart').addEventListener('click', async () => {
     symbols = lastPortfolio.weights.map(([symbol]) => String(symbol || '').toUpperCase()).filter(Boolean);
   }
   if (!symbols.length) {
-    alert('Please set candidate pool first (manual symbols or run Portfolio optimization).');
+    alert('Please set candidate universe first (manual symbols or run Portfolio optimization).');
     return;
   }
   symbols = [...new Set(symbols)].sort();
@@ -2273,7 +2283,7 @@ document.getElementById('paperStart').addEventListener('click', async () => {
   const optimizationTime = (paperOptTimeInput?.value || '22:00').trim() || '22:00';
   const optimizationWeekdays = getPaperOptimizationWeekdays();
   setPaperStartOptimizing(true);
-  setStatus('Optimizing candidate pool before start...');
+  setStatus('Optimizing candidate universe before start...');
   try {
     await paperControl('/api/paper/start', {
       targets,

@@ -8,7 +8,7 @@
   ],
   "benchmark_symbol": "QQQ",
   "benchmark_initial_price": 605.7899780273438,
-  "optimization_time_local": "21:00",
+  "optimization_time_local": "23:00",
   "optimization_weekdays": [
     1,
     2,
@@ -18,26 +18,31 @@
     6,
     7
   ],
+  "candidate_symbols": [
+    "COPX",
+    "ETN",
+    "IAU",
+    "MSFT",
+    "NVDA",
+    "TLT",
+    "URA"
+  ],
   "targets": [
     {
       "symbol": "COPX",
-      "target_weight": 0.23376362049515206
+      "target_weight": 0.2269767058715238
     },
     {
       "symbol": "ETN",
-      "target_weight": 0.11594933163590676
+      "target_weight": 0.19974069331935929
     },
     {
       "symbol": "IAU",
-      "target_weight": 0.29445356892822816
-    },
-    {
-      "symbol": "TLT",
-      "target_weight": 0.07669532929390603
+      "target_weight": 0.31151606924502373
     },
     {
       "symbol": "URA",
-      "target_weight": 0.015529972647367583
+      "target_weight": 0.04101722604180716
     }
   ],
   "analyses": [

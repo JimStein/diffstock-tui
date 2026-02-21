@@ -155,6 +155,8 @@ pub struct StrategyLog {
     pub optimization_time_local: Option<String>,
     #[serde(default)]
     pub optimization_weekdays: Vec<u32>,
+    #[serde(default)]
+    pub candidate_symbols: Vec<String>,
     pub targets: Vec<TargetWeight>,
     pub analyses: Vec<AnalysisRecord>,
 }
@@ -219,6 +221,7 @@ pub enum PaperCommand {
         optimization_weekdays: Vec<u32>,
     },
     UpdateTargets {
+        candidate_symbols: Vec<String>,
         targets: Vec<TargetWeight>,
         apply_now: bool,
     },
@@ -237,6 +240,7 @@ struct PaperRuntime {
 }
 
 pub async fn run_paper_trading(
+    candidate_symbols: Vec<String>,
     target_weights: Vec<(String, f64)>,
     config: PaperTradingConfig,
     event_tx: Sender<PaperEvent>,
@@ -261,6 +265,20 @@ pub async fn run_paper_trading(
         holdings_avg_cost.insert(target.symbol.clone(), 0.0);
     }
 
+    let mut normalized_candidate_symbols = candidate_symbols
+        .into_iter()
+        .map(|s| s.trim().to_uppercase())
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>();
+    normalized_candidate_symbols.sort();
+    normalized_candidate_symbols.dedup();
+    if normalized_candidate_symbols.is_empty() {
+        normalized_candidate_symbols = target_weights
+            .iter()
+            .map(|t| t.symbol.clone())
+            .collect::<Vec<_>>();
+    }
+
     let mut runtime = PaperRuntime {
         initial_capital_usd: config.initial_capital_usd,
         cash_usd: config.initial_capital_usd,
@@ -283,6 +301,7 @@ pub async fn run_paper_trading(
                 .optimization_time_local
                 .map(|t| t.format("%H:%M").to_string()),
             optimization_weekdays: config.optimization_weekdays.clone(),
+            candidate_symbols: normalized_candidate_symbols,
             targets: target_weights.clone(),
             analyses: Vec::new(),
         },
@@ -378,7 +397,22 @@ pub async fn run_paper_trading(
                         ))
                         .await;
                 }
-                PaperCommand::UpdateTargets { targets: next_targets, apply_now } => {
+                PaperCommand::UpdateTargets {
+                    candidate_symbols,
+                    targets: next_targets,
+                    apply_now,
+                } => {
+                    let mut normalized_symbols = candidate_symbols
+                        .into_iter()
+                        .map(|s| s.trim().to_uppercase())
+                        .filter(|s| !s.is_empty())
+                        .collect::<Vec<_>>();
+                    normalized_symbols.sort();
+                    normalized_symbols.dedup();
+                    if !normalized_symbols.is_empty() {
+                        runtime.strategy_log.candidate_symbols = normalized_symbols;
+                    }
+
                     let tuples = next_targets
                         .iter()
                         .map(|t| (t.symbol.clone(), t.target_weight))
@@ -412,7 +446,7 @@ pub async fn run_paper_trading(
                         .join(",");
                     let _ = event_tx
                         .send(PaperEvent::Info(format!(
-                            "Target pool updated{}: {}",
+                            "Candidate pool updated{}: {}",
                             if apply_now { " (apply-now)" } else { "" },
                             listed
                         )))
@@ -763,7 +797,22 @@ pub async fn run_paper_trading_from_strategy_file(
                         ))
                         .await;
                 }
-                PaperCommand::UpdateTargets { targets: next_targets, apply_now } => {
+                PaperCommand::UpdateTargets {
+                    candidate_symbols,
+                    targets: next_targets,
+                    apply_now,
+                } => {
+                    let mut normalized_symbols = candidate_symbols
+                        .into_iter()
+                        .map(|s| s.trim().to_uppercase())
+                        .filter(|s| !s.is_empty())
+                        .collect::<Vec<_>>();
+                    normalized_symbols.sort();
+                    normalized_symbols.dedup();
+                    if !normalized_symbols.is_empty() {
+                        runtime.strategy_log.candidate_symbols = normalized_symbols;
+                    }
+
                     let tuples = next_targets
                         .iter()
                         .map(|t| (t.symbol.clone(), t.target_weight))
@@ -797,7 +846,7 @@ pub async fn run_paper_trading_from_strategy_file(
                         .join(",");
                     let _ = event_tx
                         .send(PaperEvent::Info(format!(
-                            "Target pool updated{}: {}",
+                            "Candidate pool updated{}: {}",
                             if apply_now { " (apply-now)" } else { "" },
                             listed
                         )))
@@ -924,11 +973,20 @@ async fn optimize_targets_from_candidate_pool(
     runtime: &mut PaperRuntime,
     backend: config::ComputeBackend,
 ) -> Result<bool> {
-    let mut candidate_symbols = runtime
-        .strategy_log
-        .targets
-        .iter()
-        .map(|t| t.symbol.clone())
+    let mut candidate_symbols = if runtime.strategy_log.candidate_symbols.is_empty() {
+        runtime
+            .strategy_log
+            .targets
+            .iter()
+            .map(|t| t.symbol.clone())
+            .collect::<Vec<_>>()
+    } else {
+        runtime.strategy_log.candidate_symbols.clone()
+    };
+    candidate_symbols = candidate_symbols
+        .into_iter()
+        .map(|s| s.trim().to_uppercase())
+        .filter(|s| !s.is_empty())
         .collect::<Vec<_>>();
     candidate_symbols.sort();
     candidate_symbols.dedup();
