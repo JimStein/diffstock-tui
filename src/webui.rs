@@ -250,6 +250,12 @@ struct PaperLoadRequest {
     strategy_file: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct PaperTargetsUpdateRequest {
+    symbols: Vec<String>,
+    apply_now: Option<bool>,
+}
+
 pub async fn run_webui_server(port: u16, backend_default: config::ComputeBackend) -> Result<()> {
     let forecast_state = match load_forecast_state() {
         Ok(state) => state,
@@ -280,6 +286,7 @@ pub async fn run_webui_server(port: u16, backend_default: config::ComputeBackend
         .route("/api/paper/start", post(start_paper))
         .route("/api/paper/load", post(load_paper))
         .route("/api/paper/status", get(paper_status))
+        .route("/api/paper/targets", post(paper_targets_update))
         .route("/api/paper/pause", post(paper_pause))
         .route("/api/paper/resume", post(paper_resume))
         .route("/api/paper/stop", post(paper_stop))
@@ -769,6 +776,59 @@ async fn paper_status(
     let mut status = state.paper.lock().await.clone();
     status.cmd_tx = None;
     Ok(Json(status))
+}
+
+async fn paper_targets_update(
+    State(state): State<WebState>,
+    Json(req): Json<PaperTargetsUpdateRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ApiError>)> {
+    let mut symbols: Vec<String> = req
+        .symbols
+        .iter()
+        .map(|s| s.trim().to_uppercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+    symbols.sort();
+    symbols.dedup();
+
+    if symbols.is_empty() {
+        return Err(api_err(StatusCode::BAD_REQUEST, "symbols cannot be empty"));
+    }
+
+    let weight = 1.0 / symbols.len() as f64;
+    let next_target_state = symbols
+        .iter()
+        .map(|symbol| PaperTargetState {
+            symbol: symbol.clone(),
+            weight,
+        })
+        .collect::<Vec<_>>();
+    let next_target_cmd = symbols
+        .iter()
+        .map(|symbol| paper_trading::TargetWeight {
+            symbol: symbol.clone(),
+            target_weight: weight,
+        })
+        .collect::<Vec<_>>();
+
+    let apply_now = req.apply_now.unwrap_or(false);
+
+    let tx = {
+        let mut ps = state.paper.lock().await;
+        ps.target_weights = next_target_state;
+        ps.cmd_tx.clone()
+    };
+
+    if let Some(tx) = tx {
+        tx.send(paper_trading::PaperCommand::UpdateTargets {
+            targets: next_target_cmd,
+            apply_now,
+        })
+            .await
+            .map_err(internal_err)?;
+    }
+
+    Ok(Json(serde_json::json!({ "ok": true, "symbols": symbols, "apply_now": apply_now })))
 }
 
 async fn paper_pause(

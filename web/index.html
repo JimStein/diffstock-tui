@@ -1039,6 +1039,126 @@
       align-items: flex-end;
     }
 
+    .paper-target-editor {
+      margin-top: 10px;
+      padding: 12px 14px;
+      border: 1px solid rgba(59,130,246,.2);
+      border-left: 3px solid var(--accent);
+      border-radius: var(--radius);
+      background: rgba(59,130,246,.04);
+    }
+    .paper-target-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .paper-target-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-2);
+      letter-spacing: .3px;
+    }
+    .paper-target-count {
+      display: inline-flex;
+      align-items: center;
+      padding: 1px 7px;
+      border-radius: 999px;
+      background: rgba(59,130,246,.18);
+      color: var(--accent-2);
+      font-size: 10px;
+      font-weight: 700;
+      font-family: var(--mono);
+      letter-spacing: .2px;
+    }
+    .paper-target-dirty-badge {
+      font-size: 10px;
+      font-weight: 600;
+      color: #f59e0b;
+      letter-spacing: .2px;
+      animation: pulse-dirty 2s ease-in-out infinite;
+    }
+    @keyframes pulse-dirty {
+      0%, 100% { opacity: 1; }
+      50% { opacity: .45; }
+    }
+    .paper-target-input-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .paper-target-apply-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 10px;
+      flex-wrap: wrap;
+    }
+    .paper-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--muted);
+      user-select: none;
+      cursor: pointer;
+    }
+    .paper-toggle input { accent-color: var(--accent); cursor: pointer; }
+    .paper-target-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      min-height: 38px;
+      padding: 7px 9px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: rgba(0,0,0,.25);
+      align-content: flex-start;
+      align-items: center;
+    }
+    .paper-target-chips-empty {
+      color: var(--muted-2);
+      font-size: 11px;
+      font-style: italic;
+    }
+    .paper-target-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 7px 3px 9px;
+      border-radius: 999px;
+      border: 1px solid rgba(59,130,246,.38);
+      background: rgba(59,130,246,.14);
+      color: var(--text);
+      font-size: 11px;
+      font-weight: 600;
+      font-family: var(--mono);
+      letter-spacing: .3px;
+      transition: background .15s;
+    }
+    .paper-target-chip:hover { background: rgba(59,130,246,.24); }
+    .paper-target-remove {
+      border: none;
+      background: transparent;
+      color: var(--muted-2);
+      cursor: pointer;
+      line-height: 1;
+      padding: 0;
+      font-size: 13px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: background .15s, color .15s;
+    }
+    .paper-target-remove:hover { color: #fff; background: var(--down); }
+
     .range-group {
       display: flex;
       gap: 6px;
@@ -1725,7 +1845,26 @@
               <input id="paperLoadPath" placeholder="e.g. log/paper_strategy_20260219_101500.json" style="width:100%" />
             </div>
           </div>
-          <div class="small">Uses current portfolio symbols/weights as targets.</div>
+          <div class="paper-target-editor">
+            <div class="paper-target-header">
+              <div class="paper-target-title">
+                <span>🎯</span>
+                <span>Target Pool</span>
+                <span id="paperTargetCount" class="paper-target-count">0 symbols</span>
+              </div>
+              <span id="paperTargetDirtyBadge" class="paper-target-dirty-badge" style="display:none">● Unsaved</span>
+            </div>
+            <div class="paper-target-input-row">
+              <input id="paperTargetInput" placeholder="NVDA or AAPL,MSFT,QQQ" style="flex:1;" />
+              <button id="paperTargetAdd">＋ Add</button>
+            </div>
+            <div id="paperTargetChips" class="paper-target-chips"></div>
+            <div class="paper-target-apply-row">
+              <button id="paperTargetApply" class="primary">⚡ Apply to Running Paper</button>
+              <label class="paper-toggle"><input id="paperApplyNow" type="checkbox" checked /> Rebalance immediately</label>
+            </div>
+          </div>
+          <div class="small">Start 优先使用手动池子；Apply 后按最新池子执行调仓，删除的标的自动卖出。</div>
         </div>
         <div class="panel" id="paperRiskPanel" style="display:none;">
           <div class="panel-header" style="margin-bottom:8px;">
@@ -1883,6 +2022,6 @@
   </div>
 
   <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
-  <script src="/app.js?v=20260221h"></script>
+  <script src="/app.js?v=20260221k"></script>
 </body>
 </html>

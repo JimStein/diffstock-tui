@@ -2,7 +2,7 @@ use crate::{config, data};
 use anyhow::{anyhow, Result};
 use chrono::{Local, NaiveDate, NaiveTime};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -161,6 +161,10 @@ pub enum PaperCommand {
     Pause,
     Resume,
     Stop,
+    UpdateTargets {
+        targets: Vec<TargetWeight>,
+        apply_now: bool,
+    },
 }
 
 struct PaperRuntime {
@@ -187,9 +191,8 @@ pub async fn run_paper_trading(
     }
 
     let (strategy_path, runtime_path) = create_output_paths()?;
-    let tracked_symbols = tracked_symbols(&target_weights);
 
-    let mut current_prices = fetch_prices_for_symbols(&tracked_symbols).await?;
+    let mut current_prices = fetch_prices_for_symbols(&tracked_symbols(&target_weights)).await?;
     let benchmark_initial_price = *current_prices
         .get(BENCHMARK_SYMBOL)
         .ok_or(anyhow!("Benchmark symbol {} price missing", BENCHMARK_SYMBOL))?;
@@ -273,6 +276,68 @@ pub async fn run_paper_trading(
                         .await;
                     return Ok(());
                 }
+                PaperCommand::UpdateTargets { targets: next_targets, apply_now } => {
+                    let tuples = next_targets
+                        .iter()
+                        .map(|t| (t.symbol.clone(), t.target_weight))
+                        .collect::<Vec<_>>();
+                    let normalized = normalize_weights(&tuples);
+                    if normalized.is_empty() {
+                        let _ = event_tx
+                            .send(PaperEvent::Warning("Ignored empty target update".to_string()))
+                            .await;
+                        continue;
+                    }
+
+                    runtime.strategy_log.targets = normalized;
+                    for target in &runtime.strategy_log.targets {
+                        runtime
+                            .holdings_shares
+                            .entry(target.symbol.clone())
+                            .or_insert(0.0);
+                        runtime
+                            .holdings_avg_cost
+                            .entry(target.symbol.clone())
+                            .or_insert(0.0);
+                    }
+                    write_strategy_json(&runtime.strategy_path, &runtime.strategy_log)?;
+                    let listed = runtime
+                        .strategy_log
+                        .targets
+                        .iter()
+                        .map(|t| t.symbol.clone())
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let _ = event_tx
+                        .send(PaperEvent::Info(format!(
+                            "Target pool updated{}: {}",
+                            if apply_now { " (apply-now)" } else { "" },
+                            listed
+                        )))
+                        .await;
+
+                    if apply_now {
+                        let runtime_symbols = tracked_symbols_for_runtime(&runtime);
+                        match fetch_prices_for_symbols(&runtime_symbols).await {
+                            Ok(prices) => {
+                                current_prices = prices;
+                                let analysis = run_analysis_once(&mut runtime, &current_prices)?;
+                                let _ = event_tx.send(PaperEvent::Analysis(analysis)).await;
+                                let minute_snapshot = build_minute_snapshot(&mut runtime, &current_prices)?;
+                                append_jsonl(&runtime.runtime_path, &minute_snapshot)?;
+                                let _ = event_tx.send(PaperEvent::Minute(minute_snapshot)).await;
+                            }
+                            Err(error) => {
+                                let _ = event_tx
+                                    .send(PaperEvent::Warning(format!(
+                                        "Apply-now rebalance skipped due to price fetch error: {}",
+                                        error
+                                    )))
+                                    .await;
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -280,7 +345,8 @@ pub async fn run_paper_trading(
             continue;
         }
 
-        match fetch_prices_for_symbols(&tracked_symbols).await {
+        let runtime_symbols = tracked_symbols_for_runtime(&runtime);
+        match fetch_prices_for_symbols(&runtime_symbols).await {
             Ok(prices) => {
                 current_prices = prices;
             }
@@ -348,8 +414,7 @@ pub async fn run_paper_trading_from_strategy_file(
         analysis_times_local,
     };
 
-    let tracked_symbols = tracked_symbols(&strategy_log.targets);
-    let mut current_prices = fetch_prices_for_symbols(&tracked_symbols).await?;
+    let mut current_prices = fetch_prices_for_symbols(&tracked_symbols(&strategy_log.targets)).await?;
 
     let benchmark_initial_price = strategy_log
         .benchmark_initial_price
@@ -477,6 +542,68 @@ pub async fn run_paper_trading_from_strategy_file(
                         .await;
                     return Ok(());
                 }
+                PaperCommand::UpdateTargets { targets: next_targets, apply_now } => {
+                    let tuples = next_targets
+                        .iter()
+                        .map(|t| (t.symbol.clone(), t.target_weight))
+                        .collect::<Vec<_>>();
+                    let normalized = normalize_weights(&tuples);
+                    if normalized.is_empty() {
+                        let _ = event_tx
+                            .send(PaperEvent::Warning("Ignored empty target update".to_string()))
+                            .await;
+                        continue;
+                    }
+
+                    runtime.strategy_log.targets = normalized;
+                    for target in &runtime.strategy_log.targets {
+                        runtime
+                            .holdings_shares
+                            .entry(target.symbol.clone())
+                            .or_insert(0.0);
+                        runtime
+                            .holdings_avg_cost
+                            .entry(target.symbol.clone())
+                            .or_insert(0.0);
+                    }
+                    write_strategy_json(&runtime.strategy_path, &runtime.strategy_log)?;
+                    let listed = runtime
+                        .strategy_log
+                        .targets
+                        .iter()
+                        .map(|t| t.symbol.clone())
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let _ = event_tx
+                        .send(PaperEvent::Info(format!(
+                            "Target pool updated{}: {}",
+                            if apply_now { " (apply-now)" } else { "" },
+                            listed
+                        )))
+                        .await;
+
+                    if apply_now {
+                        let runtime_symbols = tracked_symbols_for_runtime(&runtime);
+                        match fetch_prices_for_symbols(&runtime_symbols).await {
+                            Ok(prices) => {
+                                current_prices = prices;
+                                let analysis = run_analysis_once(&mut runtime, &current_prices)?;
+                                let _ = event_tx.send(PaperEvent::Analysis(analysis)).await;
+                                let minute_snapshot = build_minute_snapshot(&mut runtime, &current_prices)?;
+                                append_jsonl(&runtime.runtime_path, &minute_snapshot)?;
+                                let _ = event_tx.send(PaperEvent::Minute(minute_snapshot)).await;
+                            }
+                            Err(error) => {
+                                let _ = event_tx
+                                    .send(PaperEvent::Warning(format!(
+                                        "Apply-now rebalance skipped due to price fetch error: {}",
+                                        error
+                                    )))
+                                    .await;
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -484,7 +611,8 @@ pub async fn run_paper_trading_from_strategy_file(
             continue;
         }
 
-        match fetch_prices_for_symbols(&tracked_symbols).await {
+        let runtime_symbols = tracked_symbols_for_runtime(&runtime);
+        match fetch_prices_for_symbols(&runtime_symbols).await {
             Ok(prices) => {
                 current_prices = prices;
             }
@@ -525,6 +653,52 @@ fn run_analysis_once(runtime: &mut PaperRuntime, current_prices: &HashMap<String
     let now = Local::now().to_rfc3339();
     let portfolio_before = total_portfolio_value(runtime, current_prices)?;
     let mut trades = Vec::new();
+
+    let target_symbols: HashSet<String> = runtime
+        .strategy_log
+        .targets
+        .iter()
+        .map(|t| t.symbol.clone())
+        .collect();
+
+    let symbols_to_liquidate = runtime
+        .holdings_shares
+        .iter()
+        .filter_map(|(symbol, qty)| {
+            if *qty > 1e-9 && !target_symbols.contains(symbol) {
+                Some(symbol.clone())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
+    for symbol in symbols_to_liquidate {
+        let price = *current_prices
+            .get(&symbol)
+            .ok_or(anyhow!("Missing price for {}", symbol))?;
+        let current_shares = *runtime.holdings_shares.get(&symbol).unwrap_or(&0.0);
+        let execute_qty = current_shares.floor().max(0.0);
+        if execute_qty < 1.0 {
+            continue;
+        }
+
+        let notional = execute_qty * price;
+        let fee = notional * TRADING_FEE_RATE;
+        runtime.cash_usd += notional - fee;
+        runtime.holdings_shares.insert(symbol.clone(), 0.0);
+        runtime.holdings_avg_cost.insert(symbol.clone(), 0.0);
+
+        trades.push(TradeRecord {
+            timestamp: now.clone(),
+            symbol,
+            side: "SELL".to_string(),
+            quantity: execute_qty,
+            price,
+            notional,
+            fee,
+        });
+    }
 
     for target in &runtime.strategy_log.targets {
         let price = *current_prices
@@ -648,8 +822,21 @@ fn build_minute_snapshot(
 
     let mut symbols = Vec::new();
     let mut holdings = Vec::new();
-    for target in &runtime.strategy_log.targets {
-        let symbol = &target.symbol;
+    let mut snapshot_symbols: HashSet<String> = runtime
+        .strategy_log
+        .targets
+        .iter()
+        .map(|target| target.symbol.clone())
+        .collect();
+    for (symbol, qty) in &runtime.holdings_shares {
+        if *qty > 1e-9 {
+            snapshot_symbols.insert(symbol.clone());
+        }
+    }
+    let mut ordered_symbols: Vec<String> = snapshot_symbols.into_iter().collect();
+    ordered_symbols.sort();
+
+    for symbol in &ordered_symbols {
         let price = *current_prices
             .get(symbol)
             .ok_or(anyhow!("Missing symbol price for {}", symbol))?;
@@ -754,6 +941,25 @@ fn tracked_symbols(targets: &[TargetWeight]) -> Vec<String> {
         symbols.push(BENCHMARK_SYMBOL.to_string());
     }
     symbols
+}
+
+fn tracked_symbols_for_runtime(runtime: &PaperRuntime) -> Vec<String> {
+    let mut symbols: HashSet<String> = runtime
+        .strategy_log
+        .targets
+        .iter()
+        .map(|target| target.symbol.clone())
+        .collect();
+    for (symbol, qty) in &runtime.holdings_shares {
+        if *qty > 1e-9 {
+            symbols.insert(symbol.clone());
+        }
+    }
+    symbols.insert(BENCHMARK_SYMBOL.to_string());
+
+    let mut out: Vec<String> = symbols.into_iter().collect();
+    out.sort();
+    out
 }
 
 async fn fetch_prices_for_symbols(symbols: &[String]) -> Result<HashMap<String, f64>> {

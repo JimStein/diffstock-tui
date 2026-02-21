@@ -23,6 +23,13 @@ const paperFilePicker = document.getElementById('paperFilePicker');
 const paperPauseBtn = document.getElementById('paperPause');
 const paperResumeBtn = document.getElementById('paperResume');
 const paperStopBtn = document.getElementById('paperStop');
+const paperTargetInput = document.getElementById('paperTargetInput');
+const paperTargetAddBtn = document.getElementById('paperTargetAdd');
+const paperTargetApplyBtn = document.getElementById('paperTargetApply');
+const paperApplyNowCheckbox = document.getElementById('paperApplyNow');
+const paperTargetChips = document.getElementById('paperTargetChips');
+const paperTargetCount = document.getElementById('paperTargetCount');
+const paperTargetDirtyBadge = document.getElementById('paperTargetDirtyBadge');
 const paperLegend = document.getElementById('paperLegend');
 const legendPortfolio = document.getElementById('legendPortfolio');
 const legendPortfolioPnl = document.getElementById('legendPortfolioPnl');
@@ -47,6 +54,8 @@ let selectedTradeFilter = 'all';
 let tradeSearchText = '';
 let selectedPaperRangeDays = 0.5;
 let paperSessionStartMs = null;
+let manualPaperTargets = [];
+let paperTargetsDirty = false;
 const FORECAST_BATCH_CACHE_KEY = 'diffstock:forecast-batch:v2';
 const FORECAST_META_CACHE_KEY = 'diffstock:forecast-meta:v1';
 let paperFullContext = {
@@ -627,6 +636,77 @@ const normalizeTradeSide = (side) => {
   if (s === 'BUY' || s === 'B') return 'BUY';
   if (s === 'SELL' || s === 'S') return 'SELL';
   return s || 'UNKNOWN';
+};
+
+const normalizeSymbols = (text) => {
+  return [...new Set(String(text || '')
+    .toUpperCase()
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean))];
+};
+
+const addPaperTargetSymbols = (symbols) => {
+  const merged = new Set(manualPaperTargets);
+  for (const s of symbols) merged.add(s);
+  manualPaperTargets = Array.from(merged).sort();
+  paperTargetsDirty = true;
+};
+
+const removePaperTargetSymbol = (symbol) => {
+  manualPaperTargets = manualPaperTargets.filter(s => s !== symbol);
+  paperTargetsDirty = true;
+};
+
+const renderPaperTargetChips = () => {
+  if (!paperTargetChips) return;
+  const n = manualPaperTargets.length;
+  if (paperTargetCount) {
+    paperTargetCount.textContent = n === 1 ? '1 symbol' : `${n} symbols`;
+  }
+  if (paperTargetDirtyBadge) {
+    paperTargetDirtyBadge.style.display = paperTargetsDirty ? '' : 'none';
+  }
+  if (!n) {
+    paperTargetChips.innerHTML = `<span class="paper-target-chips-empty">No symbols — Start will fall back to Portfolio weights</span>`;
+    return;
+  }
+  paperTargetChips.innerHTML = manualPaperTargets
+    .map(sym => `<span class='paper-target-chip'>${sym}<button class='paper-target-remove' data-paper-target-remove='${sym}' title='Remove ${sym}'>×</button></span>`)
+    .join('');
+  paperTargetChips.querySelectorAll('[data-paper-target-remove]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      removePaperTargetSymbol(btn.dataset.paperTargetRemove);
+      renderPaperTargetChips();
+    });
+  });
+};
+
+const hydratePaperTargetsFromStatus = (st) => {
+  if (paperTargetsDirty) return;
+  const fromStatus = (st?.target_weights || [])
+    .map(x => String(x?.symbol || '').toUpperCase())
+    .filter(Boolean);
+  if (fromStatus.length) {
+    manualPaperTargets = [...new Set(fromStatus)].sort();
+    renderPaperTargetChips();
+  }
+};
+
+const forceSyncPaperTargetsFromStatus = async () => {
+  try {
+    const st = await api('/api/paper/status');
+    const fromStatus = (st?.target_weights || [])
+      .map(x => String(x?.symbol || '').toUpperCase())
+      .filter(Boolean);
+    if (fromStatus.length) {
+      manualPaperTargets = [...new Set(fromStatus)].sort();
+      paperTargetsDirty = false;
+      renderPaperTargetChips();
+    }
+  } catch {
+    // ignore sync failures
+  }
 };
 
 const applyTradeToCostBasis = (trade) => {
@@ -1866,6 +1946,7 @@ const refreshPaper = async () => {
     const st = await api('/api/paper/status');
     setPaperStatusChip(st);
     syncPaperButtons(st);
+    hydratePaperTargetsFromStatus(st);
 
     const ctx = buildPaperSeriesContext(st.snapshots || []);
     paperFullContext = ctx.portfolioSeries.length > 0 ? ctx : buildFallbackPaperContext(st.latest_snapshot);
@@ -1965,24 +2046,83 @@ const paperControl = async (path, body = {}, options = {}) => {
       resetPaperTradeState();
     }
     await refreshPaper();
+    if (options.syncTargetsOnce) {
+      await forceSyncPaperTargetsFromStatus();
+    }
   } catch (e) {
     setStatus(e.message || String(e), 'err');
     alert(e.message);
   }
 };
 
+const buildPaperTargetsPayload = (symbols) => {
+  const weight = symbols.length > 0 ? 1 / symbols.length : 0;
+  return symbols.map(symbol => ({ symbol, weight }));
+};
+
+if (paperTargetAddBtn) {
+  paperTargetAddBtn.addEventListener('click', () => {
+    const symbols = normalizeSymbols(paperTargetInput?.value || '');
+    if (!symbols.length) return;
+    addPaperTargetSymbols(symbols);
+    if (paperTargetInput) paperTargetInput.value = '';
+    renderPaperTargetChips();
+  });
+}
+
+if (paperTargetInput) {
+  paperTargetInput.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    paperTargetAddBtn?.click();
+  });
+}
+
+if (paperTargetApplyBtn) {
+  paperTargetApplyBtn.addEventListener('click', async () => {
+    if (manualPaperTargets.length === 0) {
+      alert('Target pool cannot be empty.');
+      return;
+    }
+    try {
+      const applyNow = paperApplyNowCheckbox ? !!paperApplyNowCheckbox.checked : true;
+      await api('/api/paper/targets', {
+        method: 'POST',
+        body: JSON.stringify({ symbols: manualPaperTargets, apply_now: applyNow }),
+      });
+      paperTargetsDirty = false;
+      renderPaperTargetChips();
+      setStatus(applyNow
+        ? 'Paper target pool updated and rebalanced immediately'
+        : 'Paper target pool updated (effective on next scheduled rebalance)', 'ok');
+      await refreshPaper();
+    } catch (e) {
+      setStatus(e.message || String(e), 'err');
+      alert(e.message);
+    }
+  });
+}
+
 document.getElementById('paperStart').addEventListener('click', async () => {
-  if (!lastPortfolio) {
-    alert('Run Portfolio optimization first.');
+  let symbols = [...manualPaperTargets];
+  if (!symbols.length && lastPortfolio?.weights?.length) {
+    symbols = lastPortfolio.weights.map(([symbol]) => String(symbol || '').toUpperCase()).filter(Boolean);
+  }
+  if (!symbols.length) {
+    alert('Please set target pool first (manual targets or run Portfolio optimization).');
     return;
   }
-  const targets = lastPortfolio.weights.map(([symbol, weight]) => ({ symbol, weight }));
+  symbols = [...new Set(symbols)].sort();
+  manualPaperTargets = symbols;
+  paperTargetsDirty = false;
+  renderPaperTargetChips();
+  const targets = buildPaperTargetsPayload(symbols);
   await paperControl('/api/paper/start', {
     targets,
     initial_capital: Number(document.getElementById('paperCapital').value),
     time1: document.getElementById('paperTime1').value,
     time2: document.getElementById('paperTime2').value,
-  }, { resetTradeState: true });
+  }, { resetTradeState: true, syncTargetsOnce: true });
 });
 document.getElementById('paperLoad').addEventListener('click', async () => {
   if (!paperFilePicker) {
@@ -1993,7 +2133,7 @@ document.getElementById('paperLoad').addEventListener('click', async () => {
     }
     await paperControl('/api/paper/load', {
       strategy_file: strategyFile,
-    }, { resetTradeState: true });
+    }, { resetTradeState: true, syncTargetsOnce: true });
     return;
   }
 
@@ -2026,7 +2166,7 @@ if (paperFilePicker) {
     try {
       await paperControl('/api/paper/load', {
         strategy_file: suggestedPath,
-      }, { resetTradeState: true });
+      }, { resetTradeState: true, syncTargetsOnce: true });
     } finally {
       if (paperLoadBtn) {
         paperLoadBtn.disabled = false;
@@ -2133,6 +2273,7 @@ document.getElementById('trainStart').addEventListener('click', async () => {
 
 refreshPaper();
 refreshTrain();
+renderPaperTargetChips();
 
 const restoreState = async () => {
   try {
