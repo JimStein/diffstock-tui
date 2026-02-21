@@ -184,6 +184,9 @@ pub enum PaperEvent {
         strategy_file: String,
         runtime_file: String,
     },
+    AutoOptimizationStatus {
+        running: bool,
+    },
     Info(String),
     Warning(String),
     Analysis(AnalysisRecord),
@@ -439,6 +442,14 @@ pub async fn run_paper_trading(
                 .contains(&now_local.weekday().number_from_monday());
 
             if should_optimize_today && !already_optimized_today && now_time >= opt_time {
+                let _ = event_tx
+                    .send(PaperEvent::AutoOptimizationStatus { running: true })
+                    .await;
+                let _ = event_tx
+                    .send(PaperEvent::Info(
+                        "Scheduled optimization started".to_string(),
+                    ))
+                    .await;
                 match optimize_targets_from_candidate_pool(&mut runtime, config.optimization_backend).await {
                     Ok(updated) => {
                         if updated {
@@ -451,12 +462,10 @@ pub async fn run_paper_trading(
                                 .join(", ");
                             let _ = event_tx
                                 .send(PaperEvent::Info(format!(
-                                    "Scheduled optimization updated targets: {}",
+                                    "Scheduled optimization updated targets (rebalance at next schedule): {}",
                                     listed
                                 )))
                                 .await;
-                            let analysis = run_analysis_once(&mut runtime, &current_prices)?;
-                            let _ = event_tx.send(PaperEvent::Analysis(analysis)).await;
                         }
                         optimization_last_run_date = Some(now_date);
                     }
@@ -469,6 +478,9 @@ pub async fn run_paper_trading(
                             .await;
                     }
                 }
+                let _ = event_tx
+                    .send(PaperEvent::AutoOptimizationStatus { running: false })
+                    .await;
             }
         }
     }
@@ -776,6 +788,14 @@ pub async fn run_paper_trading_from_strategy_file(
                 .contains(&now_local.weekday().number_from_monday());
 
             if should_optimize_today && !already_optimized_today && now_time >= opt_time {
+                let _ = event_tx
+                    .send(PaperEvent::AutoOptimizationStatus { running: true })
+                    .await;
+                let _ = event_tx
+                    .send(PaperEvent::Info(
+                        "Scheduled optimization started".to_string(),
+                    ))
+                    .await;
                 match optimize_targets_from_candidate_pool(&mut runtime, cfg.optimization_backend).await {
                     Ok(updated) => {
                         if updated {
@@ -788,12 +808,10 @@ pub async fn run_paper_trading_from_strategy_file(
                                 .join(", ");
                             let _ = event_tx
                                 .send(PaperEvent::Info(format!(
-                                    "Scheduled optimization updated targets: {}",
+                                    "Scheduled optimization updated targets (rebalance at next schedule): {}",
                                     listed
                                 )))
                                 .await;
-                            let analysis = run_analysis_once(&mut runtime, &current_prices)?;
-                            let _ = event_tx.send(PaperEvent::Analysis(analysis)).await;
                         }
                         optimization_last_run_date = Some(now_date);
                     }
@@ -806,6 +824,9 @@ pub async fn run_paper_trading_from_strategy_file(
                             .await;
                     }
                 }
+                let _ = event_tx
+                    .send(PaperEvent::AutoOptimizationStatus { running: false })
+                    .await;
             }
         }
     }

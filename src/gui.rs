@@ -267,6 +267,13 @@ impl eframe::App for GuiApp {
                     Ok(PaperEvent::Info(message)) => {
                         self.paper_log_messages.push(message);
                     }
+                    Ok(PaperEvent::AutoOptimizationStatus { running }) => {
+                        self.paper_log_messages.push(if running {
+                            "Scheduled optimization started".to_string()
+                        } else {
+                            "Scheduled optimization finished".to_string()
+                        });
+                    }
                     Ok(PaperEvent::Warning(message)) => {
                         self.paper_log_messages.push(format!("Warning: {}", message));
                     }

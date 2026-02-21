@@ -59,7 +59,8 @@ let paperSessionStartMs = null;
 let manualPaperTargets = [];
 let paperTargetsDirty = false;
 let paperStartOptimizing = false;
-let paperApplyOptimizing = false;
+let paperApplyManualOptimizing = false;
+let paperApplyAutoOptimizing = false;
 const FORECAST_BATCH_CACHE_KEY = 'diffstock:forecast-batch:v2';
 const FORECAST_META_CACHE_KEY = 'diffstock:forecast-meta:v1';
 let paperFullContext = {
@@ -1240,12 +1241,22 @@ const setPaperStartOptimizing = (optimizing) => {
   syncPaperButtons(null);
 };
 
-const setPaperApplyOptimizing = (optimizing) => {
-  paperApplyOptimizing = !!optimizing;
+const syncPaperApplyButtonState = () => {
+  const busy = !!(paperApplyManualOptimizing || paperApplyAutoOptimizing);
   if (!paperTargetApplyBtn) return;
-  paperTargetApplyBtn.disabled = paperApplyOptimizing;
-  paperTargetApplyBtn.textContent = paperApplyOptimizing ? 'Optimizing...' : '⚡ Apply Candidate Pool';
-  if (paperApplyNowCheckbox) paperApplyNowCheckbox.disabled = paperApplyOptimizing;
+  paperTargetApplyBtn.disabled = busy;
+  paperTargetApplyBtn.textContent = busy ? 'Optimizing...' : '⚡ Apply Candidate Pool';
+  if (paperApplyNowCheckbox) paperApplyNowCheckbox.disabled = busy;
+};
+
+const setPaperApplyOptimizing = (optimizing) => {
+  paperApplyManualOptimizing = !!optimizing;
+  syncPaperApplyButtonState();
+};
+
+const setPaperApplyAutoOptimizing = (optimizing) => {
+  paperApplyAutoOptimizing = !!optimizing;
+  syncPaperApplyButtonState();
 };
 
 /* ─── Forecast: helpers ─── */
@@ -1981,6 +1992,7 @@ const renderChartSummaryStrip = () => {
 const refreshPaper = async () => {
   try {
     const st = await api('/api/paper/status');
+    setPaperApplyAutoOptimizing(!!st?.auto_optimizing);
     setPaperStatusChip(st);
     syncPaperButtons(st);
     hydratePaperTargetsFromStatus(st);

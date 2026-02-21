@@ -139,6 +139,7 @@ impl Default for TrainRuntimeState {
 struct PaperRuntimeState {
     running: bool,
     paused: bool,
+    auto_optimizing: bool,
     started_at: Option<String>,
     strategy_file: Option<String>,
     runtime_file: Option<String>,
@@ -157,6 +158,7 @@ impl Default for PaperRuntimeState {
         Self {
             running: false,
             paused: false,
+            auto_optimizing: false,
             started_at: None,
             strategy_file: None,
             runtime_file: None,
@@ -606,6 +608,7 @@ async fn start_paper(
         let mut paper_state = state.paper.lock().await;
         paper_state.running = true;
         paper_state.paused = false;
+        paper_state.auto_optimizing = false;
         paper_state.started_at = Some(chrono::Local::now().to_rfc3339());
         paper_state.strategy_file = None;
         paper_state.runtime_file = None;
@@ -640,6 +643,9 @@ async fn start_paper(
                 paper_trading::PaperEvent::Info(msg) => {
                     ps.logs.push(msg);
                 }
+                paper_trading::PaperEvent::AutoOptimizationStatus { running } => {
+                    ps.auto_optimizing = running;
+                }
                 paper_trading::PaperEvent::Warning(msg) => {
                     ps.logs.push(format!("Warning: {}", msg));
                 }
@@ -663,6 +669,7 @@ async fn start_paper(
                     ps.logs.push(format!("Error: {}", msg));
                     ps.running = false;
                     ps.paused = false;
+                    ps.auto_optimizing = false;
                 }
             }
             if ps.logs.len() > 200 {
@@ -678,6 +685,7 @@ async fn start_paper(
         let mut ps = paper_state_runner.lock().await;
         ps.running = false;
         ps.paused = false;
+        ps.auto_optimizing = false;
         ps.cmd_tx = None;
         if let Err(err) = res {
             ps.logs.push(format!("Error: {}", err));
@@ -714,6 +722,7 @@ async fn load_paper(
         let mut paper_state = state.paper.lock().await;
         paper_state.running = true;
         paper_state.paused = false;
+        paper_state.auto_optimizing = false;
         paper_state.started_at = Some(chrono::Local::now().to_rfc3339());
         paper_state.strategy_file = Some(strategy_file.clone());
         paper_state.runtime_file = None;
@@ -743,6 +752,9 @@ async fn load_paper(
                 paper_trading::PaperEvent::Info(msg) => {
                     ps.logs.push(msg);
                 }
+                paper_trading::PaperEvent::AutoOptimizationStatus { running } => {
+                    ps.auto_optimizing = running;
+                }
                 paper_trading::PaperEvent::Warning(msg) => {
                     ps.logs.push(format!("Warning: {}", msg));
                 }
@@ -766,6 +778,7 @@ async fn load_paper(
                     ps.logs.push(format!("Error: {}", msg));
                     ps.running = false;
                     ps.paused = false;
+                    ps.auto_optimizing = false;
                 }
             }
             if ps.logs.len() > 200 {
@@ -788,6 +801,7 @@ async fn load_paper(
         let mut ps = paper_state_runner.lock().await;
         ps.running = false;
         ps.paused = false;
+        ps.auto_optimizing = false;
         ps.cmd_tx = None;
         if let Err(err) = res {
             ps.logs.push(format!("Error: {}", err));
