@@ -38,6 +38,8 @@ let legendForecastP10 = document.getElementById('legendForecastP10');
 let legendForecastP90 = document.getElementById('legendForecastP90');
 let paperMetricsByTime = new Map();
 let lastForecastContext = null;
+let forecastBatchResults = new Map(); // symbol → {data, selectedSymbol}
+let forecastSelectedSymbol = null;
 let paperTradeHistory = [];
 let paperTradeSeenKeys = new Set();
 let paperCostBasis = new Map();
@@ -79,9 +81,9 @@ const ensureForecastLegendElements = () => {
       <div class="legend-row"><span class="legend-key">Current Date</span><span class="legend-val" id="legendForecastCurrentDate">--</span></div>
       <div class="legend-row"><span class="legend-key">Current Price</span><span class="legend-val" id="legendForecastCurrentPrice">--</span></div>
       <div class="legend-row"><span class="legend-key">Target Date</span><span class="legend-val" id="legendForecastTargetDate">--</span></div>
-      <div class="legend-row"><span class="legend-key">P50 Target</span><span class="legend-val" id="legendForecastP50">--</span></div>
-      <div class="legend-row"><span class="legend-key">P10 Target</span><span class="legend-val" id="legendForecastP10">--</span></div>
-      <div class="legend-row"><span class="legend-key">P90 Target</span><span class="legend-val" id="legendForecastP90">--</span></div>
+      <div class="legend-row"><span class="legend-key"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#5b9cf6;margin-right:5px;vertical-align:middle"></span>P50 Median</span><span class="legend-val" id="legendForecastP50">--</span></div>
+      <div class="legend-row"><span class="legend-key"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ff6b7a;margin-right:5px;vertical-align:middle"></span>P10 Bear</span><span class="legend-val" id="legendForecastP10">--</span></div>
+      <div class="legend-row"><span class="legend-key"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#2ee8b0;margin-right:5px;vertical-align:middle"></span>P90 Bull</span><span class="legend-val" id="legendForecastP90">--</span></div>
     `;
     wrap.appendChild(legend);
   }
@@ -164,6 +166,18 @@ const addLineSeriesCompat = (chart, options) => {
   return createNoopSeries();
 };
 
+const addAreaSeriesCompat = (chart, options) => {
+  if (!chart) return createNoopSeries();
+  if (typeof chart.addAreaSeries === 'function') {
+    return chart.addAreaSeries(options);
+  }
+  if (window.LightweightCharts?.AreaSeries && typeof chart.addSeries === 'function') {
+    return chart.addSeries(window.LightweightCharts.AreaSeries, options);
+  }
+  // Fallback to line series with fill
+  return addLineSeriesCompat(chart, { ...options, lineWidth: 0 });
+};
+
 const createChartCompat = (containerId) => {
   const container = document.getElementById(containerId);
   const lib = window.LightweightCharts;
@@ -232,10 +246,28 @@ setInterval(() => {
 }, 1000);
 
 const fChart = createChartCompat('forecastChart');
-const historySeries = fChart.addLineSeries({ color: '#7e8aa5', lineWidth: 1 });
-const p50Series = fChart.addLineSeries({ color: '#3b82f6', lineWidth: 2 });
-const p10Series = fChart.addLineSeries({ color: '#ff4757', lineWidth: 1 });
-const p90Series = fChart.addLineSeries({ color: '#00d4aa', lineWidth: 1 });
+// Confidence band FIRST (renders behind everything)
+const p70AreaSeries = addAreaSeriesCompat(fChart.chart, {
+  topColor: 'rgba(91,156,246,0.30)',
+  bottomColor: 'rgba(91,156,246,0.08)',
+  lineColor: 'rgba(91,156,246,0.35)',
+  lineWidth: 1,
+  crosshairMarkerVisible: false,
+});
+const p30AreaSeries = addAreaSeriesCompat(fChart.chart, {
+  topColor: '#0f1420',
+  bottomColor: '#0f1420',
+  lineColor: 'rgba(91,156,246,0.35)',
+  lineWidth: 1,
+  crosshairMarkerVisible: false,
+});
+// History line - bright enough to see clearly
+const historySeries = fChart.addLineSeries({ color: '#b0b8d0', lineWidth: 2 });
+// Percentile lines ON TOP of area bands
+const p10Series = fChart.addLineSeries({ color: '#ff6b7a', lineWidth: 2, lineStyle: 2 });
+const p90Series = fChart.addLineSeries({ color: '#2ee8b0', lineWidth: 2, lineStyle: 2 });
+// P50 (median) last — most prominent
+const p50Series = fChart.addLineSeries({ color: '#5b9cf6', lineWidth: 3 });
 if (!fChart.chart) {
   setStatus('Chart library unavailable, but APIs and tables still work.', 'err');
 }
@@ -1011,24 +1043,286 @@ const syncPaperButtons = (status) => {
   paperStopBtn.disabled = true;
 };
 
+/* ─── Forecast: helpers ─── */
+const fcEmptyState = document.getElementById('fcEmptyState');
+const fcChartWrap = document.getElementById('fcChartWrap');
+const fcKpiGrid = document.getElementById('fcKpiGrid');
+const fcKpiPanel = document.getElementById('fcKpiPanel');
+const fcKpiSymbolTag = document.getElementById('fcKpiSymbolTag');
+const fcKpiSignalBadge = document.getElementById('fcKpiSignalBadge');
+const fcBatchGrid = document.getElementById('fcBatchGrid');
+const fcChartHeader = document.getElementById('fcChartHeader');
+const fcChartSubtitle = document.getElementById('fcChartSubtitle');
+
+const showFcChart = (symbol) => {
+  if (fcEmptyState) fcEmptyState.style.display = 'none';
+  if (fcChartWrap) fcChartWrap.style.display = '';
+  if (fcChartHeader) fcChartHeader.style.display = '';
+  if (fcChartSubtitle && symbol) {
+    const hEl = document.getElementById('fHorizon');
+    const h = hEl ? hEl.value : '5';
+    fcChartSubtitle.textContent = symbol + ' · ' + h + '-day horizon · Monte Carlo';
+  }
+};
+const showFcEmpty = () => {
+  if (fcEmptyState) fcEmptyState.style.display = '';
+  if (fcChartWrap) fcChartWrap.style.display = 'none';
+  if (fcChartHeader) fcChartHeader.style.display = 'none';
+  if (fcKpiPanel) { fcKpiPanel.style.display = 'none'; }
+  if (fcKpiGrid) { fcKpiGrid.innerHTML = ''; }
+  if (fcBatchGrid) { fcBatchGrid.style.display = 'none'; fcBatchGrid.innerHTML = ''; }
+};
+
+const computeSignal = (currentPrice, p50Target) => {
+  if (!Number.isFinite(currentPrice) || !Number.isFinite(p50Target) || currentPrice === 0) return 'neutral';
+  const pct = ((p50Target - currentPrice) / currentPrice) * 100;
+  if (pct > 2) return 'bull';
+  if (pct < -2) return 'bear';
+  return 'neutral';
+};
+
+const signalLabel = (sig) => sig === 'bull' ? '▲ Bullish' : sig === 'bear' ? '▼ Bearish' : '● Neutral';
+
+const renderFcKpiCards = (data) => {
+  if (!fcKpiGrid) return;
+  const history = Array.isArray(data?.history) ? data.history : [];
+  const p50 = Array.isArray(data?.p50) ? data.p50 : [];
+  const p10 = Array.isArray(data?.p10) ? data.p10 : [];
+  const p90 = Array.isArray(data?.p90) ? data.p90 : [];
+  const current = history.length > 0 ? history[history.length - 1] : null;
+  const p50Last = p50.length > 0 ? p50[p50.length - 1] : null;
+  const p10Last = p10.length > 0 ? p10[p10.length - 1] : null;
+  const p90Last = p90.length > 0 ? p90[p90.length - 1] : null;
+  const curP = Number(current?.value);
+  const p50V = Number(p50Last?.value);
+  const p10V = Number(p10Last?.value);
+  const p90V = Number(p90Last?.value);
+
+  const pctDelta = (target) => {
+    if (!Number.isFinite(target) || !Number.isFinite(curP) || curP === 0) return '--';
+    const d = ((target - curP) / curP) * 100;
+    return `${d >= 0 ? '+' : ''}${d.toFixed(2)}%`;
+  };
+
+  const signal = computeSignal(curP, p50V);
+  const rangeSpread = (Number.isFinite(p90V) && Number.isFinite(p10V))
+    ? `$${(p90V - p10V).toFixed(2)}`
+    : '--';
+
+  // Update panel header
+  if (fcKpiPanel) fcKpiPanel.style.display = '';
+  if (fcKpiSymbolTag) fcKpiSymbolTag.textContent = data.symbol || '--';
+  if (fcKpiSignalBadge) {
+    fcKpiSignalBadge.className = `fc-kpi-panel-signal ${signal}`;
+    fcKpiSignalBadge.textContent = signalLabel(signal);
+  }
+
+  fcKpiGrid.innerHTML = `
+    <div class="fc-kpi-card kpi-neutral">
+      <div class="fc-kpi-label">Current Price</div>
+      <div class="fc-kpi-value">${formatPrice(curP)}</div>
+      <div class="fc-kpi-sub" style="color:var(--muted)">${data.symbol || '--'}</div>
+    </div>
+    <div class="fc-kpi-card ${p50V >= curP ? 'kpi-bull' : 'kpi-bear'}">
+      <div class="fc-kpi-label">P50 Target (Median)</div>
+      <div class="fc-kpi-value" style="color:${p50V >= curP ? 'var(--up)' : 'var(--down)'}">${formatPrice(p50V)}</div>
+      <div class="fc-kpi-sub" style="color:${p50V >= curP ? 'var(--up)' : 'var(--down)'}">${pctDelta(p50V)}</div>
+    </div>
+    <div class="fc-kpi-card kpi-bear">
+      <div class="fc-kpi-label">P10 Bear Case</div>
+      <div class="fc-kpi-value" style="color:var(--down)">${formatPrice(p10V)}</div>
+      <div class="fc-kpi-sub" style="color:var(--down)">${pctDelta(p10V)}</div>
+    </div>
+    <div class="fc-kpi-card kpi-bull">
+      <div class="fc-kpi-label">P90 Bull Case</div>
+      <div class="fc-kpi-value" style="color:var(--up)">${formatPrice(p90V)}</div>
+      <div class="fc-kpi-sub" style="color:var(--up)">${pctDelta(p90V)}</div>
+    </div>
+    <div class="fc-kpi-card kpi-neutral">
+      <div class="fc-kpi-label">Expected Range</div>
+      <div class="fc-kpi-value">${rangeSpread}</div>
+      <div class="fc-kpi-sub" style="color:var(--muted)">P10 – P90 spread</div>
+    </div>
+    <div class="fc-kpi-card kpi-neutral">
+      <div class="fc-kpi-label">Horizon</div>
+      <div class="fc-kpi-value" style="font-size:16px">${document.getElementById('fHorizon')?.value || '10'}d</div>
+      <div class="fc-kpi-sub" style="color:var(--muted)">Trading days</div>
+    </div>
+  `;
+};
+
+const applyForecastDataToChart = (data) => {
+  historySeries.setData(toSeries(data.history || []));
+  p10Series.setData(toSeries(data.p10 || []));
+  p50Series.setData(toSeries(data.p50 || []));
+  p90Series.setData(toSeries(data.p90 || []));
+  // Confidence band: P30-P70
+  if (data.p70 && data.p70.length > 0) {
+    p70AreaSeries.setData(toSeries(data.p70));
+  } else {
+    p70AreaSeries.setData([]);
+  }
+  if (data.p30 && data.p30.length > 0) {
+    p30AreaSeries.setData(toSeries(data.p30));
+  } else {
+    p30AreaSeries.setData([]);
+  }
+  setForecastLegend(data);
+  showFcChart(data.symbol || forecastSelectedSymbol || '');
+  fChart.fit();
+};
+
+const renderBatchGrid = () => {
+  if (!fcBatchGrid) return;
+  if (forecastBatchResults.size <= 1) {
+    fcBatchGrid.style.display = 'none';
+    fcBatchGrid.innerHTML = '';
+    return;
+  }
+  fcBatchGrid.style.display = '';
+  let html = '';
+  for (const [sym, data] of forecastBatchResults) {
+    const history = data.history || [];
+    const p50 = data.p50 || [];
+    const p10 = data.p10 || [];
+    const p90 = data.p90 || [];
+    const curP = history.length > 0 ? Number(history[history.length - 1]?.value) : NaN;
+    const p50V = p50.length > 0 ? Number(p50[p50.length - 1]?.value) : NaN;
+    const p10V = p10.length > 0 ? Number(p10[p10.length - 1]?.value) : NaN;
+    const p90V = p90.length > 0 ? Number(p90[p90.length - 1]?.value) : NaN;
+    const signal = computeSignal(curP, p50V);
+    const pctDelta = Number.isFinite(p50V) && Number.isFinite(curP) && curP !== 0
+      ? ((p50V - curP) / curP * 100)
+      : 0;
+    const pctStr = Number.isFinite(pctDelta)
+      ? `${pctDelta >= 0 ? '+' : ''}${pctDelta.toFixed(2)}%`
+      : '--';
+    const selected = forecastSelectedSymbol === sym;
+
+    // Progress bar: normalize p50 delta between p10 and p90 range
+    let progressPct = 50;
+    if (Number.isFinite(p10V) && Number.isFinite(p90V) && Number.isFinite(curP) && (p90V - p10V) > 0) {
+      progressPct = Math.max(0, Math.min(100, ((curP - p10V) / (p90V - p10V)) * 100));
+    }
+    const progressColor = signal === 'bull' ? 'var(--up)' : signal === 'bear' ? 'var(--down)' : 'var(--accent)';
+
+    html += `
+      <div class="fc-batch-card ${signal === 'bull' ? 'card-bull' : signal === 'bear' ? 'card-bear' : ''} ${selected ? 'selected' : ''}" data-batch-sym="${sym}">
+        <div class="fc-batch-card-header">
+          <span class="fc-batch-symbol">${sym}</span>
+          <span class="fc-batch-signal ${signal}">${signalLabel(signal)}</span>
+        </div>
+        <div class="fc-batch-row"><span>Price</span><span class="val">${formatPrice(curP)}</span></div>
+        <div class="fc-batch-row"><span>P50 Target</span><span class="val" style="color:${pctDelta >= 0 ? 'var(--up)' : 'var(--down)'}">${formatPrice(p50V)} (${pctStr})</span></div>
+        <div class="fc-batch-row"><span>Bear / Bull</span><span class="val">${formatPrice(p10V)} / ${formatPrice(p90V)}</span></div>
+        <div class="fc-batch-progress"><div class="fc-batch-progress-fill" style="width:${progressPct}%;background:${progressColor}"></div></div>
+      </div>
+    `;
+  }
+  fcBatchGrid.innerHTML = html;
+
+  // Click handler for selecting symbol
+  fcBatchGrid.querySelectorAll('.fc-batch-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const sym = card.dataset.batchSym;
+      if (!sym || !forecastBatchResults.has(sym)) return;
+      forecastSelectedSymbol = sym;
+      const data = forecastBatchResults.get(sym);
+      applyForecastDataToChart(data);
+      renderFcKpiCards(data);
+      renderBatchGrid(); // re-render to update selected highlight
+    });
+  });
+};
+
+const syncQuickChips = () => {
+  const input = document.getElementById('fSymbol');
+  if (!input) return;
+  const syms = input.value.toUpperCase().split(',').map(s => s.trim()).filter(Boolean);
+  document.querySelectorAll('.fc-quick-chip').forEach(chip => {
+    chip.classList.toggle('active', syms.includes(chip.dataset.sym));
+  });
+};
+
+// Quick chip click handlers
+document.querySelectorAll('.fc-quick-chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    const sym = chip.dataset.sym;
+    const input = document.getElementById('fSymbol');
+    if (!input) return;
+    const current = input.value.toUpperCase().split(',').map(s => s.trim()).filter(Boolean);
+    const idx = current.indexOf(sym);
+    if (idx >= 0) {
+      current.splice(idx, 1);
+    } else {
+      current.push(sym);
+    }
+    input.value = current.join(',');
+    syncQuickChips();
+  });
+});
+
+// Sync chips on input change
+document.getElementById('fSymbol')?.addEventListener('input', syncQuickChips);
+syncQuickChips();
+
 document.getElementById('runForecast').addEventListener('click', async () => {
   try {
     await withBusy('runForecast', 'Running...', 'Forecast updated', async () => {
-      const payload = {
-        symbol: document.getElementById('fSymbol').value.trim(),
-        horizon: Number(document.getElementById('fHorizon').value),
-        simulations: Number(document.getElementById('fSims').value),
-      };
-      const data = await api('/api/forecast', { method: 'POST', body: JSON.stringify(payload) });
-      document.getElementById('fSymbol').value = payload.symbol;
-      document.getElementById('fHorizon').value = payload.horizon;
-      document.getElementById('fSims').value = payload.simulations;
-      historySeries.setData(toSeries(data.history));
-      p10Series.setData(toSeries(data.p10));
-      p50Series.setData(toSeries(data.p50));
-      p90Series.setData(toSeries(data.p90));
-      setForecastLegend(data);
-      fChart.fit();
+      const rawInput = document.getElementById('fSymbol').value.trim();
+      const symbols = [...new Set(rawInput.toUpperCase().split(',').map(s => s.trim()).filter(Boolean))];
+      if (symbols.length === 0) throw new Error('Please enter at least one symbol');
+
+      const horizon = Number(document.getElementById('fHorizon').value);
+      const simulations = Number(document.getElementById('fSims').value);
+
+      forecastBatchResults.clear();
+
+      // Run all symbols in parallel
+      const promises = symbols.map(symbol =>
+        api('/api/forecast', { method: 'POST', body: JSON.stringify({ symbol, horizon, simulations }) })
+          .then(data => ({ symbol, data, error: null }))
+          .catch(err => ({ symbol, data: null, error: err.message }))
+      );
+      const results = await Promise.all(promises);
+
+      let firstGoodSymbol = null;
+      const errors = [];
+      for (const r of results) {
+        if (r.data) {
+          forecastBatchResults.set(r.symbol, r.data);
+          if (!firstGoodSymbol) firstGoodSymbol = r.symbol;
+        } else {
+          errors.push(`${r.symbol}: ${r.error}`);
+        }
+      }
+
+      if (errors.length > 0 && forecastBatchResults.size === 0) {
+        throw new Error(errors.join('; '));
+      }
+
+      document.getElementById('fSymbol').value = symbols.join(',');
+      document.getElementById('fHorizon').value = horizon;
+      document.getElementById('fSims').value = simulations;
+      syncQuickChips();
+
+      // Select first symbol (or keep current selection if still valid)
+      if (forecastSelectedSymbol && forecastBatchResults.has(forecastSelectedSymbol)) {
+        // keep selection
+      } else {
+        forecastSelectedSymbol = firstGoodSymbol;
+      }
+
+      const selectedData = forecastBatchResults.get(forecastSelectedSymbol);
+      if (selectedData) {
+        applyForecastDataToChart(selectedData);
+        renderFcKpiCards(selectedData);
+      }
+      renderBatchGrid();
+
+      if (errors.length > 0) {
+        setStatus(`Forecast done (${errors.length} error${errors.length > 1 ? 's' : ''}): ${errors.join('; ')}`, 'err');
+      }
     });
   } catch (e) { alert(e.message); }
 });
@@ -1751,14 +2045,16 @@ const restoreState = async () => {
       document.getElementById('fSymbol').value = state.forecast.last_request.symbol || document.getElementById('fSymbol').value;
       document.getElementById('fHorizon').value = state.forecast.last_request.horizon || document.getElementById('fHorizon').value;
       document.getElementById('fSims').value = state.forecast.last_request.simulations || document.getElementById('fSims').value;
+      syncQuickChips();
     }
     if (state.forecast?.last_result) {
       const r = state.forecast.last_result;
-      historySeries.setData(toSeries(r.history || []));
-      p10Series.setData(toSeries(r.p10 || []));
-      p50Series.setData(toSeries(r.p50 || []));
-      p90Series.setData(toSeries(r.p90 || []));
-      fChart.fit();
+      forecastBatchResults.clear();
+      forecastBatchResults.set(r.symbol || document.getElementById('fSymbol').value.trim().toUpperCase(), r);
+      forecastSelectedSymbol = r.symbol || document.getElementById('fSymbol').value.trim().toUpperCase();
+      applyForecastDataToChart(r);
+      renderFcKpiCards(r);
+      renderBatchGrid();
     }
 
     if (state.portfolio?.last_symbols?.length) {

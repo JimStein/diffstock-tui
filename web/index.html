@@ -540,7 +540,9 @@
     }
 
     /* ─── Charts ─── */
-    #forecastChart, #paperChart { height: 380px; border-radius: var(--radius); overflow: hidden; }
+    #forecastChart { height: 420px; border-radius: var(--radius); overflow: hidden; box-shadow: inset 0 0 30px rgba(0,0,0,.15); }
+    #paperChart { height: 380px; border-radius: var(--radius); overflow: hidden; }
+    .fc-chart-panel { padding: 14px 14px 10px; }
     .chart-wrap {
       position: relative;
       border-radius: var(--radius);
@@ -658,23 +660,309 @@
       margin-top: 6px;
     }
 
+    /* ─── Forecast Input Panel ─── */
+    .fc-input-panel {
+      border: 1px solid rgba(59,130,246,.10);
+    }
+    .fc-input-panel .panel-header { border-bottom: 1px solid rgba(255,255,255,.04); padding-bottom: 10px; }
+
     /* ─── Forecast Chart Legend (inline, always visible) ─── */
     .forecast-legend {
       display: flex;
-      gap: 16px;
-      padding: 8px 4px 4px;
+      gap: 6px;
+      padding: 10px 4px 4px;
       font-size: 11px;
+      flex-wrap: wrap;
     }
     .forecast-legend-item {
-      display: flex;
+      display: inline-flex;
       align-items: center;
       gap: 6px;
-      color: var(--muted);
+      color: var(--text-2);
+      background: rgba(255,255,255,.03);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 3px 10px 3px 8px;
+      font-size: 10.5px;
+      letter-spacing: .2px;
+      transition: background var(--transition);
+    }
+    .forecast-legend-item:hover {
+      background: rgba(255,255,255,.06);
     }
     .forecast-legend-dot {
-      width: 10px; height: 3px;
-      border-radius: 2px;
       flex-shrink: 0;
+    }
+    .forecast-legend-dot.line {
+      width: 14px; height: 2px;
+      border-radius: 1px;
+    }
+    .forecast-legend-dot.dashed {
+      width: 14px; height: 0;
+      border-top: 2px dashed;
+    }
+    .forecast-legend-dot.band {
+      width: 14px; height: 8px;
+      border-radius: 2px;
+      opacity: .7;
+    }
+
+    /* ─── Forecast KPI Summary Cards ─── */
+    .fc-kpi-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px 16px;
+      margin-bottom: 12px;
+    }
+    .fc-kpi-panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .fc-kpi-panel-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: .2px;
+    }
+    .fc-kpi-panel-title .symbol-tag {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--accent-bg);
+      color: var(--accent-2);
+      letter-spacing: .3px;
+    }
+    .fc-kpi-panel-signal {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 999px;
+      letter-spacing: .3px;
+    }
+    .fc-kpi-panel-signal.bull {
+      color: var(--up);
+      background: var(--up-bg);
+    }
+    .fc-kpi-panel-signal.bear {
+      color: var(--down);
+      background: var(--down-bg);
+    }
+    .fc-kpi-panel-signal.neutral {
+      color: var(--muted);
+      background: rgba(255,255,255,.05);
+    }
+    .fc-kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+    @media (max-width: 720px) {
+      .fc-kpi-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    .fc-kpi-card {
+      background: rgba(15,20,32,.65);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      transition: background var(--transition), border-color var(--transition), transform .12s ease;
+    }
+    .fc-kpi-card:hover {
+      background: rgba(24,32,52,.75);
+      transform: translateY(-1px);
+    }
+    .fc-kpi-card.kpi-bull { border-left: 3px solid var(--up); }
+    .fc-kpi-card.kpi-bear { border-left: 3px solid var(--down); }
+    .fc-kpi-card.kpi-neutral { border-left: 3px solid var(--accent); }
+    .fc-kpi-label {
+      font-size: 10px;
+      color: var(--muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .4px;
+    }
+    .fc-kpi-value {
+      font-size: 20px;
+      font-weight: 700;
+      font-family: var(--mono);
+      letter-spacing: -.3px;
+      line-height: 1.2;
+    }
+    .fc-kpi-sub {
+      font-size: 10px;
+      font-family: var(--mono);
+      margin-top: 1px;
+    }
+
+    /* ─── Forecast Empty State ─── */
+    .fc-empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 56px 20px;
+      color: var(--muted);
+      text-align: center;
+      gap: 12px;
+      background: radial-gradient(ellipse at center, rgba(59,130,246,.04) 0%, transparent 70%);
+      border-radius: var(--radius);
+    }
+    .fc-empty-icon {
+      font-size: 48px;
+      opacity: .5;
+      filter: grayscale(.2);
+    }
+    .fc-empty-text {
+      font-size: 13px;
+      max-width: 340px;
+      line-height: 1.6;
+      color: var(--text-2);
+    }
+    .fc-empty-text strong {
+      color: var(--accent-2);
+    }
+
+    /* ─── Quick Symbol Chips ─── */
+    .fc-quick-chips {
+      display: flex;
+      gap: 5px;
+      flex-wrap: wrap;
+      padding-top: 8px;
+      align-items: center;
+    }
+    .fc-quick-chips-label {
+      font-size: 10px;
+      color: var(--muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .4px;
+      margin-right: 4px;
+    }
+    .fc-quick-chip {
+      padding: 2px 9px;
+      font-size: 10px;
+      font-weight: 600;
+      font-family: var(--mono);
+      letter-spacing: .3px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      transition: background var(--transition), color var(--transition), border-color var(--transition);
+    }
+    .fc-quick-chip:hover {
+      background: var(--accent-bg);
+      color: var(--accent-2);
+      border-color: rgba(59,130,246,.3);
+    }
+    .fc-quick-chip.active {
+      background: var(--accent-bg);
+      color: var(--accent-2);
+      border-color: rgba(59,130,246,.35);
+    }
+
+    /* ─── Forecast Batch Results Grid ─── */
+    .fc-batch-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .fc-batch-card {
+      background: rgba(21,28,44,.55);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--border-2);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      cursor: pointer;
+      transition: background var(--transition), border-color var(--transition), transform .15s ease;
+    }
+    .fc-batch-card:hover {
+      background: rgba(30,38,58,.7);
+      transform: translateY(-1px);
+    }
+    .fc-batch-card.selected {
+      border-color: var(--accent);
+      background: rgba(59,130,246,.06);
+    }
+    .fc-batch-card.card-bull { border-left-color: var(--up); }
+    .fc-batch-card.card-bear { border-left-color: var(--down); }
+    .fc-batch-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+    .fc-batch-symbol {
+      font-weight: 700;
+      font-size: 14px;
+      letter-spacing: .3px;
+    }
+    .fc-batch-signal {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 999px;
+      letter-spacing: .3px;
+    }
+    .fc-batch-signal.bull {
+      color: var(--up);
+      background: var(--up-bg);
+    }
+    .fc-batch-signal.bear {
+      color: var(--down);
+      background: var(--down-bg);
+    }
+    .fc-batch-signal.neutral {
+      color: var(--muted);
+      background: rgba(255,255,255,.05);
+    }
+    .fc-batch-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      font-size: 11px;
+      color: var(--text-2);
+      padding: 1px 0;
+    }
+    .fc-batch-row .val {
+      font-family: var(--mono);
+      font-weight: 500;
+    }
+    .fc-batch-progress {
+      height: 3px;
+      border-radius: 2px;
+      background: rgba(255,255,255,.06);
+      margin-top: 8px;
+      overflow: hidden;
+    }
+    .fc-batch-progress-fill {
+      height: 100%;
+      border-radius: 2px;
+      transition: width .3s ease;
     }
 
     /* ─── Paper button group ─── */
@@ -1184,11 +1472,17 @@
 
       <!-- ══════ Forecast Tab ══════ -->
       <section id="tab-forecast" class="tab-panel">
-        <div class="panel">
+        <div class="panel fc-input-panel">
+          <div class="panel-header" style="margin-bottom:10px;">
+            <div class="panel-title">
+              <span class="panel-title-icon">&#9881;</span> Forecast Parameters
+            </div>
+            <div class="panel-subtitle">Configure symbols and simulation settings</div>
+          </div>
           <div class="row">
-            <div class="field">
-              <label class="field-label">Symbol</label>
-              <input id="fSymbol" value="NVDA" placeholder="e.g. AAPL" style="width:100px" />
+            <div class="field" style="flex:1">
+              <label class="field-label">Symbols (comma-separated)</label>
+              <input id="fSymbol" value="NVDA" placeholder="e.g. NVDA,AAPL,MSFT" style="width:100%" />
             </div>
             <div class="field">
               <label class="field-label">Horizon (days)</label>
@@ -1203,25 +1497,68 @@
               <button class="primary" id="runForecast">&#9654; Run Forecast</button>
             </div>
           </div>
-        </div>
-        <div class="panel" style="padding: 12px 12px 8px;">
-          <div class="chart-wrap">
-            <div id="forecastChart"></div>
-            <div class="chart-legend" id="forecastLegend">
-              <div class="legend-title">Forecast Metrics</div>
-              <div class="legend-row"><span class="legend-key">Current Date</span><span class="legend-val" id="legendForecastCurrentDate">--</span></div>
-              <div class="legend-row"><span class="legend-key">Current Price</span><span class="legend-val" id="legendForecastCurrentPrice">--</span></div>
-              <div class="legend-row"><span class="legend-key">Target Date</span><span class="legend-val" id="legendForecastTargetDate">--</span></div>
-              <div class="legend-row"><span class="legend-key">P50 Target</span><span class="legend-val" id="legendForecastP50">--</span></div>
-              <div class="legend-row"><span class="legend-key">P10 Target</span><span class="legend-val" id="legendForecastP10">--</span></div>
-              <div class="legend-row"><span class="legend-key">P90 Target</span><span class="legend-val" id="legendForecastP90">--</span></div>
-            </div>
+          <div class="fc-quick-chips" id="fcQuickChips">
+            <span class="fc-quick-chips-label">Quick Add:</span>
+            <button class="fc-quick-chip" data-sym="NVDA">NVDA</button>
+            <button class="fc-quick-chip" data-sym="AAPL">AAPL</button>
+            <button class="fc-quick-chip" data-sym="MSFT">MSFT</button>
+            <button class="fc-quick-chip" data-sym="TSLA">TSLA</button>
+            <button class="fc-quick-chip" data-sym="SPY">SPY</button>
+            <button class="fc-quick-chip" data-sym="QQQ">QQQ</button>
+            <button class="fc-quick-chip" data-sym="AMZN">AMZN</button>
+            <button class="fc-quick-chip" data-sym="META">META</button>
+            <button class="fc-quick-chip" data-sym="GOOGL">GOOGL</button>
+            <button class="fc-quick-chip" data-sym="AMD">AMD</button>
           </div>
-          <div class="forecast-legend">
-            <div class="forecast-legend-item"><span class="forecast-legend-dot" style="background:#7e8aa5"></span> History</div>
-            <div class="forecast-legend-item"><span class="forecast-legend-dot" style="background:#3b82f6"></span> P50 (Median)</div>
-            <div class="forecast-legend-item"><span class="forecast-legend-dot" style="background:#ff4757"></span> P10 (Bear)</div>
-            <div class="forecast-legend-item"><span class="forecast-legend-dot" style="background:#00d4aa"></span> P90 (Bull)</div>
+        </div>
+
+        <!-- Batch Results Grid (shown when multiple symbols) -->
+        <div id="fcBatchGrid" class="fc-batch-grid" style="display:none;"></div>
+
+        <!-- KPI Summary Panel -->
+        <div id="fcKpiPanel" class="fc-kpi-panel" style="display:none;">
+          <div class="fc-kpi-panel-header">
+            <div class="fc-kpi-panel-title">
+              <span>&#128202;</span> Forecast Summary
+              <span class="symbol-tag" id="fcKpiSymbolTag">--</span>
+            </div>
+            <span class="fc-kpi-panel-signal" id="fcKpiSignalBadge"></span>
+          </div>
+          <div id="fcKpiGrid" class="fc-kpi-grid"></div>
+        </div>
+
+        <div class="panel fc-chart-panel">
+          <div class="panel-header" id="fcChartHeader" style="display:none;">
+            <div class="panel-title">
+              <span class="panel-title-icon">&#128200;</span> Price Forecast
+            </div>
+            <div class="panel-subtitle" id="fcChartSubtitle">Monte Carlo simulation</div>
+          </div>
+          <!-- Empty State -->
+          <div id="fcEmptyState" class="fc-empty-state">
+            <div class="fc-empty-icon">📈</div>
+            <div class="fc-empty-text">Enter one or more symbols above and click <strong>Run Forecast</strong> to generate Monte Carlo price projections</div>
+          </div>
+          <div id="fcChartWrap" style="display:none;">
+            <div class="chart-wrap">
+              <div id="forecastChart"></div>
+              <div class="chart-legend" id="forecastLegend">
+                <div class="legend-title">Forecast Metrics</div>
+                <div class="legend-row"><span class="legend-key">Current Date</span><span class="legend-val" id="legendForecastCurrentDate">--</span></div>
+                <div class="legend-row"><span class="legend-key">Current Price</span><span class="legend-val" id="legendForecastCurrentPrice">--</span></div>
+                <div class="legend-row"><span class="legend-key">Target Date</span><span class="legend-val" id="legendForecastTargetDate">--</span></div>
+                <div class="legend-row"><span class="legend-key"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#5b9cf6;margin-right:5px;vertical-align:middle"></span>P50 Median</span><span class="legend-val" id="legendForecastP50">--</span></div>
+                <div class="legend-row"><span class="legend-key"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ff6b7a;margin-right:5px;vertical-align:middle"></span>P10 Bear</span><span class="legend-val" id="legendForecastP10">--</span></div>
+                <div class="legend-row"><span class="legend-key"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#2ee8b0;margin-right:5px;vertical-align:middle"></span>P90 Bull</span><span class="legend-val" id="legendForecastP90">--</span></div>
+              </div>
+            </div>
+            <div class="forecast-legend">
+              <div class="forecast-legend-item"><span class="forecast-legend-dot line" style="background:#b0b8d0"></span> History</div>
+              <div class="forecast-legend-item"><span class="forecast-legend-dot line" style="background:#5b9cf6;height:3px"></span> P50 Median</div>
+              <div class="forecast-legend-item"><span class="forecast-legend-dot band" style="background:rgba(91,156,246,.35)"></span> P30–P70 Band</div>
+              <div class="forecast-legend-item"><span class="forecast-legend-dot dashed" style="border-color:#ff6b7a"></span> P10 Bear</div>
+              <div class="forecast-legend-item"><span class="forecast-legend-dot dashed" style="border-color:#2ee8b0"></span> P90 Bull</div>
+            </div>
           </div>
         </div>
       </section>
@@ -1454,6 +1791,6 @@
   </div>
 
   <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
-  <script src="/app.js?v=20260220k"></script>
+  <script src="/app.js?v=20260221d"></script>
 </body>
 </html>
