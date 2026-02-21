@@ -148,64 +148,131 @@
 
     /* ─── Sidebar ─── */
     .sidebar {
-      border-right: 1px solid var(--border);
-      padding: 16px 10px;
-      background: var(--bg-2);
+      border-right: 1px solid rgba(255,255,255,.06);
+      padding: 0;
+      background: linear-gradient(180deg, rgba(12,16,28,.97) 0%, rgba(8,11,20,.99) 100%);
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      position: sticky;
+      top: 52px;
+      height: calc(100vh - 52px);
+      overflow-y: auto;
+    }
+    .sidebar-nav {
+      flex: 1;
+      padding: 12px 10px;
       display: flex;
       flex-direction: column;
       gap: 2px;
     }
     .sidebar-section {
-      font-size: 10px;
-      font-weight: 600;
-      letter-spacing: .8px;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 1.2px;
       text-transform: uppercase;
       color: var(--muted-2);
-      padding: 12px 12px 8px;
+      padding: 16px 14px 7px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
+    .sidebar-section::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: linear-gradient(90deg, rgba(255,255,255,.06), transparent);
+    }
+    .sidebar-section:first-child { padding-top: 6px; }
     .tab-btn {
       width: 100%;
       text-align: left;
       border: none;
       background: transparent;
       color: var(--muted);
-      padding: 9px 12px;
-      border-radius: 8px;
+      padding: 10px 12px;
+      border-radius: 10px;
       cursor: pointer;
       font-family: var(--font);
       font-size: 13px;
       font-weight: 500;
       display: flex;
       align-items: center;
-      gap: 10px;
-      transition: var(--transition);
+      gap: 11px;
+      transition: all .2s cubic-bezier(.4,0,.2,1);
       position: relative;
+      margin: 1px 0;
     }
     .tab-btn:hover {
       background: rgba(255,255,255,.04);
       color: var(--text-2);
+      transform: translateX(2px);
     }
     .tab-btn.active {
-      background: var(--accent-bg);
-      color: var(--accent-2);
+      background: linear-gradient(135deg, rgba(59,130,246,.12) 0%, rgba(59,130,246,.06) 100%);
+      color: #fff;
+      box-shadow: 0 0 20px rgba(59,130,246,.08), inset 0 0 0 1px rgba(59,130,246,.15);
     }
     .tab-btn.active::before {
       content: '';
       position: absolute;
       left: 0; top: 50%;
       transform: translateY(-50%);
-      width: 3px; height: 20px;
-      border-radius: 0 3px 3px 0;
-      background: var(--accent);
+      width: 3px; height: 22px;
+      border-radius: 0 4px 4px 0;
+      background: linear-gradient(180deg, #5b9cf6, #3b82f6);
+      box-shadow: 0 0 8px rgba(59,130,246,.5);
+    }
+    .tab-icon-wrap {
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255,255,255,.04);
+      flex-shrink: 0;
+      transition: all .2s ease;
+    }
+    .tab-btn:hover .tab-icon-wrap { background: rgba(255,255,255,.07); }
+    .tab-btn.active .tab-icon-wrap {
+      background: rgba(59,130,246,.18);
+      box-shadow: 0 0 12px rgba(59,130,246,.15);
     }
     .tab-icon {
-      font-size: 16px;
-      width: 20px;
-      text-align: center;
-      flex-shrink: 0;
-      opacity: .8;
+      font-size: 15px;
+      line-height: 1;
+      opacity: .75;
+      filter: saturate(.8);
     }
-    .tab-btn.active .tab-icon { opacity: 1; }
+    .tab-btn.active .tab-icon { opacity: 1; filter: saturate(1.2); }
+    .tab-label {
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .sidebar-footer {
+      padding: 12px 14px;
+      border-top: 1px solid rgba(255,255,255,.04);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .sidebar-footer-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 10px;
+      color: var(--muted-2);
+    }
+    .sidebar-status-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--up);
+      box-shadow: 0 0 6px rgba(0,212,170,.4);
+      animation: pulse-dot 2.5s ease-in-out infinite;
+    }
 
     /* ─── Content ─── */
     .content {
@@ -1101,12 +1168,15 @@
       flex-shrink: 0;
       transition: var(--transition);
     }
+    .tab-badge:empty { display: none; }
     .tab-badge.running {
+      display: block;
       background: var(--up);
       box-shadow: 0 0 6px rgba(0,212,170,.5);
       animation: pulse-dot 2s ease-in-out infinite;
     }
     .tab-badge.paused {
+      display: block;
       background: var(--gold);
       box-shadow: 0 0 6px rgba(245,158,11,.4);
     }
@@ -1399,15 +1469,22 @@
       .shell { grid-template-columns: 1fr; }
       .sidebar {
         flex-direction: row;
-        padding: 8px;
-        gap: 4px;
+        padding: 0;
+        gap: 0;
         overflow-x: auto;
         border-right: none;
         border-bottom: 1px solid var(--border);
+        position: static;
+        height: auto;
       }
+      .sidebar-nav { padding: 6px; flex-direction: row; gap: 4px; }
       .sidebar-section { display: none; }
+      .sidebar-footer { display: none; }
       .tab-btn { padding: 8px 14px; }
+      .tab-btn:hover { transform: none; }
       .tab-btn.active::before { display: none; }
+      .tab-icon-wrap { width: 24px; height: 24px; border-radius: 6px; }
+      .tab-icon { font-size: 13px; }
       .grid-2 { grid-template-columns: 1fr; }
       #tradeSearchInput { min-width: 120px; max-width: 100%; width: 100%; }
     }
@@ -1447,23 +1524,38 @@
 
     <!-- Sidebar -->
     <aside class="sidebar">
-      <div class="sidebar-section">Analysis</div>
-      <button class="tab-btn active" data-tab="forecast">
-        <span class="tab-icon">📈</span> Forecast
-      </button>
-      <button class="tab-btn" data-tab="portfolio">
-        <span class="tab-icon">💼</span> Portfolio
-      </button>
-      <div class="sidebar-section">Trading</div>
-      <button class="tab-btn" data-tab="paper">
-        <span class="tab-icon">📄</span> Paper Trade
-        <span class="tab-badge" id="paperTabBadge"></span>
-      </button>
-      <div class="sidebar-section">System</div>
-      <button class="tab-btn" data-tab="train">
-        <span class="tab-icon">🧠</span> Train Model
-        <span class="tab-badge" id="trainTabBadge"></span>
-      </button>
+      <nav class="sidebar-nav">
+        <div class="sidebar-section">Analysis</div>
+        <button class="tab-btn active" data-tab="forecast">
+          <span class="tab-icon-wrap"><span class="tab-icon">📈</span></span>
+          <span class="tab-label">Forecast</span>
+        </button>
+        <button class="tab-btn" data-tab="portfolio">
+          <span class="tab-icon-wrap"><span class="tab-icon">💼</span></span>
+          <span class="tab-label">Portfolio</span>
+        </button>
+        <div class="sidebar-section">Trading</div>
+        <button class="tab-btn" data-tab="paper">
+          <span class="tab-icon-wrap"><span class="tab-icon">📄</span></span>
+          <span class="tab-label">Paper Trade</span>
+          <span class="tab-badge" id="paperTabBadge"></span>
+        </button>
+        <div class="sidebar-section">System</div>
+        <button class="tab-btn" data-tab="train">
+          <span class="tab-icon-wrap"><span class="tab-icon">🧠</span></span>
+          <span class="tab-label">Train Model</span>
+          <span class="tab-badge" id="trainTabBadge"></span>
+        </button>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="sidebar-footer-row">
+          <span>DiffStock v0.1</span>
+          <span class="sidebar-status-dot" title="Server online"></span>
+        </div>
+        <div class="sidebar-footer-row">
+          <span>DirectML Backend</span>
+        </div>
+      </div>
     </aside>
 
     <!-- Content -->
@@ -1791,6 +1883,6 @@
   </div>
 
   <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
-  <script src="/app.js?v=20260221d"></script>
+  <script src="/app.js?v=20260221f"></script>
 </body>
 </html>
