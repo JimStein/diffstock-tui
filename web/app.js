@@ -47,6 +47,8 @@ let selectedTradeFilter = 'all';
 let tradeSearchText = '';
 let selectedPaperRangeDays = 0.5;
 let paperSessionStartMs = null;
+const FORECAST_BATCH_CACHE_KEY = 'diffstock:forecast-batch:v2';
+const FORECAST_META_CACHE_KEY = 'diffstock:forecast-meta:v1';
 let paperFullContext = {
   portfolioSeries: [],
   benchmarkSeries: [],
@@ -57,6 +59,90 @@ const paperRangeButtons = Array.from(document.querySelectorAll('[data-paper-rang
 
 const tradeFilterButtons = Array.from(document.querySelectorAll('[data-trade-filter]'));
 const tradeSearchInput = document.getElementById('tradeSearchInput');
+
+const saveForecastBatchCache = () => {
+  try {
+    const symbolsInput = document.getElementById('fSymbol')?.value || '';
+    const horizon = Number(document.getElementById('fHorizon')?.value || 10);
+    const simulations = Number(document.getElementById('fSims')?.value || 500);
+    const meta = {
+      savedAt: Date.now(),
+      symbolsInput,
+      horizon,
+      simulations,
+      selectedSymbol: forecastSelectedSymbol,
+    };
+    localStorage.setItem(FORECAST_META_CACHE_KEY, JSON.stringify(meta));
+
+    if (forecastBatchResults.size === 0) {
+      localStorage.removeItem(FORECAST_BATCH_CACHE_KEY);
+      return;
+    }
+    const payload = {
+      savedAt: Date.now(),
+      symbolsInput,
+      horizon,
+      simulations,
+      selectedSymbol: forecastSelectedSymbol,
+      results: Array.from(forecastBatchResults.entries()).map(([symbol, data]) => ({ symbol, data })),
+    };
+    localStorage.setItem(FORECAST_BATCH_CACHE_KEY, JSON.stringify(payload));
+  } catch (err) {
+    console.warn('saveForecastBatchCache failed', err);
+  }
+};
+
+const loadForecastMetaCache = () => {
+  try {
+    const raw = localStorage.getItem(FORECAST_META_CACHE_KEY);
+    if (!raw) return null;
+    const meta = JSON.parse(raw);
+    if (!meta || typeof meta !== 'object') return null;
+    return meta;
+  } catch {
+    return null;
+  }
+};
+
+const restoreForecastBatchCache = () => {
+  try {
+    const raw = localStorage.getItem(FORECAST_BATCH_CACHE_KEY);
+    if (!raw) return false;
+    const payload = JSON.parse(raw);
+    const rows = Array.isArray(payload?.results) ? payload.results : [];
+    if (rows.length === 0) return false;
+
+    forecastBatchResults.clear();
+    for (const row of rows) {
+      if (!row || !row.symbol || !row.data) continue;
+      forecastBatchResults.set(String(row.symbol).toUpperCase(), row.data);
+    }
+    if (forecastBatchResults.size === 0) return false;
+
+    const inputEl = document.getElementById('fSymbol');
+    const horizonEl = document.getElementById('fHorizon');
+    const simsEl = document.getElementById('fSims');
+    if (inputEl && payload.symbolsInput) inputEl.value = payload.symbolsInput;
+    if (horizonEl && Number.isFinite(Number(payload.horizon))) horizonEl.value = Number(payload.horizon);
+    if (simsEl && Number.isFinite(Number(payload.simulations))) simsEl.value = Number(payload.simulations);
+    syncQuickChips();
+
+    const preferred = payload.selectedSymbol ? String(payload.selectedSymbol).toUpperCase() : null;
+    const first = forecastBatchResults.keys().next().value;
+    forecastSelectedSymbol = preferred && forecastBatchResults.has(preferred) ? preferred : first;
+
+    const selectedData = forecastBatchResults.get(forecastSelectedSymbol);
+    if (selectedData) {
+      applyForecastDataToChart(selectedData);
+      renderFcKpiCards(selectedData);
+    }
+    renderBatchGrid();
+    return true;
+  } catch (err) {
+    console.warn('restoreForecastBatchCache failed', err);
+    return false;
+  }
+};
 
 const ensureForecastLegendElements = () => {
   const chartHost = document.getElementById('forecastChart');
@@ -1230,6 +1316,7 @@ const renderBatchGrid = () => {
       const data = forecastBatchResults.get(sym);
       applyForecastDataToChart(data);
       renderFcKpiCards(data);
+      saveForecastBatchCache();
       renderBatchGrid(); // re-render to update selected highlight
     });
   });
@@ -1266,6 +1353,50 @@ document.querySelectorAll('.fc-quick-chip').forEach(chip => {
 document.getElementById('fSymbol')?.addEventListener('input', syncQuickChips);
 syncQuickChips();
 
+const runForecastBatchForSymbols = async (symbols, horizon, simulations) => {
+  forecastBatchResults.clear();
+  const promises = symbols.map(symbol =>
+    api('/api/forecast', { method: 'POST', body: JSON.stringify({ symbol, horizon, simulations }) })
+      .then(data => ({ symbol, data, error: null }))
+      .catch(err => ({ symbol, data: null, error: err.message }))
+  );
+  const results = await Promise.all(promises);
+
+  let firstGoodSymbol = null;
+  const errors = [];
+  for (const r of results) {
+    if (r.data) {
+      forecastBatchResults.set(r.symbol, r.data);
+      if (!firstGoodSymbol) firstGoodSymbol = r.symbol;
+    } else {
+      errors.push(`${r.symbol}: ${r.error}`);
+    }
+  }
+
+  if (errors.length > 0 && forecastBatchResults.size === 0) {
+    throw new Error(errors.join('; '));
+  }
+
+  document.getElementById('fSymbol').value = symbols.join(',');
+  document.getElementById('fHorizon').value = horizon;
+  document.getElementById('fSims').value = simulations;
+  syncQuickChips();
+
+  if (!(forecastSelectedSymbol && forecastBatchResults.has(forecastSelectedSymbol))) {
+    forecastSelectedSymbol = firstGoodSymbol;
+  }
+  const selectedData = forecastBatchResults.get(forecastSelectedSymbol);
+  if (selectedData) {
+    applyForecastDataToChart(selectedData);
+    renderFcKpiCards(selectedData);
+  }
+  renderBatchGrid();
+  saveForecastBatchCache();
+  refreshBackendChip();
+
+  return { errors };
+};
+
 document.getElementById('runForecast').addEventListener('click', async () => {
   try {
     await withBusy('runForecast', 'Running...', 'Forecast updated', async () => {
@@ -1275,50 +1406,7 @@ document.getElementById('runForecast').addEventListener('click', async () => {
 
       const horizon = Number(document.getElementById('fHorizon').value);
       const simulations = Number(document.getElementById('fSims').value);
-
-      forecastBatchResults.clear();
-
-      // Run all symbols in parallel
-      const promises = symbols.map(symbol =>
-        api('/api/forecast', { method: 'POST', body: JSON.stringify({ symbol, horizon, simulations }) })
-          .then(data => ({ symbol, data, error: null }))
-          .catch(err => ({ symbol, data: null, error: err.message }))
-      );
-      const results = await Promise.all(promises);
-
-      let firstGoodSymbol = null;
-      const errors = [];
-      for (const r of results) {
-        if (r.data) {
-          forecastBatchResults.set(r.symbol, r.data);
-          if (!firstGoodSymbol) firstGoodSymbol = r.symbol;
-        } else {
-          errors.push(`${r.symbol}: ${r.error}`);
-        }
-      }
-
-      if (errors.length > 0 && forecastBatchResults.size === 0) {
-        throw new Error(errors.join('; '));
-      }
-
-      document.getElementById('fSymbol').value = symbols.join(',');
-      document.getElementById('fHorizon').value = horizon;
-      document.getElementById('fSims').value = simulations;
-      syncQuickChips();
-
-      // Select first symbol (or keep current selection if still valid)
-      if (forecastSelectedSymbol && forecastBatchResults.has(forecastSelectedSymbol)) {
-        // keep selection
-      } else {
-        forecastSelectedSymbol = firstGoodSymbol;
-      }
-
-      const selectedData = forecastBatchResults.get(forecastSelectedSymbol);
-      if (selectedData) {
-        applyForecastDataToChart(selectedData);
-        renderFcKpiCards(selectedData);
-      }
-      renderBatchGrid();
+      const { errors } = await runForecastBatchForSymbols(symbols, horizon, simulations);
 
       if (errors.length > 0) {
         setStatus(`Forecast done (${errors.length} error${errors.length > 1 ? 's' : ''}): ${errors.join('; ')}`, 'err');
@@ -2040,6 +2128,7 @@ refreshTrain();
 const restoreState = async () => {
   try {
     const state = await api('/api/state');
+    let restoredFromBackendForecast = false;
 
     if (state.forecast?.last_request) {
       document.getElementById('fSymbol').value = state.forecast.last_request.symbol || document.getElementById('fSymbol').value;
@@ -2055,6 +2144,31 @@ const restoreState = async () => {
       applyForecastDataToChart(r);
       renderFcKpiCards(r);
       renderBatchGrid();
+      restoredFromBackendForecast = true;
+    }
+
+    const restoredFromLocalBatch = restoreForecastBatchCache();
+    let restoredByRefetch = false;
+    if (!restoredFromLocalBatch) {
+      const meta = loadForecastMetaCache();
+      const rawSymbols = String(meta?.symbolsInput || '').trim();
+      const symbols = [...new Set(rawSymbols.toUpperCase().split(',').map(s => s.trim()).filter(Boolean))];
+      const horizon = Number(meta?.horizon || document.getElementById('fHorizon').value || 10);
+      const simulations = Number(meta?.simulations || document.getElementById('fSims').value || 500);
+      if (symbols.length > 1) {
+        const prevSelection = forecastSelectedSymbol;
+        if (meta?.selectedSymbol) forecastSelectedSymbol = String(meta.selectedSymbol).toUpperCase();
+        try {
+          const { errors } = await runForecastBatchForSymbols(symbols, horizon, simulations);
+          restoredByRefetch = true;
+          if (errors.length > 0) {
+            setStatus(`State restored (refetched, ${errors.length} symbol error${errors.length > 1 ? 's' : ''})`, 'err');
+          }
+        } catch (err) {
+          forecastSelectedSymbol = prevSelection;
+          console.warn('restore refetch failed', err);
+        }
+      }
     }
 
     if (state.portfolio?.last_symbols?.length) {
@@ -2091,7 +2205,16 @@ const restoreState = async () => {
       if (rawBox) rawBox.textContent = JSON.stringify(state.train, null, 2);
     }
 
-    setStatus('State restored from backend', 'ok');
+    if (restoredFromLocalBatch && forecastBatchResults.size > 1) {
+      setStatus('State restored (backend + local multi-symbol cache)', 'ok');
+    } else if (restoredByRefetch && forecastBatchResults.size > 1) {
+      setStatus('State restored (multi-symbol refetched)', 'ok');
+    } else if (restoredFromBackendForecast) {
+      setStatus('State restored from backend', 'ok');
+    } else {
+      setStatus('State restored', 'ok');
+    }
+    refreshBackendChip();
   } catch (e) {
     setStatus(`State restore failed: ${e.message}`, 'err');
   }
@@ -2102,7 +2225,7 @@ renderQuotesAsOf();
 renderTradeHistory();
 
 // Backend chip: detect compute backend from /api/state
-(async () => {
+const refreshBackendChip = async () => {
   const backendChip = document.getElementById('backendChip');
   const backendDot = document.getElementById('backendDot');
   if (!backendChip) return;
@@ -2110,13 +2233,24 @@ renderTradeHistory();
     const st = await api('/api/state');
     const backend = st?.forecast?.last_request?.compute_backend || st?.compute_backend || null;
     if (backend) {
-      const label = backend.charAt(0).toUpperCase() + backend.slice(1);
+      const lower = String(backend).toLowerCase();
+      const label = lower === 'directml'
+        ? 'DirectML'
+        : lower === 'cuda'
+          ? 'CUDA'
+          : lower === 'cpu'
+            ? 'CPU'
+            : (backend.charAt(0).toUpperCase() + backend.slice(1));
       backendChip.textContent = `Backend: ${label}`;
-      if (backendDot) { backendDot.style.background = backend === 'cpu' ? 'var(--muted)' : 'var(--accent)'; }
+      if (backendDot) { backendDot.style.background = lower === 'cpu' ? 'var(--muted)' : 'var(--accent)'; }
     } else {
-      backendChip.textContent = 'Backend: CPU';
+      backendChip.textContent = 'Backend: --';
+      if (backendDot) { backendDot.style.background = 'var(--muted-2)'; }
     }
   } catch {
     backendChip.textContent = 'Backend: --';
+    if (backendDot) { backendDot.style.background = 'var(--muted-2)'; }
   }
-})();
+};
+
+refreshBackendChip();
