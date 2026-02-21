@@ -437,7 +437,14 @@ pub async fn run_paper_trading(
                             .or_insert(0.0);
                     }
                     write_strategy_json(&runtime.strategy_path, &runtime.strategy_log)?;
-                    let listed = runtime
+                    let listed_candidates = runtime
+                        .strategy_log
+                        .candidate_symbols
+                        .iter()
+                        .map(|s| s.clone())
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let listed_targets = runtime
                         .strategy_log
                         .targets
                         .iter()
@@ -446,9 +453,10 @@ pub async fn run_paper_trading(
                         .join(",");
                     let _ = event_tx
                         .send(PaperEvent::Info(format!(
-                            "Candidate pool updated{}: {}",
+                            "Candidate pool updated{}: [{}] · active targets: [{}]",
                             if apply_now { " (apply-now)" } else { "" },
-                            listed
+                            listed_candidates,
+                            listed_targets,
                         )))
                         .await;
 
@@ -837,7 +845,14 @@ pub async fn run_paper_trading_from_strategy_file(
                             .or_insert(0.0);
                     }
                     write_strategy_json(&runtime.strategy_path, &runtime.strategy_log)?;
-                    let listed = runtime
+                    let listed_candidates = runtime
+                        .strategy_log
+                        .candidate_symbols
+                        .iter()
+                        .map(|s| s.clone())
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let listed_targets = runtime
                         .strategy_log
                         .targets
                         .iter()
@@ -846,9 +861,10 @@ pub async fn run_paper_trading_from_strategy_file(
                         .join(",");
                     let _ = event_tx
                         .send(PaperEvent::Info(format!(
-                            "Candidate pool updated{}: {}",
+                            "Candidate pool updated{}: [{}] · active targets: [{}]",
                             if apply_now { " (apply-now)" } else { "" },
-                            listed
+                            listed_candidates,
+                            listed_targets,
                         )))
                         .await;
 

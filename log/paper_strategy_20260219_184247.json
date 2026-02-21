@@ -24,25 +24,30 @@
     "IAU",
     "MSFT",
     "NVDA",
+    "QQQ",
     "TLT",
     "URA"
   ],
   "targets": [
     {
       "symbol": "COPX",
-      "target_weight": 0.2269767058715238
+      "target_weight": 0.2200169380639934
     },
     {
       "symbol": "ETN",
-      "target_weight": 0.19974069331935929
+      "target_weight": 0.12176492363559151
     },
     {
       "symbol": "IAU",
-      "target_weight": 0.31151606924502373
+      "target_weight": 0.3117088532651541
+    },
+    {
+      "symbol": "QQQ",
+      "target_weight": 0.07959968999235245
     },
     {
       "symbol": "URA",
-      "target_weight": 0.04101722604180716
+      "target_weight": 0.04699278165215282
     }
   ],
   "analyses": [
