@@ -8,34 +8,36 @@
   ],
   "benchmark_symbol": "QQQ",
   "benchmark_initial_price": 605.7899780273438,
+  "optimization_time_local": "21:00",
+  "optimization_weekdays": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
   "targets": [
     {
       "symbol": "COPX",
-      "target_weight": 0.14285714285714285
+      "target_weight": 0.23376362049515206
     },
     {
       "symbol": "ETN",
-      "target_weight": 0.14285714285714285
+      "target_weight": 0.11594933163590676
     },
     {
       "symbol": "IAU",
-      "target_weight": 0.14285714285714285
-    },
-    {
-      "symbol": "MSFT",
-      "target_weight": 0.14285714285714285
-    },
-    {
-      "symbol": "NVDA",
-      "target_weight": 0.14285714285714285
+      "target_weight": 0.29445356892822816
     },
     {
       "symbol": "TLT",
-      "target_weight": 0.14285714285714285
+      "target_weight": 0.07669532929390603
     },
     {
       "symbol": "URA",
-      "target_weight": 0.14285714285714285
+      "target_weight": 0.015529972647367583
     }
   ],
   "analyses": [
@@ -253,7 +255,7 @@
           "side": "BUY",
           "quantity": 60.0,
           "price": 189.82000732421875,
-          "notional": 11389.200439453125,
+          "notional": 11389.200439453123,
           "fee": 5.694600219726563
         },
         {
@@ -262,7 +264,7 @@
           "side": "BUY",
           "quantity": 120.0,
           "price": 89.41000366210938,
-          "notional": 10729.200439453125,
+          "notional": 10729.200439453123,
           "fee": 5.3646002197265625
         },
         {

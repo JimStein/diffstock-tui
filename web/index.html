@@ -40,6 +40,9 @@
       --transition: .2s cubic-bezier(.4,0,.2,1);
     }
 
+    /* ensure native time picker popup is dark-themed */
+    :root { color-scheme: dark; }
+
     /* ─── Reset & Base ─── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
@@ -349,6 +352,12 @@
       box-shadow: 0 0 0 3px var(--glow);
     }
     input::placeholder { color: var(--muted-2); }
+    input[type=time]::-webkit-calendar-picker-indicator {
+      filter: invert(0.7) sepia(1) saturate(2) hue-rotate(190deg);
+      cursor: pointer;
+      opacity: .65;
+    }
+    input[type=time]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 
     button {
       background: var(--surface);
@@ -1989,15 +1998,15 @@
               </div>
               <div class="field">
                 <label class="field-label">Schedule 1</label>
-                <input id="paperTime1" value="23:30" style="width:80px" />
+                <input id="paperTime1" type="time" value="23:30" step="60" style="width:108px" />
               </div>
               <div class="field">
                 <label class="field-label">Schedule 2</label>
-                <input id="paperTime2" value="02:30" style="width:80px" />
+                <input id="paperTime2" type="time" value="02:30" step="60" style="width:108px" />
               </div>
               <div class="field">
                 <label class="field-label">Optimize Time</label>
-                <input id="paperOptTime" value="22:00" style="width:80px" />
+                <input id="paperOptTime" type="time" value="22:00" step="60" style="width:108px" />
               </div>
             </div>
             <!-- Row 2: optimize days + history path -->
