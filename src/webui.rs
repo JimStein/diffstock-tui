@@ -57,19 +57,54 @@ struct TrainRuntimeState {
     last_error: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(default)]
 struct ForecastRuntimeState {
     last_request: Option<ForecastRequestState>,
     last_result: Option<ForecastResponse>,
     last_error: Option<String>,
+    cached_results: HashMap<String, CachedForecastEntry>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+const FORECAST_CACHE_FILE: &str = "log/webui_forecast_cache.json";
+
+fn forecast_cache_path() -> std::path::PathBuf {
+    config::project_root_path().join(FORECAST_CACHE_FILE)
+}
+
+fn load_forecast_state() -> Result<ForecastRuntimeState> {
+    let path = forecast_cache_path();
+    if !path.exists() {
+        return Ok(ForecastRuntimeState::default());
+    }
+    let raw = std::fs::read_to_string(path)?;
+    let state = serde_json::from_str::<ForecastRuntimeState>(&raw)?;
+    Ok(state)
+}
+
+fn save_forecast_state(state: &ForecastRuntimeState) -> Result<()> {
+    let path = forecast_cache_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let json = serde_json::to_string_pretty(state)?;
+    std::fs::write(path, json)?;
+    Ok(())
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct ForecastRequestState {
     symbol: String,
     horizon: usize,
     simulations: usize,
     compute_backend: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct CachedForecastEntry {
+    request: ForecastRequestState,
+    result: ForecastResponse,
+    forecasted_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -151,13 +186,13 @@ struct ForecastRequest {
     compute_backend: Option<ApiComputeBackend>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct PricePoint {
     time: i64,
     value: f64,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct ForecastResponse {
     symbol: String,
     history: Vec<PricePoint>,
@@ -166,6 +201,7 @@ struct ForecastResponse {
     p50: Vec<PricePoint>,
     p70: Vec<PricePoint>,
     p90: Vec<PricePoint>,
+    forecasted_at: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -215,11 +251,19 @@ struct PaperLoadRequest {
 }
 
 pub async fn run_webui_server(port: u16, backend_default: config::ComputeBackend) -> Result<()> {
+    let forecast_state = match load_forecast_state() {
+        Ok(state) => state,
+        Err(err) => {
+            warn!("failed to load forecast cache: {}", err);
+            ForecastRuntimeState::default()
+        }
+    };
+
     let state = WebState {
         backend_default,
         train: Arc::new(Mutex::new(TrainRuntimeState::default())),
         paper: Arc::new(Mutex::new(PaperRuntimeState::default())),
-        forecast: Arc::new(Mutex::new(ForecastRuntimeState::default())),
+        forecast: Arc::new(Mutex::new(forecast_state)),
         portfolio: Arc::new(Mutex::new(PortfolioRuntimeState::default())),
     };
 
@@ -278,15 +322,16 @@ async fn forecast(
     let horizon = req.horizon.unwrap_or(10);
     let simulations = req.simulations.unwrap_or(500);
     let backend_label = format!("{:?}", backend).to_lowercase();
+    let request_state = ForecastRequestState {
+        symbol: symbol.clone(),
+        horizon,
+        simulations,
+        compute_backend: backend_label.clone(),
+    };
 
     {
         let mut fs = state.forecast.lock().await;
-        fs.last_request = Some(ForecastRequestState {
-            symbol: symbol.clone(),
-            horizon,
-            simulations,
-            compute_backend: backend_label.clone(),
-        });
+        fs.last_request = Some(request_state.clone());
         fs.last_error = None;
     }
 
@@ -321,6 +366,8 @@ async fn forecast(
             .collect::<Vec<_>>()
     };
 
+    let forecasted_at = chrono::Local::now().to_rfc3339();
+
     let response = ForecastResponse {
         symbol,
         history,
@@ -329,12 +376,26 @@ async fn forecast(
         p50: map_points(forecast.p50),
         p70: map_points(forecast.p70),
         p90: map_points(forecast.p90),
+        forecasted_at: Some(forecasted_at.clone()),
     };
 
-    {
+    let forecast_snapshot = {
         let mut fs = state.forecast.lock().await;
         fs.last_result = Some(response.clone());
         fs.last_error = None;
+        fs.cached_results.insert(
+            response.symbol.clone(),
+            CachedForecastEntry {
+                request: request_state,
+                result: response.clone(),
+                forecasted_at,
+            },
+        );
+        fs.clone()
+    };
+
+    if let Err(err) = save_forecast_state(&forecast_snapshot) {
+        warn!("failed to persist forecast cache: {}", err);
     }
 
     Ok(Json(response))

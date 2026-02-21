@@ -600,6 +600,13 @@ const formatChartDate = (unixSec) => {
   return new Date(unixSec * 1000).toLocaleDateString();
 };
 
+const formatDateTime = (iso) => {
+  if (!iso) return '--';
+  const dt = new Date(iso);
+  if (!Number.isFinite(dt.getTime())) return '--';
+  return dt.toLocaleString();
+};
+
 const formatPrice = (v) => {
   if (!Number.isFinite(v)) return '--';
   return `$${v.toFixed(2)}`;
@@ -1284,6 +1291,7 @@ const renderBatchGrid = () => {
       ? `${pctDelta >= 0 ? '+' : ''}${pctDelta.toFixed(2)}%`
       : '--';
     const selected = forecastSelectedSymbol === sym;
+    const forecastedAt = data?.forecasted_at || null;
 
     // Progress bar: normalize p50 delta between p10 and p90 range
     let progressPct = 50;
@@ -1301,6 +1309,7 @@ const renderBatchGrid = () => {
         <div class="fc-batch-row"><span>Price</span><span class="val">${formatPrice(curP)}</span></div>
         <div class="fc-batch-row"><span>P50 Target</span><span class="val" style="color:${pctDelta >= 0 ? 'var(--up)' : 'var(--down)'}">${formatPrice(p50V)} (${pctStr})</span></div>
         <div class="fc-batch-row"><span>Bear / Bull</span><span class="val">${formatPrice(p10V)} / ${formatPrice(p90V)}</span></div>
+        <div class="fc-batch-row"><span>Forecasted</span><span class="val">${formatDateTime(forecastedAt)}</span></div>
         <div class="fc-batch-progress"><div class="fc-batch-progress-fill" style="width:${progressPct}%;background:${progressColor}"></div></div>
       </div>
     `;
@@ -2130,13 +2139,48 @@ const restoreState = async () => {
     const state = await api('/api/state');
     let restoredFromBackendForecast = false;
 
-    if (state.forecast?.last_request) {
+    const backendCached = state?.forecast?.cached_results || {};
+    const cachedSymbols = Object.keys(backendCached);
+
+    if (cachedSymbols.length > 0) {
+      forecastBatchResults.clear();
+      for (const sym of cachedSymbols) {
+        const entry = backendCached[sym];
+        const result = entry?.result;
+        if (!result) continue;
+        if (!result.forecasted_at && entry?.forecasted_at) {
+          result.forecasted_at = entry.forecasted_at;
+        }
+        forecastBatchResults.set(String(sym).toUpperCase(), result);
+      }
+
+      if (forecastBatchResults.size > 0) {
+        const req = state.forecast?.last_request;
+        const requestSymbol = req?.symbol ? String(req.symbol).toUpperCase() : null;
+        const firstSym = forecastBatchResults.keys().next().value;
+        forecastSelectedSymbol = requestSymbol && forecastBatchResults.has(requestSymbol) ? requestSymbol : firstSym;
+        const allSymbols = Array.from(forecastBatchResults.keys());
+        document.getElementById('fSymbol').value = allSymbols.join(',');
+        if (req?.horizon) document.getElementById('fHorizon').value = req.horizon;
+        if (req?.simulations) document.getElementById('fSims').value = req.simulations;
+        syncQuickChips();
+
+        const selectedData = forecastBatchResults.get(forecastSelectedSymbol);
+        if (selectedData) {
+          applyForecastDataToChart(selectedData);
+          renderFcKpiCards(selectedData);
+        }
+        renderBatchGrid();
+        saveForecastBatchCache();
+        restoredFromBackendForecast = true;
+      }
+    } else if (state.forecast?.last_request) {
       document.getElementById('fSymbol').value = state.forecast.last_request.symbol || document.getElementById('fSymbol').value;
       document.getElementById('fHorizon').value = state.forecast.last_request.horizon || document.getElementById('fHorizon').value;
       document.getElementById('fSims').value = state.forecast.last_request.simulations || document.getElementById('fSims').value;
       syncQuickChips();
     }
-    if (state.forecast?.last_result) {
+    if (!restoredFromBackendForecast && state.forecast?.last_result) {
       const r = state.forecast.last_result;
       forecastBatchResults.clear();
       forecastBatchResults.set(r.symbol || document.getElementById('fSymbol').value.trim().toUpperCase(), r);
