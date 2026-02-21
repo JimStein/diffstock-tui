@@ -27,6 +27,8 @@ const paperTargetInput = document.getElementById('paperTargetInput');
 const paperTargetAddBtn = document.getElementById('paperTargetAdd');
 const paperTargetApplyBtn = document.getElementById('paperTargetApply');
 const paperApplyNowCheckbox = document.getElementById('paperApplyNow');
+const paperOptTimeInput = document.getElementById('paperOptTime');
+const paperOptWeekdayChecks = Array.from(document.querySelectorAll('[data-paper-opt-weekday]'));
 const paperTargetChips = document.getElementById('paperTargetChips');
 const paperTargetCount = document.getElementById('paperTargetCount');
 const paperTargetDirtyBadge = document.getElementById('paperTargetDirtyBadge');
@@ -56,6 +58,8 @@ let selectedPaperRangeDays = 0.5;
 let paperSessionStartMs = null;
 let manualPaperTargets = [];
 let paperTargetsDirty = false;
+let paperStartOptimizing = false;
+let paperApplyOptimizing = false;
 const FORECAST_BATCH_CACHE_KEY = 'diffstock:forecast-batch:v2';
 const FORECAST_META_CACHE_KEY = 'diffstock:forecast-meta:v1';
 let paperFullContext = {
@@ -662,7 +666,10 @@ const renderPaperTargetChips = () => {
   if (!paperTargetChips) return;
   const n = manualPaperTargets.length;
   if (paperTargetCount) {
-    paperTargetCount.textContent = n === 1 ? '1 symbol' : `${n} symbols`;
+    const poolText = n === 1 ? '1 symbol' : `${n} symbols`;
+    paperTargetCount.textContent = poolText;
+    const ctrlPool = document.getElementById('paperCtrlPool');
+    if (ctrlPool) ctrlPool.textContent = poolText;
   }
   if (paperTargetDirtyBadge) {
     paperTargetDirtyBadge.style.display = paperTargetsDirty ? '' : 'none';
@@ -1191,6 +1198,18 @@ const syncPaperButtons = (status) => {
 
   if (!paperStartBtn || !paperPauseBtn || !paperResumeBtn || !paperStopBtn) return;
 
+  if (paperStartOptimizing) {
+    paperStartBtn.textContent = 'Optimizing...';
+    paperStartBtn.disabled = true;
+    paperPauseBtn.disabled = true;
+    paperResumeBtn.disabled = true;
+    paperStopBtn.disabled = true;
+    if (paperLoadBtn) paperLoadBtn.disabled = true;
+    return;
+  }
+
+  if (paperLoadBtn) paperLoadBtn.disabled = false;
+
   if (running && !paused) {
     paperStartBtn.textContent = 'Running';
     paperStartBtn.disabled = true;
@@ -1214,6 +1233,19 @@ const syncPaperButtons = (status) => {
   paperPauseBtn.disabled = true;
   paperResumeBtn.disabled = true;
   paperStopBtn.disabled = true;
+};
+
+const setPaperStartOptimizing = (optimizing) => {
+  paperStartOptimizing = !!optimizing;
+  syncPaperButtons(null);
+};
+
+const setPaperApplyOptimizing = (optimizing) => {
+  paperApplyOptimizing = !!optimizing;
+  if (!paperTargetApplyBtn) return;
+  paperTargetApplyBtn.disabled = paperApplyOptimizing;
+  paperTargetApplyBtn.textContent = paperApplyOptimizing ? 'Optimizing...' : '⚡ Apply Candidate Pool';
+  if (paperApplyNowCheckbox) paperApplyNowCheckbox.disabled = paperApplyOptimizing;
 };
 
 /* ─── Forecast: helpers ─── */
@@ -1594,6 +1626,7 @@ const fillAssetTable = (alloc, paperStatus) => {
 const fillHoldingsTable = (paperStatus) => {
   const tb = document.querySelector('#holdingsTable tbody');
   if (!tb) return;
+  const holdingsPoolBadge = document.getElementById('holdingsPoolBadge');
 
   tb.innerHTML = '';
 
@@ -1608,20 +1641,17 @@ const fillHoldingsTable = (paperStatus) => {
     if (!symbol || !Number.isFinite(weight)) continue;
     targetMap.set(symbol, weight);
   }
-  for (const [symbol, weight] of (lastPortfolio?.weights || [])) {
-    const normalized = String(symbol || '').toUpperCase();
-    const w = Number(weight);
-    if (!normalized || !Number.isFinite(w)) continue;
-    if (!targetMap.has(normalized)) {
-      targetMap.set(normalized, w);
-    }
+
+  if (holdingsPoolBadge) {
+    const candidateSymbols = Array.from(targetMap.keys());
+    const holdingCount = holdingsSet.size;
+    const poolCount = candidateSymbols.length;
+    const inPoolHeldCount = candidateSymbols.filter(symbol => holdingsSet.has(symbol)).length;
+    const notHeldCount = Math.max(0, poolCount - inPoolHeldCount);
+    holdingsPoolBadge.textContent = `Holding ${holdingCount} · In Pool ${poolCount} · Not Held ${notHeldCount}`;
   }
 
-  const symbols = new Set();
-  for (const symbol of holdingsSet) symbols.add(symbol);
-  for (const symbol of targetMap.keys()) symbols.add(symbol);
-
-  const orderedSymbols = Array.from(symbols).sort();
+  const orderedSymbols = Array.from(holdingsSet).sort();
   if (orderedSymbols.length === 0) {
     const tr = document.createElement('tr');
     tr.innerHTML = `<td colspan='8'><div class='empty-state'><div class='empty-state-icon'>📊</div>No holdings data yet.<br>Run portfolio optimization and start paper trading.</div></td>`;
@@ -1636,7 +1666,6 @@ const fillHoldingsTable = (paperStatus) => {
     const currentPrice = row?.price ?? latestQuoteMap.get(sym);
     const quantity = holding?.quantity ?? (holdingsSet.has(sym) ? 0 : null);
     const assetValue = holding?.asset_value ?? (quantity != null && currentPrice != null ? quantity * currentPrice : null);
-    const isHolding = holdingsSet.has(sym);
     const snapshotAvgCost = holding?.avg_cost;
     const basis = paperCostBasis.get(sym);
     const avgCostFromTrades = basis && Number.isFinite(basis.avgCost) && basis.avgCost > 0 ? basis.avgCost : null;
@@ -1668,7 +1697,7 @@ const fillHoldingsTable = (paperStatus) => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${sym}</td>
-      <td class='${isHolding ? 'up' : ''}'>${isHolding ? 'Holding' : 'Target Only'}</td>
+      <td class='up'>Holding</td>
       <td class='num'>${quantity == null ? '--' : quantity.toFixed(2)}</td>
       <td class='num'>${priceCell}</td>
       <td class='num'>${avgCost == null ? '--' : '$' + avgCost.toFixed(2)}</td>
@@ -1859,19 +1888,27 @@ window.addEventListener('resize', () => {
 const setPaperStatusChip = (status) => {
   const chip = document.getElementById('paperStatusChip');
   const dot = document.getElementById('systemDot');
+  const ctrlStatus = document.getElementById('paperCtrlStatus');
+  const ctrlDot = document.getElementById('paperCtrlDot');
   const badge = document.getElementById('paperTabBadge');
   if (!status.running) {
     chip.textContent = 'IDLE';
+    if (ctrlStatus) ctrlStatus.textContent = 'IDLE';
     if (dot) { dot.classList.remove('active', 'paused'); }
+    if (ctrlDot) { ctrlDot.classList.remove('active', 'paused'); }
     if (badge) { badge.classList.remove('running', 'paused'); }
     paperSessionStartMs = null;
   } else if (status.paused) {
     chip.textContent = 'PAUSED';
+    if (ctrlStatus) ctrlStatus.textContent = 'PAUSED';
     if (dot) { dot.classList.remove('active'); dot.classList.add('paused'); }
+    if (ctrlDot) { ctrlDot.classList.remove('active'); ctrlDot.classList.add('paused'); }
     if (badge) { badge.classList.remove('running'); badge.classList.add('paused'); }
   } else {
     chip.textContent = 'RUNNING';
+    if (ctrlStatus) ctrlStatus.textContent = 'RUNNING';
     if (dot) { dot.classList.remove('paused'); dot.classList.add('active'); }
+    if (ctrlDot) { ctrlDot.classList.remove('paused'); ctrlDot.classList.add('active'); }
     if (badge) { badge.classList.remove('paused'); badge.classList.add('running'); }
     if (!paperSessionStartMs) paperSessionStartMs = Date.now();
   }
@@ -2060,6 +2097,48 @@ const buildPaperTargetsPayload = (symbols) => {
   return symbols.map(symbol => ({ symbol, weight }));
 };
 
+const formatOptWeekday = (w) => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][w - 1] || '--';
+
+const computeNextOptimizationLabel = (optTimeText, weekdays) => {
+  const m = String(optTimeText || '').trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return '--';
+  const hour = Number(m[1]);
+  const minute = Number(m[2]);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return '--';
+  }
+
+  const now = new Date();
+  const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  for (let delta = 0; delta <= 7; delta += 1) {
+    const day = new Date(todayMidnight);
+    day.setDate(day.getDate() + delta);
+    const weekdayMon = ((day.getDay() + 6) % 7) + 1;
+    if (!weekdays.includes(weekdayMon)) continue;
+
+    const candidate = new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour, minute, 0, 0);
+    if (candidate <= now) continue;
+
+    const hoursDiff = Math.round((candidate.getTime() - now.getTime()) / 3600000);
+    return `${formatOptWeekday(weekdayMon)} ${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')} (in ${hoursDiff}h)`;
+  }
+  return '--';
+};
+
+const getPaperOptimizationWeekdays = () => {
+  const selected = paperOptWeekdayChecks
+    .map(el => Number(el.getAttribute('data-paper-opt-weekday') || 0))
+    .filter((day, idx) => day >= 1 && day <= 7 && paperOptWeekdayChecks[idx]?.checked);
+  return selected.length ? selected : [1, 2, 3, 4, 5];
+};
+
+const syncNextOptimizationBadge = () => {
+  const el = document.getElementById('paperCtrlNextOpt');
+  if (!el) return;
+  const weekdays = getPaperOptimizationWeekdays();
+  el.textContent = computeNextOptimizationLabel(paperOptTimeInput?.value || '22:00', weekdays);
+};
+
 if (paperTargetAddBtn) {
   paperTargetAddBtn.addEventListener('click', () => {
     const symbols = normalizeSymbols(paperTargetInput?.value || '');
@@ -2081,9 +2160,11 @@ if (paperTargetInput) {
 if (paperTargetApplyBtn) {
   paperTargetApplyBtn.addEventListener('click', async () => {
     if (manualPaperTargets.length === 0) {
-      alert('Target pool cannot be empty.');
+      alert('Candidate pool cannot be empty.');
       return;
     }
+    setPaperApplyOptimizing(true);
+    setStatus('Optimizing candidate pool...');
     try {
       const applyNow = paperApplyNowCheckbox ? !!paperApplyNowCheckbox.checked : true;
       await api('/api/paper/targets', {
@@ -2093,12 +2174,14 @@ if (paperTargetApplyBtn) {
       paperTargetsDirty = false;
       renderPaperTargetChips();
       setStatus(applyNow
-        ? 'Paper target pool updated and rebalanced immediately'
-        : 'Paper target pool updated (effective on next scheduled rebalance)', 'ok');
+        ? 'Candidate pool optimized and rebalanced immediately'
+        : 'Candidate pool optimized (rebalance will use latest optimized weights)', 'ok');
       await refreshPaper();
     } catch (e) {
       setStatus(e.message || String(e), 'err');
       alert(e.message);
+    } finally {
+      setPaperApplyOptimizing(false);
     }
   });
 }
@@ -2109,7 +2192,7 @@ document.getElementById('paperStart').addEventListener('click', async () => {
     symbols = lastPortfolio.weights.map(([symbol]) => String(symbol || '').toUpperCase()).filter(Boolean);
   }
   if (!symbols.length) {
-    alert('Please set target pool first (manual targets or run Portfolio optimization).');
+    alert('Please set candidate pool first (manual symbols or run Portfolio optimization).');
     return;
   }
   symbols = [...new Set(symbols)].sort();
@@ -2117,12 +2200,23 @@ document.getElementById('paperStart').addEventListener('click', async () => {
   paperTargetsDirty = false;
   renderPaperTargetChips();
   const targets = buildPaperTargetsPayload(symbols);
-  await paperControl('/api/paper/start', {
-    targets,
-    initial_capital: Number(document.getElementById('paperCapital').value),
-    time1: document.getElementById('paperTime1').value,
-    time2: document.getElementById('paperTime2').value,
-  }, { resetTradeState: true, syncTargetsOnce: true });
+  const optimizationTime = (paperOptTimeInput?.value || '22:00').trim() || '22:00';
+  const optimizationWeekdays = getPaperOptimizationWeekdays();
+  setPaperStartOptimizing(true);
+  setStatus('Optimizing candidate pool before start...');
+  try {
+    await paperControl('/api/paper/start', {
+      targets,
+      initial_capital: Number(document.getElementById('paperCapital').value),
+      time1: document.getElementById('paperTime1').value,
+      time2: document.getElementById('paperTime2').value,
+      optimization_time: optimizationTime,
+      optimization_weekdays: optimizationWeekdays,
+    }, { resetTradeState: true, syncTargetsOnce: true });
+  } finally {
+    setPaperStartOptimizing(false);
+    await refreshPaper();
+  }
 });
 document.getElementById('paperLoad').addEventListener('click', async () => {
   if (!paperFilePicker) {
@@ -2439,3 +2533,31 @@ const refreshBackendChip = async () => {
 };
 
 refreshBackendChip();
+
+// ─── Paper ctrl header: sync badges from inputs + collapsible toggle ───
+const syncPaperCtrlBadges = () => {
+  const capEl = document.getElementById('paperCtrlCapital');
+  const schedEl = document.getElementById('paperCtrlSchedule');
+  const capVal = Number(document.getElementById('paperCapital')?.value) || 0;
+  const t1 = document.getElementById('paperTime1')?.value || '--';
+  const t2 = document.getElementById('paperTime2')?.value || '--';
+  if (capEl) capEl.textContent = capVal > 0 ? capVal.toLocaleString() : '--';
+  if (schedEl) schedEl.textContent = `${t1} / ${t2}`;
+  syncNextOptimizationBadge();
+};
+document.getElementById('paperCapital')?.addEventListener('input', syncPaperCtrlBadges);
+document.getElementById('paperTime1')?.addEventListener('input', syncPaperCtrlBadges);
+document.getElementById('paperTime2')?.addEventListener('input', syncPaperCtrlBadges);
+paperOptTimeInput?.addEventListener('input', syncNextOptimizationBadge);
+paperOptWeekdayChecks.forEach(el => el.addEventListener('change', syncNextOptimizationBadge));
+syncPaperCtrlBadges();
+setInterval(syncNextOptimizationBadge, 60000);
+
+const paperCtrlBodyEl = document.getElementById('paperCtrlBody');
+const paperCtrlChevron = document.getElementById('paperCtrlToggle');
+const togglePaperCtrl = () => {
+  paperCtrlBodyEl?.classList.toggle('open');
+  paperCtrlChevron?.classList.toggle('open');
+};
+document.getElementById('paperCtrlSummary')?.addEventListener('click', togglePaperCtrl);
+paperCtrlChevron?.addEventListener('click', togglePaperCtrl);

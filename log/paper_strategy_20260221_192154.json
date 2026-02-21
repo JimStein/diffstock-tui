@@ -1,0 +1,107 @@
+{
+  "created_at": "2026-02-21T19:21:55.546712300+08:00",
+  "initial_capital_usd": 80000.0,
+  "trading_fee_rate": 0.0005,
+  "analysis_times_local": [
+    "02:30",
+    "23:30"
+  ],
+  "benchmark_symbol": "QQQ",
+  "benchmark_initial_price": 608.8099975585938,
+  "optimization_time_local": "19:18",
+  "optimization_weekdays": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "targets": [
+    {
+      "symbol": "IAU",
+      "target_weight": 0.32688128422714036
+    },
+    {
+      "symbol": "MSFT",
+      "target_weight": 0.16354036142251807
+    },
+    {
+      "symbol": "NVDA",
+      "target_weight": 0.3268859581823477
+    }
+  ],
+  "analyses": [
+    {
+      "timestamp": "2026-02-21T19:21:55.547275200+08:00",
+      "portfolio_value_before": 80000.0,
+      "portfolio_value_after": 79969.5645347519,
+      "cash_after": 19098.63403853607,
+      "trades": [
+        {
+          "timestamp": "2026-02-21T19:21:55.547275200+08:00",
+          "symbol": "IAU",
+          "side": "BUY",
+          "quantity": 255.0,
+          "price": 95.9499969482422,
+          "notional": 24467.24922180176,
+          "fee": 12.23362461090088
+        },
+        {
+          "timestamp": "2026-02-21T19:21:55.547275200+08:00",
+          "symbol": "MSFT",
+          "side": "BUY",
+          "quantity": 30.0,
+          "price": 397.2300109863281,
+          "notional": 11916.900329589844,
+          "fee": 5.958450164794922
+        },
+        {
+          "timestamp": "2026-02-21T19:21:55.547275200+08:00",
+          "symbol": "NVDA",
+          "side": "BUY",
+          "quantity": 129.0,
+          "price": 189.82000732421875,
+          "notional": 24486.78094482422,
+          "fee": 12.24339047241211
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-02-21T19:23:37.265082700+08:00",
+      "portfolio_value_before": 79969.5645347519,
+      "portfolio_value_after": 79967.59244973755,
+      "cash_after": 15152.491924835203,
+      "trades": [
+        {
+          "timestamp": "2026-02-21T19:23:37.265082700+08:00",
+          "symbol": "IAU",
+          "side": "BUY",
+          "quantity": 17.0,
+          "price": 95.9499969482422,
+          "notional": 1631.1499481201174,
+          "fee": 0.8155749740600587
+        },
+        {
+          "timestamp": "2026-02-21T19:23:37.265082700+08:00",
+          "symbol": "MSFT",
+          "side": "BUY",
+          "quantity": 2.0,
+          "price": 397.2300109863281,
+          "notional": 794.4600219726562,
+          "fee": 0.39723001098632815
+        },
+        {
+          "timestamp": "2026-02-21T19:23:37.265082700+08:00",
+          "symbol": "NVDA",
+          "side": "BUY",
+          "quantity": 8.0,
+          "price": 189.82000732421875,
+          "notional": 1518.56005859375,
+          "fee": 0.759280029296875
+        }
+      ]
+    }
+  ]
+}

@@ -1159,6 +1159,149 @@
     }
     .paper-target-remove:hover { color: #fff; background: var(--down); }
 
+    /* ─── Paper Control Collapsible ─── */
+    .paper-ctrl-panel { padding: 0; overflow: hidden; }
+    .paper-ctrl-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      cursor: default;
+      flex-wrap: wrap;
+    }
+    .paper-ctrl-summary {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1;
+      flex-wrap: wrap;
+      cursor: pointer;
+      padding: 2px 0;
+      border-radius: 6px;
+      transition: background var(--transition);
+    }
+    .paper-ctrl-summary:hover { background: rgba(255,255,255,.03); }
+    .paper-ctrl-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .4px;
+      color: var(--text-2);
+      min-width: 64px;
+    }
+    .paper-ctrl-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.05);
+      border: 1px solid var(--border);
+      font-size: 11px;
+      color: var(--text-2);
+      font-family: var(--mono);
+      white-space: nowrap;
+    }
+    .paper-ctrl-quick {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    .paper-ctrl-chevron {
+      width: 28px;
+      height: 28px;
+      border: 1px solid var(--border-2);
+      background: var(--surface);
+      color: var(--text-2);
+      cursor: pointer;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+      flex-shrink: 0;
+      transition: border-color var(--transition), background var(--transition), transform .25s ease;
+      border-radius: 999px;
+    }
+    .paper-ctrl-chevron::before {
+      content: '';
+      width: 7px;
+      height: 7px;
+      border-right: 2px solid currentColor;
+      border-bottom: 2px solid currentColor;
+      transform: rotate(45deg) translateY(-1px);
+      transition: transform .25s ease;
+      opacity: .9;
+    }
+    .paper-ctrl-chevron:hover {
+      border-color: var(--border);
+      background: rgba(255,255,255,.05);
+    }
+    .paper-ctrl-chevron.open::before { transform: rotate(-135deg) translateY(-1px); }
+    .paper-ctrl-body {
+      overflow: hidden;
+      max-height: 0;
+      opacity: 0;
+      transition: max-height .35s ease, opacity .2s ease, padding .25s ease;
+      padding: 0 14px;
+    }
+    .paper-ctrl-body.open {
+      max-height: 800px;
+      opacity: 1;
+      padding: 0 14px 14px;
+    }
+
+    /* ─── Weekday pill toggles ─── */
+    .weekday-group {
+      display: flex;
+      gap: 5px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .weekday-label {
+      position: relative;
+      display: inline-flex;
+      cursor: pointer;
+    }
+    .weekday-label input[type=checkbox] {
+      position: absolute;
+      opacity: 0;
+      width: 0;
+      height: 0;
+      pointer-events: none;
+    }
+    .weekday-pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 38px;
+      height: 30px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .3px;
+      border: 1px solid var(--border-2);
+      background: var(--surface);
+      color: var(--muted);
+      transition: background .15s, color .15s, border-color .15s;
+      user-select: none;
+    }
+    .weekday-label input:checked + .weekday-pill {
+      background: var(--accent-bg);
+      color: var(--accent-2);
+      border-color: rgba(59,130,246,.4);
+    }
+    .weekday-label:hover .weekday-pill {
+      border-color: var(--border-2);
+      color: var(--text-2);
+    }
+    .weekday-label input:checked:hover + .weekday-pill {
+      opacity: .85;
+    }
+
     .range-group {
       display: flex;
       gap: 6px;
@@ -1812,59 +1955,91 @@
 
       <!-- ══════ Paper Trading Tab ══════ -->
       <section id="tab-paper" class="tab-panel hidden">
-        <div class="panel">
-          <div class="row">
-            <div class="field">
-              <label class="field-label">Capital ($)</label>
-              <input id="paperCapital" type="number" value="80000" style="width:120px" />
+        <div class="panel paper-ctrl-panel">
+          <!-- ── Always-visible summary header ── -->
+          <div class="paper-ctrl-header" id="paperCtrlHeader">
+            <div class="paper-ctrl-summary" id="paperCtrlSummary">
+              <span class="paper-ctrl-status">
+                <span class="chip-dot" id="paperCtrlDot"></span>
+                <span id="paperCtrlStatus">IDLE</span>
+              </span>
+              <span class="paper-ctrl-badge">&#128176;&nbsp;$<span id="paperCtrlCapital">80,000</span></span>
+              <span class="paper-ctrl-badge">&#128336;&nbsp;<span id="paperCtrlSchedule">23:30 / 02:30</span></span>
+              <span class="paper-ctrl-badge">&#9203;&nbsp;<span id="paperCtrlNextOpt">--</span></span>
+              <span class="paper-ctrl-badge">&#127919;&nbsp;<span id="paperCtrlPool">0 symbols</span></span>
             </div>
-            <div class="field">
-              <label class="field-label">Schedule 1</label>
-              <input id="paperTime1" value="23:30" style="width:80px" />
+            <div class="paper-ctrl-quick">
+              <button class="primary" id="paperStart">&#9654; Start</button>
+              <button id="paperLoad">&#128194; Load</button>
+              <span class="btn-sep"></span>
+              <button class="warn" id="paperPause">&#9208; Pause</button>
+              <button class="success" id="paperResume">&#9654; Resume</button>
+              <button class="danger" id="paperStop">&#9209; Stop</button>
+              <input id="paperFilePicker" type="file" accept=".json,application/json" class="hidden" />
             </div>
-            <div class="field">
-              <label class="field-label">Schedule 2</label>
-              <input id="paperTime2" value="02:30" style="width:80px" />
-            </div>
-            <div class="field">
-              <label class="field-label">&nbsp;</label>
-              <div class="btn-group">
-                <button class="primary" id="paperStart">&#9654; Start</button>
-                <button id="paperLoad">&#128194; Load</button>
-                <span class="btn-sep"></span>
-                <button class="warn" id="paperPause">&#9208; Pause</button>
-                <button class="success" id="paperResume">&#9654; Resume</button>
-                <button class="danger" id="paperStop">&#9209; Stop</button>
-                <input id="paperFilePicker" type="file" accept=".json,application/json" class="hidden" />
+            <button class="paper-ctrl-chevron" id="paperCtrlToggle" title="Expand / Collapse config" aria-label="Expand / Collapse config"></button>
+          </div>
+          <!-- ── Collapsible config body ── -->
+          <div class="paper-ctrl-body" id="paperCtrlBody">
+            <!-- Row 1: execution params -->
+            <div class="row" style="margin-top:4px;">
+              <div class="field">
+                <label class="field-label">Capital ($)</label>
+                <input id="paperCapital" type="number" value="80000" style="width:110px" />
+              </div>
+              <div class="field">
+                <label class="field-label">Schedule 1</label>
+                <input id="paperTime1" value="23:30" style="width:80px" />
+              </div>
+              <div class="field">
+                <label class="field-label">Schedule 2</label>
+                <input id="paperTime2" value="02:30" style="width:80px" />
+              </div>
+              <div class="field">
+                <label class="field-label">Optimize Time</label>
+                <input id="paperOptTime" value="22:00" style="width:80px" />
               </div>
             </div>
-          </div>
-          <div class="row" style="margin-top: 8px;">
-            <div class="field" style="min-width: 420px; flex: 1;">
-              <label class="field-label">History JSON Path</label>
-              <input id="paperLoadPath" placeholder="e.g. log/paper_strategy_20260219_101500.json" style="width:100%" />
-            </div>
-          </div>
-          <div class="paper-target-editor">
-            <div class="paper-target-header">
-              <div class="paper-target-title">
-                <span>🎯</span>
-                <span>Target Pool</span>
-                <span id="paperTargetCount" class="paper-target-count">0 symbols</span>
+            <!-- Row 2: optimize days + history path -->
+            <div class="row" style="margin-top:10px; align-items:flex-start;">
+              <div class="field">
+                <label class="field-label">Optimize Days</label>
+                <div class="weekday-group">
+                  <label class="weekday-label"><input type="checkbox" data-paper-opt-weekday="1" checked /><span class="weekday-pill">Mon</span></label>
+                  <label class="weekday-label"><input type="checkbox" data-paper-opt-weekday="2" checked /><span class="weekday-pill">Tue</span></label>
+                  <label class="weekday-label"><input type="checkbox" data-paper-opt-weekday="3" checked /><span class="weekday-pill">Wed</span></label>
+                  <label class="weekday-label"><input type="checkbox" data-paper-opt-weekday="4" checked /><span class="weekday-pill">Thu</span></label>
+                  <label class="weekday-label"><input type="checkbox" data-paper-opt-weekday="5" checked /><span class="weekday-pill">Fri</span></label>
+                  <label class="weekday-label"><input type="checkbox" data-paper-opt-weekday="6" /><span class="weekday-pill">Sat</span></label>
+                  <label class="weekday-label"><input type="checkbox" data-paper-opt-weekday="7" /><span class="weekday-pill">Sun</span></label>
+                </div>
               </div>
-              <span id="paperTargetDirtyBadge" class="paper-target-dirty-badge" style="display:none">● Unsaved</span>
+              <div class="field" style="flex:1; min-width:200px;">
+                <label class="field-label">History JSON Path</label>
+                <input id="paperLoadPath" placeholder="e.g. log/paper_strategy_20260219_101500.json" style="width:100%" />
+              </div>
             </div>
-            <div class="paper-target-input-row">
-              <input id="paperTargetInput" placeholder="NVDA or AAPL,MSFT,QQQ" style="flex:1;" />
-              <button id="paperTargetAdd">＋ Add</button>
+            <div class="paper-target-editor">
+              <div class="paper-target-header">
+                <div class="paper-target-title">
+                  <span>🎯</span>
+                  <span>Candidate Pool</span>
+                  <span id="paperTargetCount" class="paper-target-count">0 symbols</span>
+                </div>
+                <span id="paperTargetDirtyBadge" class="paper-target-dirty-badge" style="display:none">● Unsaved</span>
+              </div>
+              <div class="paper-target-input-row">
+                <input id="paperTargetInput" placeholder="NVDA or AAPL,MSFT,QQQ" style="flex:1;" />
+                <button id="paperTargetAdd">＋ Add</button>
+              </div>
+              <div id="paperTargetChips" class="paper-target-chips"></div>
+              <div class="paper-target-apply-row">
+                <button id="paperTargetApply" class="primary">⚡ Apply Candidate Pool</button>
+                <label class="paper-toggle"><input id="paperApplyNow" type="checkbox" checked /> Rebalance immediately</label>
+              </div>
             </div>
-            <div id="paperTargetChips" class="paper-target-chips"></div>
-            <div class="paper-target-apply-row">
-              <button id="paperTargetApply" class="primary">⚡ Apply to Running Paper</button>
-              <label class="paper-toggle"><input id="paperApplyNow" type="checkbox" checked /> Rebalance immediately</label>
-            </div>
+            <div class="small" style="margin-top:8px;">这是候选股票池（universe），算法可选择不持有其中部分标的；Apply 时会先对候选池做一次最新组合优化，再按勾选决定是否立即再平衡。定时优化会按上面的时间+周几自动刷新权重。</div>
           </div>
-          <div class="small">Start 优先使用手动池子；Apply 后按最新池子执行调仓，删除的标的自动卖出。</div>
         </div>
         <div class="panel" id="paperRiskPanel" style="display:none;">
           <div class="panel-header" style="margin-bottom:8px;">
@@ -1907,6 +2082,7 @@
         <div class="panel">
           <div class="panel-header">
             <div class="panel-title"><span class="panel-title-icon">&#128188;</span> Current Holdings</div>
+            <div class="panel-subtitle" id="holdingsPoolBadge">Holding -- · In Pool -- · Not Held --</div>
           </div>
           <table id="holdingsTable">
             <thead>
@@ -2022,6 +2198,6 @@
   </div>
 
   <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
-  <script src="/app.js?v=20260221k"></script>
+  <script src="/app.js?v=20260221p"></script>
 </body>
 </html>

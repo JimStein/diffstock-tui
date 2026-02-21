@@ -1416,6 +1416,9 @@ impl GuiApp {
             Some(&self.paper_initial_capital_input),
             &self.paper_time1_input,
             &self.paper_time2_input,
+            None,
+            None,
+            crate::config::ComputeBackend::Auto,
         ) {
             Ok(cfg) => cfg,
             Err(error) => {

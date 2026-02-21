@@ -1,0 +1,59 @@
+{
+  "created_at": "2026-02-21T19:15:40.246287200+08:00",
+  "initial_capital_usd": 80000.0,
+  "trading_fee_rate": 0.0005,
+  "analysis_times_local": [
+    "02:30",
+    "23:30"
+  ],
+  "benchmark_symbol": "QQQ",
+  "benchmark_initial_price": 608.8099975585938,
+  "optimization_time_local": "19:18",
+  "optimization_weekdays": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "targets": [
+    {
+      "symbol": "NVDA",
+      "target_weight": 0.4099058366861924
+    },
+    {
+      "symbol": "QQQ",
+      "target_weight": 0.4099058366861924
+    }
+  ],
+  "analyses": [
+    {
+      "timestamp": "2026-02-21T19:15:40.246883500+08:00",
+      "portfolio_value_before": 80000.0,
+      "portfolio_value_after": 79967.54201443482,
+      "cash_after": 15051.570884063723,
+      "trades": [
+        {
+          "timestamp": "2026-02-21T19:15:40.246883500+08:00",
+          "symbol": "NVDA",
+          "side": "BUY",
+          "quantity": 172.0,
+          "price": 189.82000732421875,
+          "notional": 32649.041259765625,
+          "fee": 16.324520629882812
+        },
+        {
+          "timestamp": "2026-02-21T19:15:40.246883500+08:00",
+          "symbol": "QQQ",
+          "side": "BUY",
+          "quantity": 53.0,
+          "price": 608.8099975585938,
+          "notional": 32266.92987060547,
+          "fee": 16.133464935302733
+        }
+      ]
+    }
+  ]
+}

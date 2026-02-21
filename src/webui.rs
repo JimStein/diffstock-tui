@@ -234,7 +234,6 @@ struct TrainStartRequest {
 #[derive(Debug, Deserialize)]
 struct PaperTarget {
     symbol: String,
-    weight: f64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -243,6 +242,8 @@ struct PaperStartRequest {
     initial_capital: Option<f64>,
     time1: Option<String>,
     time2: Option<String>,
+    optimization_time: Option<String>,
+    optimization_weekdays: Option<Vec<u32>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -565,17 +566,38 @@ async fn start_paper(
         return Err(api_err(StatusCode::BAD_REQUEST, "targets cannot be empty"));
     }
 
-    let weights = req
+    let mut symbols = req
         .targets
         .iter()
-        .map(|t| (t.symbol.trim().to_uppercase(), t.weight))
+        .map(|t| t.symbol.trim().to_uppercase())
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>();
+    symbols.sort();
+    symbols.dedup();
+    if symbols.is_empty() {
+        return Err(api_err(StatusCode::BAD_REQUEST, "targets cannot be empty"));
+    }
+
+    let optimized_targets = optimize_candidate_pool_targets(&symbols, state.backend_default)
+        .await
+        .map_err(internal_err)?;
+    let weights = optimized_targets
+        .iter()
+        .map(|t| (t.symbol.clone(), t.target_weight))
         .collect::<Vec<_>>();
 
     let capital_str = req.initial_capital.map(|v| format!("{v}"));
     let t1 = req.time1.unwrap_or_else(|| "23:30".to_string());
     let t2 = req.time2.unwrap_or_else(|| "02:30".to_string());
-    let cfg = paper_trading::build_config(capital_str.as_deref(), &t1, &t2)
-        .map_err(|e| api_err(StatusCode::BAD_REQUEST, &e.to_string()))?;
+    let cfg = paper_trading::build_config(
+        capital_str.as_deref(),
+        &t1,
+        &t2,
+        req.optimization_time.as_deref(),
+        req.optimization_weekdays.as_deref(),
+        state.backend_default,
+    )
+    .map_err(|e| api_err(StatusCode::BAD_REQUEST, &e.to_string()))?;
 
     let (event_tx, mut event_rx) = mpsc::channel(1024);
     let (cmd_tx, cmd_rx) = mpsc::channel(64);
@@ -587,11 +609,11 @@ async fn start_paper(
         paper_state.started_at = Some(chrono::Local::now().to_rfc3339());
         paper_state.strategy_file = None;
         paper_state.runtime_file = None;
-        paper_state.target_weights = weights
+        paper_state.target_weights = optimized_targets
             .iter()
-            .map(|(symbol, weight)| PaperTargetState {
-                symbol: symbol.clone(),
-                weight: *weight,
+            .map(|target| PaperTargetState {
+                symbol: target.symbol.clone(),
+                weight: target.target_weight,
             })
             .collect();
         paper_state.latest_snapshot = None;
@@ -754,8 +776,15 @@ async fn load_paper(
     });
 
     let paper_state_runner = state.paper.clone();
+    let backend = state.backend_default;
     tokio::spawn(async move {
-        let res = paper_trading::run_paper_trading_from_strategy_file(&strategy_file, event_tx, cmd_rx).await;
+        let res = paper_trading::run_paper_trading_from_strategy_file(
+            &strategy_file,
+            backend,
+            event_tx,
+            cmd_rx,
+        )
+        .await;
         let mut ps = paper_state_runner.lock().await;
         ps.running = false;
         ps.paused = false;
@@ -795,19 +824,14 @@ async fn paper_targets_update(
         return Err(api_err(StatusCode::BAD_REQUEST, "symbols cannot be empty"));
     }
 
-    let weight = 1.0 / symbols.len() as f64;
-    let next_target_state = symbols
+    let next_target_cmd = optimize_candidate_pool_targets(&symbols, state.backend_default)
+        .await
+        .map_err(internal_err)?;
+    let next_target_state = next_target_cmd
         .iter()
-        .map(|symbol| PaperTargetState {
-            symbol: symbol.clone(),
-            weight,
-        })
-        .collect::<Vec<_>>();
-    let next_target_cmd = symbols
-        .iter()
-        .map(|symbol| paper_trading::TargetWeight {
-            symbol: symbol.clone(),
-            target_weight: weight,
+        .map(|target| PaperTargetState {
+            symbol: target.symbol.clone(),
+            weight: target.target_weight,
         })
         .collect::<Vec<_>>();
 
@@ -829,6 +853,48 @@ async fn paper_targets_update(
     }
 
     Ok(Json(serde_json::json!({ "ok": true, "symbols": symbols, "apply_now": apply_now })))
+}
+
+async fn optimize_candidate_pool_targets(
+    symbols: &[String],
+    backend: config::ComputeBackend,
+) -> Result<Vec<paper_trading::TargetWeight>> {
+    if symbols.len() == 1 {
+        return Ok(vec![paper_trading::TargetWeight {
+            symbol: symbols[0].clone(),
+            target_weight: 1.0,
+        }]);
+    }
+
+    let allocation = portfolio::run_portfolio_optimization_with_backend(symbols, backend).await?;
+    let mut out = allocation
+        .weights
+        .into_iter()
+        .filter_map(|(symbol, target_weight)| {
+            let weight = target_weight.clamp(0.0, 1.0);
+            if weight > 0.0 {
+                Some(paper_trading::TargetWeight {
+                    symbol,
+                    target_weight: weight,
+                })
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
+    if out.is_empty() {
+        return Err(anyhow::anyhow!("Portfolio optimization returned empty weights"));
+    }
+
+    let total_weight: f64 = out.iter().map(|x| x.target_weight).sum();
+    if total_weight > 1.0 {
+        for target in &mut out {
+            target.target_weight /= total_weight;
+        }
+    }
+
+    Ok(out)
 }
 
 async fn paper_pause(
