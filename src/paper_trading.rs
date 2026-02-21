@@ -585,12 +585,6 @@ pub async fn run_paper_trading_from_strategy_file(
         }
     }
 
-    let mut current_prices = fetch_prices_for_symbols(&tracked_symbols(&strategy_log.targets)).await?;
-
-    let benchmark_initial_price = strategy_log
-        .benchmark_initial_price
-        .unwrap_or_else(|| *current_prices.get(BENCHMARK_SYMBOL).unwrap_or(&1.0));
-
     let mut holdings_shares = HashMap::new();
     let mut holdings_avg_cost = HashMap::new();
     for target in &strategy_log.targets {
@@ -624,6 +618,21 @@ pub async fn run_paper_trading_from_strategy_file(
         }
         cash_usd = analysis.cash_after;
     }
+
+    let mut bootstrap_symbols = tracked_symbols(&strategy_log.targets);
+    for (symbol, quantity) in &holdings_shares {
+        if quantity.abs() > 1e-9 && !bootstrap_symbols.iter().any(|known| known == symbol) {
+            bootstrap_symbols.push(symbol.clone());
+        }
+    }
+    bootstrap_symbols.sort();
+    bootstrap_symbols.dedup();
+
+    let mut current_prices = fetch_prices_for_symbols(&bootstrap_symbols).await?;
+
+    let benchmark_initial_price = strategy_log
+        .benchmark_initial_price
+        .unwrap_or_else(|| *current_prices.get(BENCHMARK_SYMBOL).unwrap_or(&1.0));
 
     let runtime_path = strategy_path
         .to_string_lossy()
@@ -1214,6 +1223,9 @@ fn total_portfolio_value(runtime: &PaperRuntime, prices: &HashMap<String, f64>) 
     let mut total = runtime.cash_usd;
 
     for (symbol, quantity) in &runtime.holdings_shares {
+        if quantity.abs() <= 1e-9 {
+            continue;
+        }
         let price = prices
             .get(symbol)
             .ok_or(anyhow!("Missing price for holdings symbol {}", symbol))?;

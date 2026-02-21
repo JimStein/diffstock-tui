@@ -1,0 +1,11 @@
+D:\DiffStock\diffstock-tui\target_fixcheck\release\deps\rand_core-e7c8b85031d66631.d: C:\Users\JimComp\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rand_core-0.9.3\src\lib.rs C:\Users\JimComp\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rand_core-0.9.3\src\block.rs C:\Users\JimComp\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rand_core-0.9.3\src\impls.rs C:\Users\JimComp\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rand_core-0.9.3\src\le.rs C:\Users\JimComp\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rand_core-0.9.3\src\os.rs
+
+D:\DiffStock\diffstock-tui\target_fixcheck\release\deps\librand_core-e7c8b85031d66631.rlib: C:\Users\JimComp\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rand_core-0.9.3\src\lib.rs C:\Users\JimComp\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rand_core-0.9.3\src\block.rs C:\Users\JimComp\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rand_core-0.9.3\src\impls.rs C:\Users\JimComp\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rand_core-0.9.3\src\le.rs C:\Users\JimComp\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rand_core-0.9.3\src\os.rs
+
+D:\DiffStock\diffstock-tui\target_fixcheck\release\deps\librand_core-e7c8b85031d66631.rmeta: C:\Users\JimComp\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rand_core-0.9.3\src\lib.rs C:\Users\JimComp\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rand_core-0.9.3\src\block.rs C:\Users\JimComp\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rand_core-0.9.3\src\impls.rs C:\Users\JimComp\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rand_core-0.9.3\src\le.rs C:\Users\JimComp\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rand_core-0.9.3\src\os.rs
+
+C:\Users\JimComp\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rand_core-0.9.3\src\lib.rs:
+C:\Users\JimComp\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rand_core-0.9.3\src\block.rs:
+C:\Users\JimComp\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rand_core-0.9.3\src\impls.rs:
+C:\Users\JimComp\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rand_core-0.9.3\src\le.rs:
+C:\Users\JimComp\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rand_core-0.9.3\src\os.rs:

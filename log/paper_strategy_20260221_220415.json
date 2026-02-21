@@ -1,0 +1,98 @@
+{
+  "created_at": "2026-02-21T22:04:22.156831100+08:00",
+  "initial_capital_usd": 80000.0,
+  "trading_fee_rate": 0.0005,
+  "analysis_times_local": [
+    "02:30",
+    "23:30"
+  ],
+  "benchmark_symbol": "QQQ",
+  "benchmark_initial_price": 608.8099975585938,
+  "optimization_time_local": "21:00",
+  "optimization_weekdays": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "targets": [
+    {
+      "symbol": "COPX",
+      "target_weight": 0.2263334449881449
+    },
+    {
+      "symbol": "ETN",
+      "target_weight": 0.13257049177077945
+    },
+    {
+      "symbol": "IAU",
+      "target_weight": 0.285453407799511
+    },
+    {
+      "symbol": "TLT",
+      "target_weight": 0.0515633310846499
+    },
+    {
+      "symbol": "URA",
+      "target_weight": 0.01787031703419299
+    }
+  ],
+  "analyses": [
+    {
+      "timestamp": "2026-02-21T22:04:22.157602700+08:00",
+      "portfolio_value_before": 80000.0,
+      "portfolio_value_after": 79971.54888557435,
+      "cash_after": 23069.320034255987,
+      "trades": [
+        {
+          "timestamp": "2026-02-21T22:04:22.157602700+08:00",
+          "symbol": "COPX",
+          "side": "BUY",
+          "quantity": 203.0,
+          "price": 89.08999633789062,
+          "notional": 18085.269256591797,
+          "fee": 9.042634628295898
+        },
+        {
+          "timestamp": "2026-02-21T22:04:22.157602700+08:00",
+          "symbol": "ETN",
+          "side": "BUY",
+          "quantity": 28.0,
+          "price": 373.3800048828125,
+          "notional": 10454.64013671875,
+          "fee": 5.227320068359375
+        },
+        {
+          "timestamp": "2026-02-21T22:04:22.157602700+08:00",
+          "symbol": "IAU",
+          "side": "BUY",
+          "quantity": 238.0,
+          "price": 95.9499969482422,
+          "notional": 22836.099273681644,
+          "fee": 11.418049636840822
+        },
+        {
+          "timestamp": "2026-02-21T22:04:22.157602700+08:00",
+          "symbol": "TLT",
+          "side": "BUY",
+          "quantity": 46.0,
+          "price": 89.41000366210938,
+          "notional": 4112.860168457031,
+          "fee": 2.0564300842285155
+        },
+        {
+          "timestamp": "2026-02-21T22:04:22.157602700+08:00",
+          "symbol": "URA",
+          "side": "BUY",
+          "quantity": 26.0,
+          "price": 54.36000061035156,
+          "notional": 1413.3600158691406,
+          "fee": 0.7066800079345703
+        }
+      ]
+    }
+  ]
+}
