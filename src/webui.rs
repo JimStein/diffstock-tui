@@ -664,6 +664,15 @@ async fn start_paper(
                 paper_trading::PaperEvent::AutoOptimizationStatus { running } => {
                     ps.auto_optimizing = running;
                 }
+                paper_trading::PaperEvent::TargetsUpdated { targets } => {
+                    ps.target_weights = targets
+                        .iter()
+                        .map(|target| PaperTargetState {
+                            symbol: target.symbol.clone(),
+                            weight: target.target_weight,
+                        })
+                        .collect();
+                }
                 paper_trading::PaperEvent::Warning(msg) => {
                     ps.logs.push(format!("Warning: {}", msg));
                 }
@@ -787,6 +796,15 @@ async fn load_paper(
                 }
                 paper_trading::PaperEvent::AutoOptimizationStatus { running } => {
                     ps.auto_optimizing = running;
+                }
+                paper_trading::PaperEvent::TargetsUpdated { targets } => {
+                    ps.target_weights = targets
+                        .iter()
+                        .map(|target| PaperTargetState {
+                            symbol: target.symbol.clone(),
+                            weight: target.target_weight,
+                        })
+                        .collect();
                 }
                 paper_trading::PaperEvent::Warning(msg) => {
                     ps.logs.push(format!("Warning: {}", msg));

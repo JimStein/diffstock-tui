@@ -274,6 +274,14 @@ impl eframe::App for GuiApp {
                             "Scheduled optimization finished".to_string()
                         });
                     }
+                    Ok(PaperEvent::TargetsUpdated { targets }) => {
+                        self.paper_target_weights = Some(
+                            targets
+                                .iter()
+                                .map(|target| (target.symbol.clone(), target.target_weight))
+                                .collect(),
+                        );
+                    }
                     Ok(PaperEvent::Warning(message)) => {
                         self.paper_log_messages.push(format!("Warning: {}", message));
                     }

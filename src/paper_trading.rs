@@ -204,6 +204,9 @@ pub enum PaperEvent {
     AutoOptimizationStatus {
         running: bool,
     },
+    TargetsUpdated {
+        targets: Vec<TargetWeight>,
+    },
     Info(String),
     Warning(String),
     Analysis(AnalysisRecord),
@@ -426,6 +429,11 @@ pub async fn run_paper_trading(
                     }
 
                     runtime.strategy_log.targets = normalized;
+                    let _ = event_tx
+                        .send(PaperEvent::TargetsUpdated {
+                            targets: runtime.strategy_log.targets.clone(),
+                        })
+                        .await;
                     for target in &runtime.strategy_log.targets {
                         runtime
                             .holdings_shares
@@ -544,6 +552,11 @@ pub async fn run_paper_trading(
                 match optimize_targets_from_candidate_pool(&mut runtime, config.optimization_backend).await {
                     Ok(updated) => {
                         if updated {
+                            let _ = event_tx
+                                .send(PaperEvent::TargetsUpdated {
+                                    targets: runtime.strategy_log.targets.clone(),
+                                })
+                                .await;
                             let listed = runtime
                                 .strategy_log
                                 .targets
@@ -834,6 +847,11 @@ pub async fn run_paper_trading_from_strategy_file(
                     }
 
                     runtime.strategy_log.targets = normalized;
+                    let _ = event_tx
+                        .send(PaperEvent::TargetsUpdated {
+                            targets: runtime.strategy_log.targets.clone(),
+                        })
+                        .await;
                     for target in &runtime.strategy_log.targets {
                         runtime
                             .holdings_shares
@@ -952,6 +970,11 @@ pub async fn run_paper_trading_from_strategy_file(
                 match optimize_targets_from_candidate_pool(&mut runtime, cfg.optimization_backend).await {
                     Ok(updated) => {
                         if updated {
+                            let _ = event_tx
+                                .send(PaperEvent::TargetsUpdated {
+                                    targets: runtime.strategy_log.targets.clone(),
+                                })
+                                .await;
                             let listed = runtime
                                 .strategy_log
                                 .targets
