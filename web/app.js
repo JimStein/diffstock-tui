@@ -236,16 +236,20 @@ const renderQuotesAsOf = () => {
   quotesAsOf.textContent = `Current Price as of ${lastQuotesStampText}`;
 };
 
-const setDataSourceChip = (sourceRaw) => {
+const setDataSourceChip = (sourceRaw, wsConnected = false) => {
+  const dataSourceStatusChip = document.getElementById('dataSourceStatusChip');
   const dataSourceChip = document.getElementById('dataSourceChip');
   const dataSourceDot = document.getElementById('dataSourceDot');
-  const dataSourceLogChip = document.getElementById('dataSourceLogChip');
   if (!dataSourceChip) return;
 
   const source = String(sourceRaw || '').trim();
   if (!source || source.toLowerCase() === 'unknown') {
     dataSourceChip.textContent = 'Data: --';
     if (dataSourceDot) dataSourceDot.style.background = 'var(--muted-2)';
+    if (dataSourceStatusChip) {
+      const wsHint = wsConnected ? ' | WS connected (not freshest)' : '';
+      dataSourceStatusChip.title = `Data source status${wsHint} (click to view source switch log)`;
+    }
     return;
   }
 
@@ -264,10 +268,10 @@ const setDataSourceChip = (sourceRaw) => {
     dataSourceSwitchLog = dataSourceSwitchLog.slice(0, 5);
   }
 
-  if (dataSourceLogChip) {
-    dataSourceLogChip.textContent = dataSourceSwitchLog.length
-      ? `SrcLog: ${dataSourceSwitchLog.join(' · ')}`
-      : 'SrcLog: --';
+  if (dataSourceStatusChip) {
+    const latest = dataSourceSwitchLog.length ? dataSourceSwitchLog[0] : '--';
+    const wsHint = wsConnected && !lower.includes('polygon-ws') ? ' | WS connected (not freshest)' : '';
+    dataSourceStatusChip.title = `Data source status: ${label}${wsHint} | latest switch: ${latest} | click to view full log`;
   }
 
   if (dataSourceDot) {
@@ -290,7 +294,7 @@ const showDataSourceLogPopup = () => {
   alert(`Data Source Switch Log\n\n${lines}`);
 };
 
-document.getElementById('dataSourceLogChip')?.addEventListener('click', showDataSourceLogPopup);
+document.getElementById('dataSourceStatusChip')?.addEventListener('click', showDataSourceLogPopup);
 
 const withBusy = async (buttonId, startText, doneText, fn) => {
   const btn = document.getElementById(buttonId);
@@ -2195,7 +2199,7 @@ const renderChartSummaryStrip = () => {
 const refreshPaper = async () => {
   try {
     const st = await api('/api/paper/status');
-    setDataSourceChip(st?.data_live_source);
+    setDataSourceChip(st?.data_live_source, !!st?.data_ws_connected);
     setPaperApplyAutoOptimizing(!!st?.auto_optimizing);
     hydratePaperOptimizationFromStatus(st);
     setPaperStatusChip(st);
@@ -2779,7 +2783,10 @@ const refreshBackendChip = async () => {
   if (!backendChip) return;
   try {
     const st = await api('/api/state');
-    setDataSourceChip(st?.data_live_source || st?.paper?.data_live_source);
+    setDataSourceChip(
+      st?.data_live_source || st?.paper?.data_live_source,
+      !!(st?.data_ws_connected ?? st?.paper?.data_ws_connected)
+    );
     const backend = st?.forecast?.last_request?.compute_backend || st?.compute_backend || null;
     if (backend) {
       const lower = String(backend).toLowerCase();

@@ -1,0 +1,3 @@
+[2m2026-02-22T12:29:47.059296Z[0m [32m INFO[0m [2mdiffstock_tui::config[0m[2m:[0m Compute backend=directml requested for webui-default
+[2m2026-02-22T12:29:47.061602Z[0m [32m INFO[0m [2mdiffstock_tui::webui[0m[2m:[0m WebUI listening on http://0.0.0.0:8099
+[2m2026-02-22T12:29:53.540230Z[0m [32m INFO[0m [2mdiffstock_tui::data[0m[2m:[0m Polygon WebSocket connected

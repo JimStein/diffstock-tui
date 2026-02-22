@@ -122,6 +122,7 @@ struct FullUiState {
     train: TrainRuntimeState,
     paper: PaperRuntimeState,
     data_live_source: String,
+    data_ws_connected: bool,
 }
 
 impl Default for TrainRuntimeState {
@@ -157,6 +158,7 @@ struct PaperRuntimeState {
     trade_history: Vec<paper_trading::TradeRecord>,
     logs: Vec<String>,
     data_live_source: String,
+    data_ws_connected: bool,
     #[serde(skip_serializing)]
     cmd_tx: Option<mpsc::Sender<paper_trading::PaperCommand>>,
 }
@@ -183,6 +185,7 @@ impl Default for PaperRuntimeState {
             trade_history: Vec::new(),
             logs: Vec::new(),
             data_live_source: "Unknown".to_string(),
+            data_ws_connected: false,
             cmd_tx: None,
         }
     }
@@ -608,7 +611,9 @@ async fn full_state(
     let mut paper = state.paper.lock().await.clone();
     paper.cmd_tx = None;
     let data_live_source = data::current_live_data_source().await;
+    let data_ws_connected = data::polygon_ws_connected().await;
     paper.data_live_source = data_live_source.clone();
+    paper.data_ws_connected = data_ws_connected;
 
     Ok(Json(FullUiState {
         forecast: state.forecast.lock().await.clone(),
@@ -616,6 +621,7 @@ async fn full_state(
         train: state.train.lock().await.clone(),
         paper,
         data_live_source,
+        data_ws_connected,
     }))
 }
 
@@ -1002,6 +1008,7 @@ async fn paper_status(
     let mut status = state.paper.lock().await.clone();
     status.cmd_tx = None;
     status.data_live_source = data::current_live_data_source().await;
+    status.data_ws_connected = data::polygon_ws_connected().await;
     Ok(Json(status))
 }
 

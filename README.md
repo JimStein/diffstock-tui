@@ -97,11 +97,16 @@ Create `.env` from `.env.example` and set:
 ```bash
 POLYGON_API_KEY=your_polygon_api_key_here
 DIFFSTOCK_DATA_PROVIDER=polygon
+DIFFSTOCK_WS_PRIORITY_RTH_ONLY=true
 ```
 
 `DIFFSTOCK_DATA_PROVIDER` options:
 - `polygon`: use Polygon/Massive only (no cross-provider fallback)
 - `yahoo` or `yfinance`: use Yahoo/yfinance only
+
+`DIFFSTOCK_WS_PRIORITY_RTH_ONLY` options:
+- `true` (default): prioritize WebSocket only during US regular session (09:30-16:00 ET), otherwise use freshest source
+- `false`: prioritize WebSocket all day (fallback to snapshot/minute when WS unavailable)
 
 `auto` mode is disabled to avoid mixed-latency data alignment issues.
 

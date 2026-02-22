@@ -1,4 +1,5 @@
-use chrono::{DateTime, Duration, TimeZone, Utc};
+use chrono::{DateTime, Datelike, Duration, TimeZone, Timelike, Utc, Weekday};
+use chrono_tz::America::New_York;
 use futures_util::{SinkExt, StreamExt};
 use rand::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -14,6 +15,8 @@ use tokio_tungstenite::tungstenite::protocol::Message;
 static LIVE_DATA_SOURCE: OnceLock<RwLock<String>> = OnceLock::new();
 static POLYGON_WS_CLIENT: OnceLock<PolygonWsClient> = OnceLock::new();
 static DATA_PROVIDER_MODE: OnceLock<DataProviderMode> = OnceLock::new();
+static POLYGON_WS_CONNECTED: OnceLock<RwLock<bool>> = OnceLock::new();
+static WS_PRIORITY_RTH_ONLY: OnceLock<bool> = OnceLock::new();
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DataProviderMode {
@@ -61,6 +64,10 @@ fn live_data_source_cell() -> &'static RwLock<String> {
     LIVE_DATA_SOURCE.get_or_init(|| RwLock::new("Unknown".to_string()))
 }
 
+fn polygon_ws_connected_cell() -> &'static RwLock<bool> {
+    POLYGON_WS_CONNECTED.get_or_init(|| RwLock::new(false))
+}
+
 async fn set_live_data_source(source: &str) {
     let mut guard = live_data_source_cell().write().await;
     *guard = source.to_string();
@@ -68,6 +75,44 @@ async fn set_live_data_source(source: &str) {
 
 pub async fn current_live_data_source() -> String {
     live_data_source_cell().read().await.clone()
+}
+
+pub async fn polygon_ws_connected() -> bool {
+    *polygon_ws_connected_cell().read().await
+}
+
+fn ws_priority_rth_only() -> bool {
+    *WS_PRIORITY_RTH_ONLY.get_or_init(|| {
+        let raw = std::env::var("DIFFSTOCK_WS_PRIORITY_RTH_ONLY")
+            .unwrap_or_else(|_| "true".to_string())
+            .trim()
+            .to_ascii_lowercase();
+
+        match raw.as_str() {
+            "1" | "true" | "yes" | "on" => true,
+            "0" | "false" | "no" | "off" => false,
+            other => {
+                warn!(
+                    "Unknown DIFFSTOCK_WS_PRIORITY_RTH_ONLY={} ; defaulting to true",
+                    other
+                );
+                true
+            }
+        }
+    })
+}
+
+fn is_us_regular_trading_session_now() -> bool {
+    let now_ny = Utc::now().with_timezone(&New_York);
+    let weekday = now_ny.weekday();
+    if matches!(weekday, Weekday::Sat | Weekday::Sun) {
+        return false;
+    }
+
+    let minutes = now_ny.hour() * 60 + now_ny.minute();
+    let open_minutes = 9 * 60 + 30;
+    let close_minutes = 16 * 60;
+    minutes >= open_minutes && minutes < close_minutes
 }
 
 struct PolygonWsClient {
@@ -166,6 +211,10 @@ async fn run_polygon_ws_loop(
         };
 
         info!("Polygon WebSocket connected");
+        {
+            let mut ws_connected = polygon_ws_connected_cell().write().await;
+            *ws_connected = true;
+        }
         let (mut write, mut read) = ws_stream.split();
 
         let auth = PolygonWsAuthReq {
@@ -253,6 +302,10 @@ async fn run_polygon_ws_loop(
         }
 
         warn!("Polygon WebSocket disconnected; reconnecting...");
+        {
+            let mut ws_connected = polygon_ws_connected_cell().write().await;
+            *ws_connected = false;
+        }
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     }
 }
@@ -1091,13 +1144,24 @@ pub async fn fetch_latest_price_1m(symbol: &str) -> Result<f64> {
                 .ok_or(anyhow::anyhow!("DIFFSTOCK_DATA_PROVIDER=polygon but POLYGON_API_KEY is missing"))?;
 
             polygon_ws_subscribe_symbols(&[symbol.to_uppercase()]).await;
+            let prefer_ws = if ws_priority_rth_only() {
+                is_us_regular_trading_session_now()
+            } else {
+                true
+            };
             let rounds = polygon_retry_attempts();
             let mut last_error: Option<anyhow::Error> = None;
 
             for round in 1..=rounds {
                 let mut candidates: Vec<TimedPrice> = Vec::new();
 
-                if let Some(price) = polygon_ws_latest_price(symbol).await {
+                let ws_candidate = polygon_ws_latest_price(symbol).await;
+                if prefer_ws {
+                    if let Some(price) = ws_candidate {
+                        set_live_data_source(price.source).await;
+                        return Ok(price.price);
+                    }
+                } else if let Some(price) = ws_candidate {
                     candidates.push(price);
                 }
 
