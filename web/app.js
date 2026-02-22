@@ -32,6 +32,7 @@ const paperOptWeekdayChecks = Array.from(document.querySelectorAll('[data-paper-
 const paperTargetChips = document.getElementById('paperTargetChips');
 const paperTargetCount = document.getElementById('paperTargetCount');
 const paperTargetDirtyBadge = document.getElementById('paperTargetDirtyBadge');
+const paperRangePadBand = document.getElementById('paperRangePadBand');
 const paperLegend = document.getElementById('paperLegend');
 const legendPortfolio = document.getElementById('legendPortfolio');
 const legendPortfolioPnl = document.getElementById('legendPortfolioPnl');
@@ -294,7 +295,12 @@ const createChartCompat = (containerId) => {
   const chart = lib.createChart(container, {
     layout: { background: { color: '#0f1420' }, textColor: '#c5c9d6' },
     grid: { vertLines: { color: 'rgba(255,255,255,.04)' }, horzLines: { color: 'rgba(255,255,255,.04)' } },
-    timeScale: { timeVisible: true, secondsVisible: false },
+    timeScale: {
+      timeVisible: true,
+      secondsVisible: false,
+      minBarSpacing: 0.02,
+      rightOffset: 3,
+    },
   });
   return {
     chart,
@@ -581,9 +587,56 @@ const renderPaperChartFromCurrentContext = () => {
 
   if (filtered.portfolioSeries.length > 0) {
     lastPaperSeries = filtered.portfolioSeries;
-    portfolioLine.setData(ensureVisibleSeries(filtered.portfolioSeries));
-    benchmarkLine.setData(filtered.benchmarkSeries.length > 0 ? ensureVisibleSeries(filtered.benchmarkSeries) : []);
-    paperChart.fit();
+    const latestTime = filtered.portfolioSeries[filtered.portfolioSeries.length - 1].time;
+    const selectedDays = Number(selectedPaperRangeDays);
+    const from = latestTime - Math.floor(selectedDays * 86400);
+    const paddedPortfolioSeries = padPaperSeriesToRange(filtered.portfolioSeries, from);
+    const paddedBenchmarkSeries = filtered.benchmarkSeries.length > 0
+      ? padPaperSeriesToRange(filtered.benchmarkSeries, from)
+      : [];
+
+    portfolioLine.setData(ensureVisibleSeries(paddedPortfolioSeries));
+    benchmarkLine.setData(paddedBenchmarkSeries.length > 0 ? ensureVisibleSeries(paddedBenchmarkSeries) : []);
+
+    const timeScale = paperChart?.chart?.timeScale?.();
+    if (timeScale && Number.isFinite(selectedDays) && selectedDays > 0) {
+      let applied = false;
+      if (typeof timeScale.setVisibleLogicalRange === 'function' && filtered.portfolioSeries.length >= 2) {
+        const deltas = [];
+        for (let i = 1; i < filtered.portfolioSeries.length; i += 1) {
+          const d = Number(filtered.portfolioSeries[i].time) - Number(filtered.portfolioSeries[i - 1].time);
+          if (Number.isFinite(d) && d > 0) deltas.push(d);
+        }
+        if (deltas.length > 0) {
+          deltas.sort((a, b) => a - b);
+          const medianDelta = deltas[Math.floor(deltas.length / 2)] || 60;
+          const barsPerDay = Math.max(1, Math.floor(86400 / Math.max(1, medianDelta)));
+          const rangeBars = Math.max(1, Math.floor(selectedDays * barsPerDay));
+          if (typeof timeScale.applyOptions === 'function') {
+            const chartWidth = Math.max(300, Math.floor(paperChart?.container?.clientWidth || 1000));
+            const targetSpacing = chartWidth / Math.max(1, rangeBars);
+            timeScale.applyOptions({
+              minBarSpacing: 0.02,
+              barSpacing: Math.max(0.02, Math.min(8, targetSpacing)),
+              rightOffset: 3,
+            });
+          }
+          const toLogical = filtered.portfolioSeries.length - 1;
+          const fromLogical = toLogical - rangeBars;
+          timeScale.setVisibleLogicalRange({ from: fromLogical, to: toLogical });
+          applied = true;
+        }
+      }
+      if (!applied && typeof timeScale.setVisibleRange === 'function') {
+        timeScale.setVisibleRange({ from, to: latestTime });
+        applied = true;
+      }
+      if (!applied) {
+        paperChart.fit();
+      }
+    } else {
+      paperChart.fit();
+    }
     setLegendText(filtered.latest || paperFullContext.latest || null);
   } else {
     lastPaperSeries = [];
@@ -596,6 +649,8 @@ const renderPaperChartFromCurrentContext = () => {
     const days = Number(btn.dataset.paperRangeDays);
     btn.classList.toggle('active', days === selectedPaperRangeDays);
   }
+
+  updatePaperRangePadBand();
 };
 
 const ensureVisibleSeries = (series = []) => {
@@ -608,6 +663,50 @@ const ensureVisibleSeries = (series = []) => {
     ];
   }
   return series;
+};
+
+const padPaperSeriesToRange = (series = [], cutoffTime) => {
+  if (!Array.isArray(series) || series.length === 0) return [];
+  if (!Number.isFinite(cutoffTime)) return series;
+  const first = series[0];
+  if (!first || !Number.isFinite(first.time) || first.time <= cutoffTime) return series;
+  return [{ time: cutoffTime }, ...series];
+};
+
+const updatePaperRangePadBand = () => {
+  if (!paperRangePadBand) return;
+  const selectedDays = Number(selectedPaperRangeDays);
+  const series = paperFullContext?.portfolioSeries || [];
+  if (!Number.isFinite(selectedDays) || selectedDays <= 0 || series.length < 2) {
+    paperRangePadBand.style.display = 'none';
+    paperRangePadBand.style.width = '0';
+    return;
+  }
+
+  const firstTime = Number(series[0].time);
+  const lastTime = Number(series[series.length - 1].time);
+  if (!Number.isFinite(firstTime) || !Number.isFinite(lastTime) || lastTime <= firstTime) {
+    paperRangePadBand.style.display = 'none';
+    paperRangePadBand.style.width = '0';
+    return;
+  }
+
+  const availableDays = (lastTime - firstTime) / 86400;
+  if (!Number.isFinite(availableDays) || availableDays >= selectedDays) {
+    paperRangePadBand.style.display = 'none';
+    paperRangePadBand.style.width = '0';
+    return;
+  }
+
+  const missingRatio = Math.max(0, Math.min(1, (selectedDays - availableDays) / selectedDays));
+  if (missingRatio <= 0.002) {
+    paperRangePadBand.style.display = 'none';
+    paperRangePadBand.style.width = '0';
+    return;
+  }
+
+  paperRangePadBand.style.display = '';
+  paperRangePadBand.style.width = `${(missingRatio * 100).toFixed(2)}%`;
 };
 
 const formatMoney = (v) => `$${v.toFixed(2)}`;
@@ -1900,6 +1999,14 @@ for (const btn of paperRangeButtons) {
     selectedPaperRangeDays = days;
     renderPaperChartFromCurrentContext();
     renderChartSummaryStrip();
+
+    const series = paperFullContext?.portfolioSeries || [];
+    if (series.length >= 2) {
+      const spanDays = (series[series.length - 1].time - series[0].time) / 86400;
+      if (Number.isFinite(spanDays) && spanDays + 0.01 < days) {
+        setStatus(`Selected ${days}d range; available history is ${spanDays.toFixed(1)}d`, '');
+      }
+    }
   });
 }
 

@@ -618,6 +618,17 @@
     /* ─── Charts ─── */
     #forecastChart { height: 420px; border-radius: var(--radius); overflow: hidden; box-shadow: inset 0 0 30px rgba(0,0,0,.15); }
     #paperChart { height: 380px; border-radius: var(--radius); overflow: hidden; }
+    .paper-range-pad-band {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 0;
+      display: none;
+      pointer-events: none;
+      z-index: 5;
+      background: linear-gradient(90deg, rgba(59,130,246,.14) 0%, rgba(59,130,246,.05) 70%, rgba(59,130,246,0) 100%);
+    }
     .fc-chart-panel { padding: 14px 14px 10px; }
     .chart-wrap {
       position: relative;
@@ -2073,9 +2084,9 @@
             <button class="range-btn" data-paper-range-days="7">7d</button>
             <button class="range-btn" data-paper-range-days="30">30d</button>
             <button class="range-btn" data-paper-range-days="60">60d</button>
-            <button class="range-btn" data-paper-range-days="180">180d</button>
           </div>
           <div class="chart-wrap">
+            <div id="paperRangePadBand" class="paper-range-pad-band"></div>
             <div id="paperChart"></div>
             <div class="chart-legend" id="paperLegend">
               <div class="legend-title">Paper Metrics</div>
