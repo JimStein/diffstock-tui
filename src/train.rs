@@ -1,5 +1,5 @@
 use crate::config::{get_device, AUGMENTATION_COPIES, AUGMENTATION_NOISE, BATCH_SIZE, CUDA_BATCH_SIZE, DATA_RANGE, DIFF_STEPS, DROPOUT_RATE, EPOCHS, FORECAST, HIDDEN_DIM, INPUT_DIM, LEARNING_RATE, LOOKBACK, LSTM_LAYERS, NUM_LAYERS, PATIENCE, TRAIN_LOG_INTERVAL_BATCHES, TRAINING_SYMBOLS, WEIGHT_DECAY};
-use crate::data::{StockData, TrainingDataset};
+use crate::data::TrainingDataset;
 use crate::diffusion::GaussianDiffusion;
 use crate::model_artifacts::save_best_model_artifacts;
 use crate::models::time_grad::{EpsilonTheta, RNNEncoder};
@@ -817,6 +817,8 @@ pub async fn train_model_with_data(
 
 async fn fetch_training_data() -> Result<(TrainingDataset, TrainingDataset)> {
     let symbols = TRAINING_SYMBOLS.to_vec();
+    let provider_mode = crate::data::configured_data_provider_mode();
+    info!("Training data provider mode: {}", provider_mode.as_str());
     
     // Parallel data fetching — download all symbols concurrently
     info!("Fetching {} symbols in parallel...", symbols.len());
@@ -825,10 +827,11 @@ async fn fetch_training_data() -> Result<(TrainingDataset, TrainingDataset)> {
         let sym = symbol.to_string();
         handles.push(tokio::spawn(async move {
             info!("Fetching {} (ID: {})...", sym, id);
-            match StockData::fetch_range(&sym, DATA_RANGE).await {
-                Ok(data) => {
+            match crate::data::fetch_range_with_source(&sym, DATA_RANGE).await {
+                Ok((data, source)) => {
+                    info!("{} fetched via {}", sym, source);
                     let dataset = data.prepare_training_data(LOOKBACK, FORECAST, id);
-                    Ok((id, sym, dataset))
+                    Ok((id, sym, source, dataset))
                 }
                 Err(e) => Err((sym, e))
             }
@@ -846,20 +849,36 @@ async fn fetch_training_data() -> Result<(TrainingDataset, TrainingDataset)> {
     }
     // Sort by asset ID to ensure deterministic ordering
     results.sort_by_key(|r| match r {
-        Ok((id, _, _)) => *id,
+        Ok((id, _, _, _)) => *id,
         Err(_) => usize::MAX,
     });
 
+    let mut failures: Vec<(String, String)> = Vec::new();
     for result in results {
         match result {
-            Ok((_id, sym, dataset)) => {
-                info!("{}: {} samples", sym, dataset.features.len());
+            Ok((_id, sym, source, dataset)) => {
+                info!("{}: {} samples (source: {})", sym, dataset.features.len(), source);
                 all_features.extend(dataset.features);
                 all_targets.extend(dataset.targets);
                 all_asset_ids.extend(dataset.asset_ids);
             }
-            Err((sym, e)) => error!("Failed to fetch {}: {}", sym, e),
+            Err((sym, e)) => {
+                error!("Failed to fetch {}: {}", sym, e);
+                failures.push((sym, e.to_string()));
+            }
         }
+    }
+
+    if !failures.is_empty() && matches!(provider_mode, crate::data::DataProviderMode::Polygon) {
+        let detail = failures
+            .iter()
+            .map(|(sym, err)| format!("{}: {}", sym, err))
+            .collect::<Vec<_>>()
+            .join(" | ");
+        return Err(anyhow::anyhow!(
+            "Training aborted: provider=polygon and data fetch failed without fallback. {}",
+            detail
+        ));
     }
 
     info!("Original samples: {}", all_features.len());

@@ -65,6 +65,8 @@ let paperApplyAutoOptimizing = false;
 let paperOptSaveTimer = null;
 let paperOptSaveInFlight = false;
 let paperOptSavePending = false;
+let dataSourceLastValue = '';
+let dataSourceSwitchLog = [];
 const FORECAST_BATCH_CACHE_KEY = 'diffstock:forecast-batch:v2';
 const FORECAST_META_CACHE_KEY = 'diffstock:forecast-meta:v1';
 let paperFullContext = {
@@ -233,6 +235,62 @@ const renderQuotesAsOf = () => {
   if (!quotesAsOf) return;
   quotesAsOf.textContent = `Current Price as of ${lastQuotesStampText}`;
 };
+
+const setDataSourceChip = (sourceRaw) => {
+  const dataSourceChip = document.getElementById('dataSourceChip');
+  const dataSourceDot = document.getElementById('dataSourceDot');
+  const dataSourceLogChip = document.getElementById('dataSourceLogChip');
+  if (!dataSourceChip) return;
+
+  const source = String(sourceRaw || '').trim();
+  if (!source || source.toLowerCase() === 'unknown') {
+    dataSourceChip.textContent = 'Data: --';
+    if (dataSourceDot) dataSourceDot.style.background = 'var(--muted-2)';
+    return;
+  }
+
+  const lower = source.toLowerCase();
+  let label = source;
+  if (lower.includes('yahoo')) {
+    label = 'Yfinance';
+  }
+  dataSourceChip.textContent = `Data: ${label}`;
+
+  if (label !== dataSourceLastValue) {
+    dataSourceLastValue = label;
+    const now = new Date();
+    const ts = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+    dataSourceSwitchLog.unshift(`${ts} ${label}`);
+    dataSourceSwitchLog = dataSourceSwitchLog.slice(0, 5);
+  }
+
+  if (dataSourceLogChip) {
+    dataSourceLogChip.textContent = dataSourceSwitchLog.length
+      ? `SrcLog: ${dataSourceSwitchLog.join(' · ')}`
+      : 'SrcLog: --';
+  }
+
+  if (dataSourceDot) {
+    if (lower.includes('polygon-ws')) {
+      dataSourceDot.style.background = 'var(--up)';
+    } else if (lower.includes('polygon')) {
+      dataSourceDot.style.background = 'var(--accent)';
+    } else if (lower.includes('yfinance')) {
+      dataSourceDot.style.background = 'var(--gold)';
+    } else {
+      dataSourceDot.style.background = 'var(--muted-2)';
+    }
+  }
+};
+
+const showDataSourceLogPopup = () => {
+  const lines = dataSourceSwitchLog.length
+    ? dataSourceSwitchLog.map((line, idx) => `${idx + 1}. ${line}`).join('\n')
+    : 'No source switch history yet.';
+  alert(`Data Source Switch Log\n\n${lines}`);
+};
+
+document.getElementById('dataSourceLogChip')?.addEventListener('click', showDataSourceLogPopup);
 
 const withBusy = async (buttonId, startText, doneText, fn) => {
   const btn = document.getElementById(buttonId);
@@ -1619,26 +1677,21 @@ syncQuickChips();
 
 const runForecastBatchForSymbols = async (symbols, horizon, simulations) => {
   forecastBatchResults.clear();
-  const promises = symbols.map(symbol =>
-    api('/api/forecast', { method: 'POST', body: JSON.stringify({ symbol, horizon, simulations }) })
-      .then(data => ({ symbol, data, error: null }))
-      .catch(err => ({ symbol, data: null, error: err.message }))
-  );
-  const results = await Promise.all(promises);
+  const rows = await api('/api/forecast/batch', {
+    method: 'POST',
+    body: JSON.stringify({ symbols, horizon, simulations }),
+  });
 
   let firstGoodSymbol = null;
-  const errors = [];
-  for (const r of results) {
-    if (r.data) {
-      forecastBatchResults.set(r.symbol, r.data);
-      if (!firstGoodSymbol) firstGoodSymbol = r.symbol;
-    } else {
-      errors.push(`${r.symbol}: ${r.error}`);
-    }
+  for (const row of (rows || [])) {
+    if (!row || !row.symbol) continue;
+    const sym = String(row.symbol).toUpperCase();
+    forecastBatchResults.set(sym, row);
+    if (!firstGoodSymbol) firstGoodSymbol = sym;
   }
 
-  if (errors.length > 0 && forecastBatchResults.size === 0) {
-    throw new Error(errors.join('; '));
+  if (forecastBatchResults.size === 0) {
+    throw new Error('Batch forecast returned no results');
   }
 
   document.getElementById('fSymbol').value = symbols.join(',');
@@ -1658,7 +1711,7 @@ const runForecastBatchForSymbols = async (symbols, horizon, simulations) => {
   saveForecastBatchCache();
   refreshBackendChip();
 
-  return { errors };
+  return { errors: [] };
 };
 
 document.getElementById('runForecast').addEventListener('click', async () => {
@@ -2067,7 +2120,17 @@ const setPaperStatusChip = (status) => {
   // Next run chip
   const nextRunChip = document.getElementById('nextRunChip');
   if (nextRunChip) {
-    if (status.running && !status.paused && status.next_run_at) {
+    const retryAtText = status?.auto_opt_retry_next_at;
+    const retryCount = Number(status?.auto_opt_retry_count || 0);
+    const retryMax = Number(status?.auto_opt_retry_max || 10);
+    if (status.running && retryAtText) {
+      const retryAt = new Date(retryAtText);
+      const now = new Date();
+      const remainSec = Math.max(0, Math.ceil((retryAt.getTime() - now.getTime()) / 1000));
+      const mm = String(Math.floor(remainSec / 60)).padStart(2, '0');
+      const ss = String(remainSec % 60).padStart(2, '0');
+      nextRunChip.textContent = `Retry ${retryCount}/${retryMax} in ${mm}:${ss}`;
+    } else if (status.running && !status.paused && status.next_run_at) {
       nextRunChip.textContent = `Next: ${status.next_run_at}`;
     } else if (status.running && !status.paused) {
       const t1 = document.getElementById('paperTime1')?.value || '--';
@@ -2132,6 +2195,7 @@ const renderChartSummaryStrip = () => {
 const refreshPaper = async () => {
   try {
     const st = await api('/api/paper/status');
+    setDataSourceChip(st?.data_live_source);
     setPaperApplyAutoOptimizing(!!st?.auto_optimizing);
     hydratePaperOptimizationFromStatus(st);
     setPaperStatusChip(st);
@@ -2208,7 +2272,24 @@ const refreshPaper = async () => {
     }
 
     const logBox = document.getElementById('logBox');
-    if (logBox) logBox.innerHTML = (st.logs || []).slice(-20).map(x => `<div>${x}</div>`).join('');
+    if (logBox) {
+      const escapeHtml = (value) => String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+      logBox.innerHTML = (st.logs || []).slice(-20).map((x) => {
+        const text = String(x || '');
+        const lower = text.toLowerCase();
+        const cls = lower.includes('error:')
+          ? 'log-error'
+          : (lower.includes('warning:') || lower.includes('[warning]') || lower.includes('skip')
+            ? 'log-warn'
+            : '');
+        return `<div class="${cls}">${escapeHtml(text)}</div>`;
+      }).join('');
+    }
     ingestPaperTrades(st);
     renderTradeHistory();
     setPaperTradeMarkers();
@@ -2698,6 +2779,7 @@ const refreshBackendChip = async () => {
   if (!backendChip) return;
   try {
     const st = await api('/api/state');
+    setDataSourceChip(st?.data_live_source || st?.paper?.data_live_source);
     const backend = st?.forecast?.last_request?.compute_backend || st?.compute_backend || null;
     if (backend) {
       const lower = String(backend).toLowerCase();

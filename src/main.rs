@@ -125,6 +125,7 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
+    let _ = dotenvy::dotenv();
     config::init_cpu_parallelism();
 
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {

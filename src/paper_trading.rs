@@ -12,6 +12,8 @@ use tokio::time::{Duration, MissedTickBehavior};
 pub const DEFAULT_INITIAL_CAPITAL_USD: f64 = 80_000.0;
 pub const TRADING_FEE_RATE: f64 = 0.0005;
 pub const PRICE_POLL_INTERVAL_SECS: u64 = 60;
+pub const AUTO_OPT_RETRY_DELAY_SECS: i64 = 60;
+pub const AUTO_OPT_MAX_RETRIES: u32 = 10;
 pub const BENCHMARK_SYMBOL: &str = "QQQ";
 
 #[derive(Clone, Debug)]
@@ -204,6 +206,11 @@ pub enum PaperEvent {
     AutoOptimizationStatus {
         running: bool,
     },
+    AutoOptimizationRetryStatus {
+        retry_count: u32,
+        max_retries: u32,
+        next_retry_at: Option<String>,
+    },
     TargetsUpdated {
         targets: Vec<TargetWeight>,
     },
@@ -228,6 +235,21 @@ pub enum PaperCommand {
         targets: Vec<TargetWeight>,
         apply_now: bool,
     },
+}
+
+async fn emit_auto_opt_retry_status(
+    event_tx: &Sender<PaperEvent>,
+    retry_count: u32,
+    max_retries: u32,
+    next_retry_at: Option<chrono::DateTime<Local>>,
+) {
+    let _ = event_tx
+        .send(PaperEvent::AutoOptimizationRetryStatus {
+            retry_count,
+            max_retries,
+            next_retry_at: next_retry_at.map(|v| v.to_rfc3339()),
+        })
+        .await;
 }
 
 struct PaperRuntime {
@@ -339,6 +361,8 @@ pub async fn run_paper_trading(
     };
     let mut optimization_last_run_date =
         compute_optimization_last_run_date(now_local, optimization_time_local, &optimization_weekdays);
+    let mut auto_opt_retry_count: u32 = 0;
+    let mut auto_opt_retry_at: Option<chrono::DateTime<Local>> = None;
 
     let mut interval = tokio::time::interval(Duration::from_secs(PRICE_POLL_INTERVAL_SECS));
     interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -393,6 +417,9 @@ pub async fn run_paper_trading(
                         optimization_time_local,
                         &optimization_weekdays,
                     );
+                    auto_opt_retry_count = 0;
+                    auto_opt_retry_at = None;
+                    emit_auto_opt_retry_status(&event_tx, 0, AUTO_OPT_MAX_RETRIES, None).await;
 
                     let _ = event_tx
                         .send(PaperEvent::Info(
@@ -539,15 +566,25 @@ pub async fn run_paper_trading(
                 .unwrap_or(false);
             let should_optimize_today = optimization_weekdays
                 .contains(&now_local.weekday().number_from_monday());
+            let retry_due = auto_opt_retry_at
+                .map(|at| now_local >= at)
+                .unwrap_or(false);
+            let scheduled_due = should_optimize_today && !already_optimized_today && now_time >= opt_time;
 
-            if should_optimize_today && !already_optimized_today && now_time >= opt_time {
+            if scheduled_due || retry_due {
                 let _ = event_tx
                     .send(PaperEvent::AutoOptimizationStatus { running: true })
                     .await;
                 let _ = event_tx
-                    .send(PaperEvent::Info(
-                        "Scheduled optimization started".to_string(),
-                    ))
+                    .send(PaperEvent::Info(if retry_due {
+                        format!(
+                            "Scheduled optimization retry started ({}/{})",
+                            auto_opt_retry_count.saturating_add(1),
+                            AUTO_OPT_MAX_RETRIES
+                        )
+                    } else {
+                        "Scheduled optimization started".to_string()
+                    }))
                     .await;
                 match optimize_targets_from_candidate_pool(&mut runtime, config.optimization_backend).await {
                     Ok(updated) => {
@@ -572,14 +609,42 @@ pub async fn run_paper_trading(
                                 .await;
                         }
                         optimization_last_run_date = Some(now_date);
+                        auto_opt_retry_count = 0;
+                        auto_opt_retry_at = None;
+                        emit_auto_opt_retry_status(&event_tx, 0, AUTO_OPT_MAX_RETRIES, None).await;
                     }
                     Err(error) => {
-                        let _ = event_tx
-                            .send(PaperEvent::Warning(format!(
-                                "Scheduled optimization failed: {}",
-                                error
-                            )))
+                        auto_opt_retry_count = auto_opt_retry_count.saturating_add(1);
+                        if auto_opt_retry_count >= AUTO_OPT_MAX_RETRIES {
+                            auto_opt_retry_at = None;
+                            optimization_last_run_date = Some(now_date);
+                            auto_opt_retry_count = 0;
+                            emit_auto_opt_retry_status(&event_tx, 0, AUTO_OPT_MAX_RETRIES, None).await;
+                            let _ = event_tx
+                                .send(PaperEvent::Warning(format!(
+                                    "ERROR: Scheduled optimization stopped after {} retries due to data fetch failures. Keeping current targets/holdings unchanged. Please check data chain or API key. Last error: {}",
+                                    AUTO_OPT_MAX_RETRIES,
+                                    error
+                                )))
+                                .await;
+                        } else {
+                            auto_opt_retry_at = Some(now_local + chrono::Duration::seconds(AUTO_OPT_RETRY_DELAY_SECS));
+                            emit_auto_opt_retry_status(
+                                &event_tx,
+                                auto_opt_retry_count,
+                                AUTO_OPT_MAX_RETRIES,
+                                auto_opt_retry_at,
+                            )
                             .await;
+                            let _ = event_tx
+                                .send(PaperEvent::Warning(format!(
+                                    "Scheduled optimization failed (attempt {}/{}): {}. Will retry in 1 minute. Keeping current targets.",
+                                    auto_opt_retry_count,
+                                    AUTO_OPT_MAX_RETRIES,
+                                    error
+                                )))
+                                .await;
+                        }
                     }
                 }
                 let _ = event_tx
@@ -757,6 +822,8 @@ pub async fn run_paper_trading_from_strategy_file(
     };
     let mut optimization_last_run_date =
         compute_optimization_last_run_date(now_local, optimization_time_local, &optimization_weekdays);
+    let mut auto_opt_retry_count: u32 = 0;
+    let mut auto_opt_retry_at: Option<chrono::DateTime<Local>> = None;
 
     let mut interval = tokio::time::interval(Duration::from_secs(PRICE_POLL_INTERVAL_SECS));
     interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -811,6 +878,9 @@ pub async fn run_paper_trading_from_strategy_file(
                         optimization_time_local,
                         &optimization_weekdays,
                     );
+                    auto_opt_retry_count = 0;
+                    auto_opt_retry_at = None;
+                    emit_auto_opt_retry_status(&event_tx, 0, AUTO_OPT_MAX_RETRIES, None).await;
 
                     let _ = event_tx
                         .send(PaperEvent::Info(
@@ -957,15 +1027,25 @@ pub async fn run_paper_trading_from_strategy_file(
                 .unwrap_or(false);
             let should_optimize_today = optimization_weekdays
                 .contains(&now_local.weekday().number_from_monday());
+            let retry_due = auto_opt_retry_at
+                .map(|at| now_local >= at)
+                .unwrap_or(false);
+            let scheduled_due = should_optimize_today && !already_optimized_today && now_time >= opt_time;
 
-            if should_optimize_today && !already_optimized_today && now_time >= opt_time {
+            if scheduled_due || retry_due {
                 let _ = event_tx
                     .send(PaperEvent::AutoOptimizationStatus { running: true })
                     .await;
                 let _ = event_tx
-                    .send(PaperEvent::Info(
-                        "Scheduled optimization started".to_string(),
-                    ))
+                    .send(PaperEvent::Info(if retry_due {
+                        format!(
+                            "Scheduled optimization retry started ({}/{})",
+                            auto_opt_retry_count.saturating_add(1),
+                            AUTO_OPT_MAX_RETRIES
+                        )
+                    } else {
+                        "Scheduled optimization started".to_string()
+                    }))
                     .await;
                 match optimize_targets_from_candidate_pool(&mut runtime, cfg.optimization_backend).await {
                     Ok(updated) => {
@@ -990,14 +1070,42 @@ pub async fn run_paper_trading_from_strategy_file(
                                 .await;
                         }
                         optimization_last_run_date = Some(now_date);
+                        auto_opt_retry_count = 0;
+                        auto_opt_retry_at = None;
+                        emit_auto_opt_retry_status(&event_tx, 0, AUTO_OPT_MAX_RETRIES, None).await;
                     }
                     Err(error) => {
-                        let _ = event_tx
-                            .send(PaperEvent::Warning(format!(
-                                "Scheduled optimization failed: {}",
-                                error
-                            )))
+                        auto_opt_retry_count = auto_opt_retry_count.saturating_add(1);
+                        if auto_opt_retry_count >= AUTO_OPT_MAX_RETRIES {
+                            auto_opt_retry_at = None;
+                            optimization_last_run_date = Some(now_date);
+                            auto_opt_retry_count = 0;
+                            emit_auto_opt_retry_status(&event_tx, 0, AUTO_OPT_MAX_RETRIES, None).await;
+                            let _ = event_tx
+                                .send(PaperEvent::Warning(format!(
+                                    "ERROR: Scheduled optimization stopped after {} retries due to data fetch failures. Keeping current targets/holdings unchanged. Please check data chain or API key. Last error: {}",
+                                    AUTO_OPT_MAX_RETRIES,
+                                    error
+                                )))
+                                .await;
+                        } else {
+                            auto_opt_retry_at = Some(now_local + chrono::Duration::seconds(AUTO_OPT_RETRY_DELAY_SECS));
+                            emit_auto_opt_retry_status(
+                                &event_tx,
+                                auto_opt_retry_count,
+                                AUTO_OPT_MAX_RETRIES,
+                                auto_opt_retry_at,
+                            )
                             .await;
+                            let _ = event_tx
+                                .send(PaperEvent::Warning(format!(
+                                    "Scheduled optimization failed (attempt {}/{}): {}. Will retry in 1 minute. Keeping current targets.",
+                                    auto_opt_retry_count,
+                                    AUTO_OPT_MAX_RETRIES,
+                                    error
+                                )))
+                                .await;
+                        }
                     }
                 }
                 let _ = event_tx

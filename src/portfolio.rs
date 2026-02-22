@@ -9,7 +9,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::sync::Arc;
-use tracing::{info, warn, error};
+use tracing::info;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Configuration
@@ -124,22 +124,23 @@ pub async fn generate_multi_asset_forecasts(
     let diffusion = GaussianDiffusion::new(DIFF_STEPS, &device)?;
 
     let mut forecasts = Vec::with_capacity(symbols.len());
+    let prefetched = crate::data::fetch_ranges_prefetch(symbols, DATA_RANGE).await?;
 
     for symbol in symbols {
         info!("Forecasting {}...", symbol);
 
         // Fetch recent data
-        let data = match crate::data::fetch_range(symbol, DATA_RANGE).await {
-            Ok(d) => d,
-            Err(e) => {
-                error!("Failed to fetch {}: {}. Skipping.", symbol, e);
-                continue;
-            }
-        };
+        let data = prefetched
+            .get(symbol)
+            .cloned()
+            .ok_or(anyhow::anyhow!("Prefetched data missing for {}", symbol))?;
 
         if data.history.len() < context_len + 1 {
-            warn!("{}: insufficient history ({} days). Skipping.", symbol, data.history.len());
-            continue;
+            return Err(anyhow::anyhow!(
+                "Insufficient history for {} ({} days). Optimization stopped.",
+                symbol,
+                data.history.len()
+            ));
         }
 
         let current_price = data.history.last().unwrap().close;
@@ -276,21 +277,22 @@ async fn generate_multi_asset_forecasts_via_inference(
     backend: ComputeBackend,
 ) -> Result<Vec<AssetForecast>> {
     let mut forecasts = Vec::with_capacity(symbols.len());
+    let prefetched = crate::data::fetch_ranges_prefetch(symbols, DATA_RANGE).await?;
 
     for symbol in symbols {
         info!("Forecasting {} via backend-dispatch path...", symbol);
 
-        let data = match crate::data::fetch_range(symbol, DATA_RANGE).await {
-            Ok(d) => d,
-            Err(e) => {
-                error!("Failed to fetch {}: {}. Skipping.", symbol, e);
-                continue;
-            }
-        };
+        let data = prefetched
+            .get(symbol)
+            .cloned()
+            .ok_or(anyhow::anyhow!("Prefetched data missing for {}", symbol))?;
 
         if data.history.len() < LOOKBACK + 1 {
-            warn!("{}: insufficient history ({} days). Skipping.", symbol, data.history.len());
-            continue;
+            return Err(anyhow::anyhow!(
+                "Insufficient history for {} ({} days). Optimization stopped.",
+                symbol,
+                data.history.len()
+            ));
         }
 
         let current_price = data.history.last().map(|c| c.close).unwrap_or_default();

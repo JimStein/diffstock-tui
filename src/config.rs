@@ -148,7 +148,7 @@ pub const LSTM_LAYERS: usize = 2;
 pub const DROPOUT_RATE: f64 = 0.10;
 pub const WEIGHT_DECAY: f64 = 0.01;
 /// Range of historical data to fetch for training (e.g., "5y", "10y", "max")
-pub const DATA_RANGE: &str = "10y";
+pub const DATA_RANGE: &str = "5y";
 /// Gaussian noise stddev for data augmentation on normalized returns
 pub const AUGMENTATION_NOISE: f64 = 0.01;
 /// Number of augmented copies per original sample

@@ -12,7 +12,7 @@
 *   **Multi-Asset Training**: Learns asset-specific patterns using ID embeddings.
 *   **Robust Training**: Includes validation sets, model checkpointing (saves best weights), early stopping, and configurable hyperparameters.
 *   **Probabilistic Inference**: Generates P10-P90 confidence intervals via 500+ Monte Carlo paths.
-*   **Efficient Data**: Local caching (`.cache/`) and retry logic for Yahoo Finance API.
+*   **Efficient Data**: Local caching (`.cache/`) and retry logic with Polygon-first + Yahoo Finance fallback.
 *   **Dual Interface**: Keyboard-driven TUI (`ratatui`) and interactive GUI (`egui`).
 
 ## Requirements
@@ -85,6 +85,27 @@ When `--compute-backend directml` is selected, the runtime searches ONNX in this
 4. `onnx/model.onnx`
 
 If no ONNX model is found, runtime logs a warning and falls back to CPU.
+
+### Market data source (manual provider mode)
+
+Default behavior is now manual provider selection:
+- `polygon`: use Polygon/Massive chain only (WS -> snapshot -> minute aggregate)
+- `yfinance`/`yahoo`: use Yahoo/yfinance only
+
+Create `.env` from `.env.example` and set:
+
+```bash
+POLYGON_API_KEY=your_polygon_api_key_here
+DIFFSTOCK_DATA_PROVIDER=polygon
+```
+
+`DIFFSTOCK_DATA_PROVIDER` options:
+- `polygon`: use Polygon/Massive only (no cross-provider fallback)
+- `yahoo` or `yfinance`: use Yahoo/yfinance only
+
+`auto` mode is disabled to avoid mixed-latency data alignment issues.
+
+Training data default range is `5y`.
 
 ### Backend selection logic (important)
 

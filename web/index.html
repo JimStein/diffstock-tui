@@ -122,6 +122,18 @@
       gap: 6px;
       transition: var(--transition);
     }
+    .chip.log {
+      max-width: 320px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      cursor: pointer;
+      user-select: none;
+    }
+    .chip.log:hover {
+      border-color: rgba(255,255,255,.18);
+      color: var(--text-2);
+    }
     .chip-dot {
       width: 6px; height: 6px;
       border-radius: 50%;
@@ -697,6 +709,16 @@
       padding: 2px 4px;
       border-radius: 3px;
       transition: background var(--transition);
+    }
+    #logBox div.log-warn {
+      color: var(--gold);
+      background: rgba(245,158,11,.08);
+      border-left: 2px solid rgba(245,158,11,.45);
+    }
+    #logBox div.log-error {
+      color: var(--down);
+      background: rgba(255,71,87,.08);
+      border-left: 2px solid rgba(255,71,87,.45);
     }
     #logBox div:hover { background: rgba(255,255,255,.03); }
 
@@ -1790,6 +1812,14 @@
       <span class="chip">
         <span class="chip-dot" id="backendDot"></span>
         <span id="backendChip">Backend: --</span>
+      </span>
+      <span class="chip">
+        <span class="chip-dot" id="dataSourceDot"></span>
+        <span id="dataSourceChip">Data: --</span>
+      </span>
+      <span class="chip log" title="Recent data source switches">
+        <span class="chip-dot"></span>
+        <span id="dataSourceLogChip">SrcLog: --</span>
       </span>
       <span class="chip">
         <span class="chip-dot" id="systemDot"></span>

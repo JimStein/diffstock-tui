@@ -274,6 +274,20 @@ impl eframe::App for GuiApp {
                             "Scheduled optimization finished".to_string()
                         });
                     }
+                    Ok(PaperEvent::AutoOptimizationRetryStatus {
+                        retry_count,
+                        max_retries,
+                        next_retry_at,
+                    }) => {
+                        if let Some(next_retry_at) = next_retry_at {
+                            self.paper_log_messages.push(format!(
+                                "Optimization retry {}/{} scheduled at {}",
+                                retry_count,
+                                max_retries,
+                                next_retry_at
+                            ));
+                        }
+                    }
                     Ok(PaperEvent::TargetsUpdated { targets }) => {
                         self.paper_target_weights = Some(
                             targets

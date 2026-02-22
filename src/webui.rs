@@ -121,6 +121,7 @@ struct FullUiState {
     portfolio: PortfolioRuntimeState,
     train: TrainRuntimeState,
     paper: PaperRuntimeState,
+    data_live_source: String,
 }
 
 impl Default for TrainRuntimeState {
@@ -142,6 +143,9 @@ struct PaperRuntimeState {
     auto_optimizing: bool,
     optimization_time_local: Option<String>,
     optimization_weekdays: Vec<u32>,
+    auto_opt_retry_count: u32,
+    auto_opt_retry_max: u32,
+    auto_opt_retry_next_at: Option<String>,
     started_at: Option<String>,
     strategy_file: Option<String>,
     runtime_file: Option<String>,
@@ -152,6 +156,7 @@ struct PaperRuntimeState {
     last_analysis: Option<paper_trading::AnalysisRecord>,
     trade_history: Vec<paper_trading::TradeRecord>,
     logs: Vec<String>,
+    data_live_source: String,
     #[serde(skip_serializing)]
     cmd_tx: Option<mpsc::Sender<paper_trading::PaperCommand>>,
 }
@@ -164,6 +169,9 @@ impl Default for PaperRuntimeState {
             auto_optimizing: false,
             optimization_time_local: None,
             optimization_weekdays: Vec::new(),
+            auto_opt_retry_count: 0,
+            auto_opt_retry_max: 10,
+            auto_opt_retry_next_at: None,
             started_at: None,
             strategy_file: None,
             runtime_file: None,
@@ -174,6 +182,7 @@ impl Default for PaperRuntimeState {
             last_analysis: None,
             trade_history: Vec::new(),
             logs: Vec::new(),
+            data_live_source: "Unknown".to_string(),
             cmd_tx: None,
         }
     }
@@ -188,6 +197,15 @@ struct PaperTargetState {
 #[derive(Clone, Debug, Deserialize)]
 struct ForecastRequest {
     symbol: String,
+    horizon: Option<usize>,
+    simulations: Option<usize>,
+    use_cuda: Option<bool>,
+    compute_backend: Option<ApiComputeBackend>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ForecastBatchRequest {
+    symbols: Vec<String>,
     horizon: Option<usize>,
     simulations: Option<usize>,
     use_cuda: Option<bool>,
@@ -294,6 +312,7 @@ pub async fn run_webui_server(port: u16, backend_default: config::ComputeBackend
         .route("/api/health", get(health))
         .route("/api/state", get(full_state))
         .route("/api/forecast", post(forecast))
+        .route("/api/forecast/batch", post(forecast_batch))
         .route("/api/portfolio", post(portfolio_opt))
         .route("/api/quotes", post(quotes))
         .route("/api/train/start", post(start_train))
@@ -424,6 +443,98 @@ async fn forecast(
     Ok(Json(response))
 }
 
+async fn forecast_batch(
+    State(state): State<WebState>,
+    Json(req): Json<ForecastBatchRequest>,
+) -> Result<Json<Vec<ForecastResponse>>, (StatusCode, Json<ApiError>)> {
+    let mut symbols: Vec<String> = req
+        .symbols
+        .iter()
+        .map(|s| s.trim().to_uppercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+    symbols.sort();
+    symbols.dedup();
+
+    if symbols.is_empty() {
+        return Err(api_err(StatusCode::BAD_REQUEST, "symbols is required"));
+    }
+
+    let requested_backend = match req.use_cuda {
+        Some(true) => config::ComputeBackend::Cuda,
+        Some(false) => config::ComputeBackend::Cpu,
+        None => req.compute_backend.map(Into::into).unwrap_or(state.backend_default),
+    };
+    let backend = config::resolve_compute_backend(requested_backend, "webui-forecast-batch");
+    let horizon = req.horizon.unwrap_or(10);
+    let simulations = req.simulations.unwrap_or(500);
+    let backend_label = format!("{:?}", backend).to_lowercase();
+
+    {
+        let mut fs = state.forecast.lock().await;
+        fs.last_request = Some(ForecastRequestState {
+            symbol: symbols.join(","),
+            horizon,
+            simulations,
+            compute_backend: backend_label,
+        });
+        fs.last_error = None;
+    }
+
+    let prefetched = data::fetch_ranges_prefetch(&symbols, "1y")
+        .await
+        .map_err(internal_err)?;
+
+    let mut responses = Vec::with_capacity(symbols.len());
+    for symbol in &symbols {
+        let data = prefetched
+            .get(symbol)
+            .cloned()
+            .ok_or(api_err(StatusCode::INTERNAL_SERVER_ERROR, "prefetched data missing"))?;
+
+        let history = data
+            .history
+            .iter()
+            .map(|c| PricePoint {
+                time: c.date.timestamp(),
+                value: c.close,
+            })
+            .collect::<Vec<_>>();
+
+        let forecast = inference::run_inference_with_backend(
+            Arc::new(data),
+            horizon,
+            simulations,
+            None,
+            backend,
+        )
+        .await
+        .map_err(internal_err)?;
+
+        let map_points = |v: Vec<(f64, f64)>| {
+            v.into_iter()
+                .map(|(t, p)| PricePoint {
+                    time: t as i64,
+                    value: p,
+                })
+                .collect::<Vec<_>>()
+        };
+
+        responses.push(ForecastResponse {
+            symbol: symbol.clone(),
+            history,
+            p10: map_points(forecast.p10),
+            p30: map_points(forecast.p30),
+            p50: map_points(forecast.p50),
+            p70: map_points(forecast.p70),
+            p90: map_points(forecast.p90),
+            forecasted_at: Some(chrono::Local::now().to_rfc3339()),
+        });
+    }
+
+    Ok(Json(responses))
+}
+
 async fn portfolio_opt(
     State(state): State<WebState>,
     Json(req): Json<PortfolioRequest>,
@@ -496,12 +607,15 @@ async fn full_state(
 ) -> Result<Json<FullUiState>, (StatusCode, Json<ApiError>)> {
     let mut paper = state.paper.lock().await.clone();
     paper.cmd_tx = None;
+    let data_live_source = data::current_live_data_source().await;
+    paper.data_live_source = data_live_source.clone();
 
     Ok(Json(FullUiState {
         forecast: state.forecast.lock().await.clone(),
         portfolio: state.portfolio.lock().await.clone(),
         train: state.train.lock().await.clone(),
         paper,
+        data_live_source,
     }))
 }
 
@@ -664,6 +778,15 @@ async fn start_paper(
                 paper_trading::PaperEvent::AutoOptimizationStatus { running } => {
                     ps.auto_optimizing = running;
                 }
+                paper_trading::PaperEvent::AutoOptimizationRetryStatus {
+                    retry_count,
+                    max_retries,
+                    next_retry_at,
+                } => {
+                    ps.auto_opt_retry_count = retry_count;
+                    ps.auto_opt_retry_max = max_retries;
+                    ps.auto_opt_retry_next_at = next_retry_at;
+                }
                 paper_trading::PaperEvent::TargetsUpdated { targets } => {
                     ps.target_weights = targets
                         .iter()
@@ -674,7 +797,7 @@ async fn start_paper(
                         .collect();
                 }
                 paper_trading::PaperEvent::Warning(msg) => {
-                    ps.logs.push(format!("Warning: {}", msg));
+                    ps.logs.push(format!("WARNING: {}", msg));
                 }
                 paper_trading::PaperEvent::Analysis(a) => {
                     ps.trade_history.extend(a.trades.clone());
@@ -797,6 +920,15 @@ async fn load_paper(
                 paper_trading::PaperEvent::AutoOptimizationStatus { running } => {
                     ps.auto_optimizing = running;
                 }
+                paper_trading::PaperEvent::AutoOptimizationRetryStatus {
+                    retry_count,
+                    max_retries,
+                    next_retry_at,
+                } => {
+                    ps.auto_opt_retry_count = retry_count;
+                    ps.auto_opt_retry_max = max_retries;
+                    ps.auto_opt_retry_next_at = next_retry_at;
+                }
                 paper_trading::PaperEvent::TargetsUpdated { targets } => {
                     ps.target_weights = targets
                         .iter()
@@ -807,7 +939,7 @@ async fn load_paper(
                         .collect();
                 }
                 paper_trading::PaperEvent::Warning(msg) => {
-                    ps.logs.push(format!("Warning: {}", msg));
+                    ps.logs.push(format!("WARNING: {}", msg));
                 }
                 paper_trading::PaperEvent::Analysis(a) => {
                     ps.trade_history.extend(a.trades.clone());
@@ -869,6 +1001,7 @@ async fn paper_status(
 ) -> Result<Json<PaperRuntimeState>, (StatusCode, Json<ApiError>)> {
     let mut status = state.paper.lock().await.clone();
     status.cmd_tx = None;
+    status.data_live_source = data::current_live_data_source().await;
     Ok(Json(status))
 }
 
@@ -901,6 +1034,34 @@ async fn paper_targets_update(
         .collect::<Vec<_>>();
 
     let apply_now = req.apply_now.unwrap_or(false);
+
+    if apply_now {
+        let mut preflight_symbols = symbols.clone();
+        let snapshot_holdings = {
+            let ps = state.paper.lock().await;
+            ps.latest_snapshot
+                .as_ref()
+                .map(|snap| snap.holdings_symbols.clone())
+                .unwrap_or_default()
+        };
+        preflight_symbols.extend(snapshot_holdings);
+        preflight_symbols.push(paper_trading::BENCHMARK_SYMBOL.to_string());
+        preflight_symbols.sort();
+        preflight_symbols.dedup();
+
+        for symbol in &preflight_symbols {
+            if let Err(error) = data::fetch_latest_price_1m(symbol).await {
+                return Err(api_err(
+                    StatusCode::BAD_GATEWAY,
+                    &format!(
+                        "Data fetch failed for {}. Apply-now optimization stopped: {}",
+                        symbol,
+                        error
+                    ),
+                ));
+            }
+        }
+    }
 
     let tx = {
         let mut ps = state.paper.lock().await;
