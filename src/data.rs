@@ -146,6 +146,9 @@ struct PolygonWsEvent {
     sym: Option<String>,
     p: Option<f64>,
     t: Option<i64>,
+    c: Option<f64>,
+    s: Option<i64>,
+    e: Option<i64>,
 }
 
 fn polygon_ws_client() -> Option<&'static PolygonWsClient> {
@@ -233,7 +236,7 @@ async fn run_polygon_ws_loop(
         if !initial_symbols.is_empty() {
             let params = initial_symbols
                 .iter()
-                .map(|s| format!("T.{}", s))
+                .flat_map(|s| [format!("A.{}", s), format!("AM.{}", s)])
                 .collect::<Vec<_>>()
                 .join(",");
             let sub = PolygonWsSubscribeReq {
@@ -257,7 +260,7 @@ async fn run_polygon_ws_loop(
                             }
                             let params = symbols
                                 .iter()
-                                .map(|s| format!("T.{}", s))
+                                .flat_map(|s| [format!("A.{}", s), format!("AM.{}", s)])
                                 .collect::<Vec<_>>()
                                 .join(",");
                             let sub = PolygonWsSubscribeReq {
@@ -337,20 +340,32 @@ async fn handle_polygon_ws_text(
 
     let mut latest = latest_prices.write().await;
     for event in events {
-        if event.ev.as_deref() != Some("T") {
+        let ev = event.ev.as_deref();
+        if ev != Some("A") && ev != Some("AM") {
             continue;
         }
-        if let (Some(sym), Some(price)) = (event.sym, event.p) {
+
+        let price_opt = event.c.or(event.p);
+        if let (Some(sym), Some(price)) = (event.sym, price_opt) {
             let ts_ms = event
-                .t
+                .e
+                .or(event.s)
+                .or(event.t)
                 .map(normalize_polygon_timestamp_to_ms)
                 .unwrap_or_else(|| Utc::now().timestamp_millis());
+
+            let source = if ev == Some("A") {
+                "Polygon-WS-SecondAgg"
+            } else {
+                "Polygon-WS-MinuteAgg"
+            };
+
             latest.insert(
                 sym.to_uppercase(),
                 TimedPrice {
                     price,
                     timestamp_ms: ts_ms,
-                    source: "Polygon-WS",
+                    source,
                 },
             );
         }
