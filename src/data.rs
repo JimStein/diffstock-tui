@@ -8,6 +8,7 @@ use tracing::{info, warn};
 use std::sync::OnceLock;
 use tokio::sync::RwLock;
 use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::protocol::Message;
@@ -18,6 +19,7 @@ static DATA_PROVIDER_MODE: OnceLock<DataProviderMode> = OnceLock::new();
 static POLYGON_WS_CONNECTED: OnceLock<RwLock<bool>> = OnceLock::new();
 static WS_PRIORITY_RTH_ONLY: OnceLock<bool> = OnceLock::new();
 static WS_DIAGNOSTICS: OnceLock<RwLock<WsDiagnosticsState>> = OnceLock::new();
+static LIVE_FETCH_DIAGNOSTICS: OnceLock<RwLock<LiveFetchDiagnosticsState>> = OnceLock::new();
 
 #[derive(Clone, Debug, Serialize, Default)]
 pub struct WsDiagnostics {
@@ -47,6 +49,34 @@ struct WsDiagnosticsState {
     last_data_event_at_ms: Option<i64>,
     last_parse_failure_at_ms: Option<i64>,
     last_parse_failure: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Default)]
+pub struct LiveFetchDiagnostics {
+    pub prefetch_calls_total: u64,
+    pub prefetch_symbols_total: u64,
+    pub prefetch_fallback_total: u64,
+    pub last_prefetch_symbol_count: u64,
+    pub last_prefetch_success_count: u64,
+    pub last_prefetch_missing_count: u64,
+    pub last_prefetch_duration_ms: u64,
+    pub last_prefetch_mode: String,
+    pub last_prefetch_at_ms: Option<i64>,
+    pub last_prefetch_error: Option<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct LiveFetchDiagnosticsState {
+    prefetch_calls_total: u64,
+    prefetch_symbols_total: u64,
+    prefetch_fallback_total: u64,
+    last_prefetch_symbol_count: u64,
+    last_prefetch_success_count: u64,
+    last_prefetch_missing_count: u64,
+    last_prefetch_duration_ms: u64,
+    last_prefetch_mode: String,
+    last_prefetch_at_ms: Option<i64>,
+    last_prefetch_error: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -103,6 +133,10 @@ fn ws_diagnostics_cell() -> &'static RwLock<WsDiagnosticsState> {
     WS_DIAGNOSTICS.get_or_init(|| RwLock::new(WsDiagnosticsState::default()))
 }
 
+fn live_fetch_diagnostics_cell() -> &'static RwLock<LiveFetchDiagnosticsState> {
+    LIVE_FETCH_DIAGNOSTICS.get_or_init(|| RwLock::new(LiveFetchDiagnosticsState::default()))
+}
+
 fn now_ts_ms() -> i64 {
     Utc::now().timestamp_millis()
 }
@@ -135,6 +169,61 @@ pub async fn current_ws_diagnostics() -> WsDiagnostics {
         last_parse_failure_at_ms: diag.last_parse_failure_at_ms,
         last_parse_failure: diag.last_parse_failure.clone(),
     }
+}
+
+pub async fn current_live_fetch_diagnostics() -> LiveFetchDiagnostics {
+    let diag = live_fetch_diagnostics_cell().read().await;
+    LiveFetchDiagnostics {
+        prefetch_calls_total: diag.prefetch_calls_total,
+        prefetch_symbols_total: diag.prefetch_symbols_total,
+        prefetch_fallback_total: diag.prefetch_fallback_total,
+        last_prefetch_symbol_count: diag.last_prefetch_symbol_count,
+        last_prefetch_success_count: diag.last_prefetch_success_count,
+        last_prefetch_missing_count: diag.last_prefetch_missing_count,
+        last_prefetch_duration_ms: diag.last_prefetch_duration_ms,
+        last_prefetch_mode: diag.last_prefetch_mode.clone(),
+        last_prefetch_at_ms: diag.last_prefetch_at_ms,
+        last_prefetch_error: diag.last_prefetch_error.clone(),
+    }
+}
+
+async fn mark_live_prefetch_success(
+    symbol_count: usize,
+    success_count: usize,
+    duration_ms: u64,
+    mode: &str,
+    fallback_used: bool,
+    warning: Option<&str>,
+) {
+    let mut diag = live_fetch_diagnostics_cell().write().await;
+    diag.prefetch_calls_total = diag.prefetch_calls_total.saturating_add(1);
+    diag.prefetch_symbols_total = diag.prefetch_symbols_total.saturating_add(symbol_count as u64);
+    if fallback_used {
+        diag.prefetch_fallback_total = diag.prefetch_fallback_total.saturating_add(1);
+    }
+    diag.last_prefetch_symbol_count = symbol_count as u64;
+    diag.last_prefetch_success_count = success_count as u64;
+    diag.last_prefetch_missing_count = symbol_count.saturating_sub(success_count) as u64;
+    diag.last_prefetch_duration_ms = duration_ms;
+    diag.last_prefetch_mode = mode.to_string();
+    diag.last_prefetch_at_ms = Some(now_ts_ms());
+    diag.last_prefetch_error = warning.map(|v| v.to_string());
+}
+
+async fn mark_live_prefetch_failure(symbol_count: usize, duration_ms: u64, mode: &str, error: &str) {
+    let mut diag = live_fetch_diagnostics_cell().write().await;
+    diag.prefetch_calls_total = diag.prefetch_calls_total.saturating_add(1);
+    diag.prefetch_symbols_total = diag.prefetch_symbols_total.saturating_add(symbol_count as u64);
+    if mode.contains("fallback") {
+        diag.prefetch_fallback_total = diag.prefetch_fallback_total.saturating_add(1);
+    }
+    diag.last_prefetch_symbol_count = symbol_count as u64;
+    diag.last_prefetch_success_count = 0;
+    diag.last_prefetch_missing_count = symbol_count as u64;
+    diag.last_prefetch_duration_ms = duration_ms;
+    diag.last_prefetch_mode = mode.to_string();
+    diag.last_prefetch_at_ms = Some(now_ts_ms());
+    diag.last_prefetch_error = Some(error.to_string());
 }
 
 async fn ws_diag_set_connected(connected: bool) {
@@ -351,6 +440,7 @@ async fn run_polygon_ws_loop(
                 .flat_map(|s| [format!("A.{}", s), format!("AM.{}", s)])
                 .collect::<Vec<_>>()
                 .join(",");
+            info!("Polygon WS initial subscribe: {}", params);
             let sub = PolygonWsSubscribeReq {
                 action: "subscribe",
                 params,
@@ -375,6 +465,7 @@ async fn run_polygon_ws_loop(
                                 .flat_map(|s| [format!("A.{}", s), format!("AM.{}", s)])
                                 .collect::<Vec<_>>()
                                 .join(",");
+                            info!("Polygon WS incremental subscribe: {}", params);
                             let sub = PolygonWsSubscribeReq {
                                 action: "subscribe",
                                 params,
@@ -1324,6 +1415,133 @@ async fn fetch_from_api(symbol: &str, range: &str, cache_path: &std::path::Path)
 /// Uses `interval=1m` and `range=1d`, then returns the most recent non-null close.
 pub async fn fetch_latest_price_1m(symbol: &str) -> Result<f64> {
     Ok(fetch_latest_price_with_meta(symbol).await?.price)
+}
+
+pub async fn fetch_latest_prices_with_meta_prefetch(
+    symbols: &[String],
+) -> Result<HashMap<String, LivePrice>> {
+    let mut normalized: Vec<String> = symbols
+        .iter()
+        .map(|s| s.trim().to_uppercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+    normalized.sort();
+    normalized.dedup();
+
+    if normalized.is_empty() {
+        return Err(anyhow::anyhow!("live prefetch failed before computation: symbol list is empty"));
+    }
+
+    if matches!(configured_data_provider_mode(), DataProviderMode::Polygon) {
+        polygon_ws_subscribe_symbols(&normalized).await;
+    }
+
+    let delay_ms = batch_fetch_delay_ms();
+    let provider = configured_data_provider_mode().as_str();
+    let started = Instant::now();
+    let total_symbols = normalized.len();
+    let mut out: HashMap<String, LivePrice> = HashMap::new();
+    let mut batch_failed: Option<String> = None;
+
+    for (idx, symbol) in normalized.iter().enumerate() {
+        let quote = match fetch_latest_price_with_meta(symbol).await {
+            Ok(q) => q,
+            Err(e) => {
+                batch_failed = Some(format!(
+                    "live batch prefetch failed: symbol={}, provider={}, reason={}",
+                    symbol,
+                    provider,
+                    e
+                ));
+                break;
+            }
+        };
+        out.insert(symbol.clone(), quote);
+
+        if idx + 1 < normalized.len() && delay_ms > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+        }
+    }
+
+    if batch_failed.is_none() {
+        mark_live_prefetch_success(
+            total_symbols,
+            out.len(),
+            started.elapsed().as_millis() as u64,
+            "batch",
+            false,
+            None,
+        )
+        .await;
+        return Ok(out);
+    }
+
+    let batch_err = batch_failed.unwrap_or_else(|| "unknown batch prefetch failure".to_string());
+    warn!(
+        "{}; degrading to per-symbol live fetch for this cycle",
+        batch_err
+    );
+
+    out.clear();
+    let mut fallback_errors: Vec<String> = Vec::new();
+    for symbol in &normalized {
+        match fetch_latest_price_with_meta(symbol).await {
+            Ok(q) => {
+                out.insert(symbol.clone(), q);
+            }
+            Err(e) => {
+                fallback_errors.push(format!("{}: {}", symbol, e));
+            }
+        }
+    }
+
+    if out.is_empty() {
+        let msg = format!(
+            "{}; fallback single-symbol fetch also failed for all symbols: {}",
+            batch_err,
+            fallback_errors.join(" | ")
+        );
+        mark_live_prefetch_failure(
+            total_symbols,
+            started.elapsed().as_millis() as u64,
+            "fallback-single",
+            &msg,
+        )
+        .await;
+        return Err(anyhow::anyhow!(msg));
+    }
+
+    let warning = if fallback_errors.is_empty() {
+        Some(format!("{}; fallback-single recovered all symbols", batch_err))
+    } else {
+        Some(format!(
+            "{}; fallback-single partial success, missing {}/{} symbols: {}",
+            batch_err,
+            total_symbols.saturating_sub(out.len()),
+            total_symbols,
+            fallback_errors.join(" | ")
+        ))
+    };
+    mark_live_prefetch_success(
+        total_symbols,
+        out.len(),
+        started.elapsed().as_millis() as u64,
+        "fallback-single",
+        true,
+        warning.as_deref(),
+    )
+    .await;
+
+    Ok(out)
+}
+
+pub async fn fetch_latest_prices_1m_prefetch(symbols: &[String]) -> Result<HashMap<String, f64>> {
+    let quotes = fetch_latest_prices_with_meta_prefetch(symbols).await?;
+    let mut prices = HashMap::new();
+    for (symbol, quote) in quotes {
+        prices.insert(symbol, quote.price);
+    }
+    Ok(prices)
 }
 
 pub async fn fetch_latest_price_with_meta(symbol: &str) -> Result<LivePrice> {

@@ -70,6 +70,7 @@ let paperOptSavePending = false;
 let dataSourceLastValue = '';
 let dataSourceSwitchLog = [];
 let lastWsDiagnostics = null;
+let lastLiveFetchDiagnostics = null;
 const FORECAST_BATCH_CACHE_KEY = 'diffstock:forecast-batch:v2';
 const FORECAST_META_CACHE_KEY = 'diffstock:forecast-meta:v1';
 let paperFullContext = {
@@ -367,13 +368,16 @@ const classifyWsDiagnostics = (diag) => {
   return '正常';
 };
 
-const setDataSourceChip = (sourceRaw, wsConnected = false, wsDiagnostics = null) => {
+const setDataSourceChip = (sourceRaw, wsConnected = false, wsDiagnostics = null, liveFetchDiagnostics = null) => {
   const dataSourceStatusChip = document.getElementById('dataSourceStatusChip');
   const dataSourceChip = document.getElementById('dataSourceChip');
   const dataSourceDot = document.getElementById('dataSourceDot');
   if (!dataSourceChip) return;
   if (wsDiagnostics && typeof wsDiagnostics === 'object') {
     lastWsDiagnostics = wsDiagnostics;
+  }
+  if (liveFetchDiagnostics && typeof liveFetchDiagnostics === 'object') {
+    lastLiveFetchDiagnostics = liveFetchDiagnostics;
   }
 
   const source = String(sourceRaw || '').trim();
@@ -433,6 +437,7 @@ const showDataSourceLogPopup = () => {
     : 'No source switch history yet.';
 
   const diag = lastWsDiagnostics || {};
+  const fetchDiag = lastLiveFetchDiagnostics || {};
   const wsStatus = classifyWsDiagnostics(diag);
   const timeoutSec = getWsTimeoutSeconds(diag);
   const timeoutText = !Number.isFinite(timeoutSec)
@@ -469,6 +474,15 @@ const showDataSourceLogPopup = () => {
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">解析失败次数</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(diag.parse_failures_total || 0)}</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">超时判定窗口</td><td style="padding:6px;border-bottom:1px solid var(--line);">120s</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">超时状态</td><td style="padding:6px;border-bottom:1px solid var(--line);">${esc(timeoutText)}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">批量拉取总次数</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(fetchDiag.prefetch_calls_total || 0)}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">批量失败退化次数</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(fetchDiag.prefetch_fallback_total || 0)}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近批量symbol数</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(fetchDiag.last_prefetch_symbol_count || 0)}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近成功symbol数</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(fetchDiag.last_prefetch_success_count || 0)}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近缺失symbol数</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(fetchDiag.last_prefetch_missing_count || 0)}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近拉取模式</td><td style="padding:6px;border-bottom:1px solid var(--line);">${esc(fetchDiag.last_prefetch_mode || '--')}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近批量耗时</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(fetchDiag.last_prefetch_duration_ms || 0)} ms</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近批量时间</td><td style="padding:6px;border-bottom:1px solid var(--line);">${formatDiagTs(Number(fetchDiag.last_prefetch_at_ms || 0))}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近批量错误</td><td style="padding:6px;border-bottom:1px solid var(--line);white-space:pre-wrap;">${esc(fetchDiag.last_prefetch_error || '--')}</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近文本消息</td><td style="padding:6px;border-bottom:1px solid var(--line);">${formatDiagTs(Number(diag.last_text_at_ms || 0))}</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近数据事件</td><td style="padding:6px;border-bottom:1px solid var(--line);">${formatDiagTs(Number(diag.last_data_event_at_ms || 0))}</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近解析失败</td><td style="padding:6px;border-bottom:1px solid var(--line);">${formatDiagTs(Number(diag.last_parse_failure_at_ms || 0))}</td></tr>
@@ -2400,7 +2414,12 @@ const renderChartSummaryStrip = () => {
 const refreshPaper = async () => {
   try {
     const st = await api('/api/paper/status');
-    setDataSourceChip(st?.data_live_source, !!st?.data_ws_connected, st?.data_ws_diagnostics);
+    setDataSourceChip(
+      st?.data_live_source,
+      !!st?.data_ws_connected,
+      st?.data_ws_diagnostics,
+      st?.data_live_fetch_diagnostics,
+    );
     setPaperApplyAutoOptimizing(!!st?.auto_optimizing);
     hydratePaperOptimizationFromStatus(st);
     setPaperStatusChip(st);
@@ -2994,7 +3013,8 @@ const refreshBackendChip = async () => {
     setDataSourceChip(
       st?.data_live_source || st?.paper?.data_live_source,
       !!(st?.data_ws_connected ?? st?.paper?.data_ws_connected),
-      st?.data_ws_diagnostics || st?.paper?.data_ws_diagnostics || null
+      st?.data_ws_diagnostics || st?.paper?.data_ws_diagnostics || null,
+      st?.data_live_fetch_diagnostics || st?.paper?.data_live_fetch_diagnostics || null,
     );
     const backend = st?.forecast?.last_request?.compute_backend || st?.compute_backend || null;
     if (backend) {

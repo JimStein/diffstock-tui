@@ -1488,12 +1488,7 @@ fn tracked_symbols_for_runtime(runtime: &PaperRuntime) -> Vec<String> {
 }
 
 async fn fetch_prices_for_symbols(symbols: &[String]) -> Result<HashMap<String, f64>> {
-    let mut prices = HashMap::new();
-    for symbol in symbols {
-        let price = data::fetch_latest_price_1m(symbol).await?;
-        prices.insert(symbol.clone(), price);
-    }
-    Ok(prices)
+    data::fetch_latest_prices_1m_prefetch(symbols).await
 }
 
 fn create_output_paths() -> Result<(PathBuf, PathBuf)> {

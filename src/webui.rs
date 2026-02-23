@@ -124,6 +124,7 @@ struct FullUiState {
     data_live_source: String,
     data_ws_connected: bool,
     data_ws_diagnostics: data::WsDiagnostics,
+    data_live_fetch_diagnostics: data::LiveFetchDiagnostics,
 }
 
 impl Default for TrainRuntimeState {
@@ -161,6 +162,7 @@ struct PaperRuntimeState {
     data_live_source: String,
     data_ws_connected: bool,
     data_ws_diagnostics: data::WsDiagnostics,
+    data_live_fetch_diagnostics: data::LiveFetchDiagnostics,
     #[serde(skip_serializing)]
     cmd_tx: Option<mpsc::Sender<paper_trading::PaperCommand>>,
 }
@@ -189,6 +191,7 @@ impl Default for PaperRuntimeState {
             data_live_source: "Unknown".to_string(),
             data_ws_connected: false,
             data_ws_diagnostics: data::WsDiagnostics::default(),
+            data_live_fetch_diagnostics: data::LiveFetchDiagnostics::default(),
             cmd_tx: None,
         }
     }
@@ -631,15 +634,17 @@ async fn quotes(
         return Err(api_err(StatusCode::BAD_REQUEST, "symbols cannot be empty"));
     }
 
+    let quotes = data::fetch_latest_prices_with_meta_prefetch(&symbols)
+        .await
+        .map_err(internal_err)?;
+
     let mut prices = HashMap::new();
     let mut exchange_ts_ms = HashMap::new();
     let mut sources = HashMap::new();
-    for symbol in symbols {
-        if let Ok(quote) = data::fetch_latest_price_with_meta(&symbol).await {
-            prices.insert(symbol.clone(), quote.price);
-            exchange_ts_ms.insert(symbol.clone(), quote.exchange_ts_ms);
-            sources.insert(symbol, quote.source);
-        }
+    for (symbol, quote) in quotes {
+        prices.insert(symbol.clone(), quote.price);
+        exchange_ts_ms.insert(symbol.clone(), quote.exchange_ts_ms);
+        sources.insert(symbol, quote.source);
     }
 
     Ok(Json(QuotesResponse {
@@ -657,9 +662,11 @@ async fn full_state(
     let data_live_source = data::current_live_data_source().await;
     let data_ws_connected = data::polygon_ws_connected().await;
     let data_ws_diagnostics = data::current_ws_diagnostics().await;
+    let data_live_fetch_diagnostics = data::current_live_fetch_diagnostics().await;
     paper.data_live_source = data_live_source.clone();
     paper.data_ws_connected = data_ws_connected;
     paper.data_ws_diagnostics = data_ws_diagnostics.clone();
+    paper.data_live_fetch_diagnostics = data_live_fetch_diagnostics.clone();
 
     Ok(Json(FullUiState {
         forecast: state.forecast.lock().await.clone(),
@@ -669,6 +676,7 @@ async fn full_state(
         data_live_source,
         data_ws_connected,
         data_ws_diagnostics,
+        data_live_fetch_diagnostics,
     }))
 }
 
@@ -1057,6 +1065,7 @@ async fn paper_status(
     status.data_live_source = data::current_live_data_source().await;
     status.data_ws_connected = data::polygon_ws_connected().await;
     status.data_ws_diagnostics = data::current_ws_diagnostics().await;
+    status.data_live_fetch_diagnostics = data::current_live_fetch_diagnostics().await;
     Ok(Json(status))
 }
 
@@ -1104,13 +1113,29 @@ async fn paper_targets_update(
         preflight_symbols.sort();
         preflight_symbols.dedup();
 
-        for symbol in &preflight_symbols {
-            if let Err(error) = data::fetch_latest_price_1m(symbol).await {
+        match data::fetch_latest_prices_1m_prefetch(&preflight_symbols).await {
+            Ok(prices) => {
+                if prices.len() < preflight_symbols.len() {
+                    let missing = preflight_symbols
+                        .iter()
+                        .filter(|s| !prices.contains_key(*s))
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    return Err(api_err(
+                        StatusCode::BAD_GATEWAY,
+                        &format!(
+                            "Data fetch partial success in apply-now prefetch; missing symbols: {}",
+                            missing
+                        ),
+                    ));
+                }
+            }
+            Err(error) => {
                 return Err(api_err(
                     StatusCode::BAD_GATEWAY,
                     &format!(
-                        "Data fetch failed for {}. Apply-now optimization stopped: {}",
-                        symbol,
+                        "Data fetch failed in apply-now batch prefetch. Apply-now optimization stopped: {}",
                         error
                     ),
                 ));
