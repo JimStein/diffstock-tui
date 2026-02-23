@@ -10,7 +10,7 @@ use candle_nn::VarBuilder;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 use chrono::Duration;
-use tracing::warn;
+use tracing::{info, warn};
 
 #[cfg(feature = "directml")]
 use ort::execution_providers::DirectMLExecutionProvider;
@@ -190,6 +190,9 @@ pub async fn run_inference_directml(
     model_path: &std::path::Path,
 ) -> Result<ForecastData> {
     let device = get_device(false);
+    info!(
+        "DirectML inference path: preprocessing tensors on CPU; denoiser executes via ONNX Runtime DirectML EP"
+    );
 
     let context_len = LOOKBACK;
     if data.history.len() < context_len + 1 {
@@ -263,6 +266,10 @@ pub async fn run_inference_directml(
         .with_execution_providers([DirectMLExecutionProvider::default().build()])?
         .commit_from_file(model_path)
         .with_context(|| format!("failed to load DirectML ONNX model '{}'", model_path.display()))?;
+    info!(
+        "DirectML execution provider initialized with ONNX model {}",
+        model_path.display()
+    );
     if session.inputs().is_empty() {
         anyhow::bail!(
             "ONNX model has 0 inputs (not executable graph). Re-export model_weights.onnx with explicit runtime inputs."
