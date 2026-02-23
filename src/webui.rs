@@ -123,6 +123,7 @@ struct FullUiState {
     paper: PaperRuntimeState,
     data_live_source: String,
     data_ws_connected: bool,
+    data_ws_diagnostics: data::WsDiagnostics,
 }
 
 impl Default for TrainRuntimeState {
@@ -159,6 +160,7 @@ struct PaperRuntimeState {
     logs: Vec<String>,
     data_live_source: String,
     data_ws_connected: bool,
+    data_ws_diagnostics: data::WsDiagnostics,
     #[serde(skip_serializing)]
     cmd_tx: Option<mpsc::Sender<paper_trading::PaperCommand>>,
 }
@@ -186,6 +188,7 @@ impl Default for PaperRuntimeState {
             logs: Vec::new(),
             data_live_source: "Unknown".to_string(),
             data_ws_connected: false,
+            data_ws_diagnostics: data::WsDiagnostics::default(),
             cmd_tx: None,
         }
     }
@@ -248,6 +251,8 @@ struct QuotesRequest {
 #[derive(Debug, Serialize)]
 struct QuotesResponse {
     prices: HashMap<String, f64>,
+    exchange_ts_ms: HashMap<String, i64>,
+    sources: HashMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -596,13 +601,21 @@ async fn quotes(
     }
 
     let mut prices = HashMap::new();
+    let mut exchange_ts_ms = HashMap::new();
+    let mut sources = HashMap::new();
     for symbol in symbols {
-        if let Ok(price) = data::fetch_latest_price_1m(&symbol).await {
-            prices.insert(symbol, price);
+        if let Ok(quote) = data::fetch_latest_price_with_meta(&symbol).await {
+            prices.insert(symbol.clone(), quote.price);
+            exchange_ts_ms.insert(symbol.clone(), quote.exchange_ts_ms);
+            sources.insert(symbol, quote.source);
         }
     }
 
-    Ok(Json(QuotesResponse { prices }))
+    Ok(Json(QuotesResponse {
+        prices,
+        exchange_ts_ms,
+        sources,
+    }))
 }
 
 async fn full_state(
@@ -612,8 +625,10 @@ async fn full_state(
     paper.cmd_tx = None;
     let data_live_source = data::current_live_data_source().await;
     let data_ws_connected = data::polygon_ws_connected().await;
+    let data_ws_diagnostics = data::current_ws_diagnostics().await;
     paper.data_live_source = data_live_source.clone();
     paper.data_ws_connected = data_ws_connected;
+    paper.data_ws_diagnostics = data_ws_diagnostics.clone();
 
     Ok(Json(FullUiState {
         forecast: state.forecast.lock().await.clone(),
@@ -622,6 +637,7 @@ async fn full_state(
         paper,
         data_live_source,
         data_ws_connected,
+        data_ws_diagnostics,
     }))
 }
 
@@ -1009,6 +1025,7 @@ async fn paper_status(
     status.cmd_tx = None;
     status.data_live_source = data::current_live_data_source().await;
     status.data_ws_connected = data::polygon_ws_connected().await;
+    status.data_ws_diagnostics = data::current_ws_diagnostics().await;
     Ok(Json(status))
 }
 

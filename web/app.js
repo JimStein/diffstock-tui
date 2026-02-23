@@ -13,8 +13,10 @@ const panels = document.querySelectorAll('.tab-panel');
 let lastPortfolio = null;
 let lastPaperSeries = [];
 let latestQuoteMap = new Map();
+let latestQuoteExchangeTsMap = new Map();
 let lastQuotesAt = 0;
 let lastQuotesStampText = '--';
+let lastExchangeStampText = '--';
 const actionStatus = document.getElementById('actionStatus');
 const quotesAsOf = document.getElementById('quotesAsOf');
 const paperStartBtn = document.getElementById('paperStart');
@@ -67,6 +69,7 @@ let paperOptSaveInFlight = false;
 let paperOptSavePending = false;
 let dataSourceLastValue = '';
 let dataSourceSwitchLog = [];
+let lastWsDiagnostics = null;
 const FORECAST_BATCH_CACHE_KEY = 'diffstock:forecast-batch:v2';
 const FORECAST_META_CACHE_KEY = 'diffstock:forecast-meta:v1';
 let paperFullContext = {
@@ -233,22 +236,60 @@ const setStatus = (text, type = '') => {
 
 const renderQuotesAsOf = () => {
   if (!quotesAsOf) return;
-  quotesAsOf.textContent = `Current Price as of ${lastQuotesStampText}`;
+  quotesAsOf.textContent = `Updated: ${lastQuotesStampText} | Exchange: ${lastExchangeStampText}`;
 };
 
-const setDataSourceChip = (sourceRaw, wsConnected = false) => {
+const formatDiagTs = (ms) => {
+  if (!Number.isFinite(ms)) return '--';
+  const d = new Date(ms);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+};
+
+const WS_EVENT_TIMEOUT_MS = 120000;
+
+const getWsTimeoutSeconds = (diag) => {
+  if (!diag || typeof diag !== 'object') return null;
+  const lastData = Number(diag.last_data_event_at_ms || 0);
+  if (!Number.isFinite(lastData) || lastData <= 0) return null;
+  return Math.max(0, Math.floor((Date.now() - lastData) / 1000));
+};
+
+const classifyWsDiagnostics = (diag) => {
+  if (!diag || typeof diag !== 'object') return '无事件';
+  const lastData = Number(diag.last_data_event_at_ms || 0);
+  const lastParse = Number(diag.last_parse_failure_at_ms || 0);
+  const parseFailures = Number(diag.parse_failures_total || 0);
+  const timeoutSec = getWsTimeoutSeconds(diag);
+  if (parseFailures > 0 && (!lastData || (lastParse && lastParse >= lastData))) {
+    return '解析失败';
+  }
+  if (!lastData) {
+    return '无事件';
+  }
+  if (diag.connected && Number.isFinite(timeoutSec) && timeoutSec * 1000 >= WS_EVENT_TIMEOUT_MS) {
+    return '超时(120s)';
+  }
+  return '正常';
+};
+
+const setDataSourceChip = (sourceRaw, wsConnected = false, wsDiagnostics = null) => {
   const dataSourceStatusChip = document.getElementById('dataSourceStatusChip');
   const dataSourceChip = document.getElementById('dataSourceChip');
   const dataSourceDot = document.getElementById('dataSourceDot');
   if (!dataSourceChip) return;
+  if (wsDiagnostics && typeof wsDiagnostics === 'object') {
+    lastWsDiagnostics = wsDiagnostics;
+  }
 
   const source = String(sourceRaw || '').trim();
+  const wsStatus = classifyWsDiagnostics(lastWsDiagnostics);
   if (!source || source.toLowerCase() === 'unknown') {
     dataSourceChip.textContent = 'Data: --';
     if (dataSourceDot) dataSourceDot.style.background = 'var(--muted-2)';
     if (dataSourceStatusChip) {
       const wsHint = wsConnected ? ' | WS connected (not freshest)' : '';
-      dataSourceStatusChip.title = `Data source status${wsHint} (click to view source switch log)`;
+      dataSourceStatusChip.title = `Data source status${wsHint} | WS: ${wsStatus} (click for details)`;
     }
     return;
   }
@@ -271,11 +312,13 @@ const setDataSourceChip = (sourceRaw, wsConnected = false) => {
   if (dataSourceStatusChip) {
     const latest = dataSourceSwitchLog.length ? dataSourceSwitchLog[0] : '--';
     const wsHint = wsConnected && !lower.includes('polygon-ws') ? ' | WS connected (not freshest)' : '';
-    dataSourceStatusChip.title = `Data source status: ${label}${wsHint} | latest switch: ${latest} | click to view full log`;
+    dataSourceStatusChip.title = `Data source status: ${label}${wsHint} | WS: ${wsStatus} | latest switch: ${latest} | click for details`;
   }
 
   if (dataSourceDot) {
-    if (lower.includes('polygon-ws')) {
+    if (wsStatus === '超时(120s)') {
+      dataSourceDot.style.background = 'var(--down)';
+    } else if (lower.includes('polygon-ws')) {
       dataSourceDot.style.background = 'var(--up)';
     } else if (lower.includes('polygon')) {
       dataSourceDot.style.background = 'var(--accent)';
@@ -288,10 +331,65 @@ const setDataSourceChip = (sourceRaw, wsConnected = false) => {
 };
 
 const showDataSourceLogPopup = () => {
+  const old = document.getElementById('dataDiagOverlay');
+  if (old) old.remove();
+
   const lines = dataSourceSwitchLog.length
     ? dataSourceSwitchLog.map((line, idx) => `${idx + 1}. ${line}`).join('\n')
     : 'No source switch history yet.';
-  alert(`Data Source Switch Log\n\n${lines}`);
+
+  const diag = lastWsDiagnostics || {};
+  const wsStatus = classifyWsDiagnostics(diag);
+  const timeoutSec = getWsTimeoutSeconds(diag);
+  const timeoutText = !Number.isFinite(timeoutSec)
+    ? '无数据事件'
+    : (timeoutSec * 1000 >= WS_EVENT_TIMEOUT_MS ? `已超时 (${timeoutSec}s)` : `未超时 (${timeoutSec}s)`);
+  const esc = (v) => String(v ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+  const overlay = document.createElement('div');
+  overlay.id = 'dataDiagOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.22);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;z-index:9999;';
+
+  const panel = document.createElement('div');
+  panel.style.cssText = 'width:min(880px,92vw);max-height:82vh;overflow:auto;background:color-mix(in srgb, var(--card) 78%, transparent);border:1px solid color-mix(in srgb, var(--line) 85%, transparent);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);box-shadow:0 8px 28px rgba(0,0,0,.24);border-radius:12px;padding:14px;';
+  panel.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <strong>Data Source Diagnostics</strong>
+      <button id="dataDiagCloseBtn" style="background:var(--card-2);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:4px 10px;cursor:pointer;">Close</button>
+    </div>
+    <div style="margin-bottom:10px;color:var(--muted);white-space:pre-wrap;">${esc(lines)}</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+      <thead>
+        <tr>
+          <th style="text-align:left;border-bottom:1px solid var(--line);padding:6px;">Item</th>
+          <th style="text-align:left;border-bottom:1px solid var(--line);padding:6px;">Value</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">WS状态</td><td style="padding:6px;border-bottom:1px solid var(--line);">${esc(wsStatus)}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">WS连接</td><td style="padding:6px;border-bottom:1px solid var(--line);">${diag.connected ? '已连接' : '未连接'}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">文本消息总数</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(diag.text_messages_total || 0)}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">状态消息总数</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(diag.status_messages_total || 0)}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">数据事件总数</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(diag.data_events_total || 0)}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">有效价格事件</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(diag.accepted_price_events_total || 0)}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">无效价格事件</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(diag.dropped_invalid_price_events_total || 0)}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">解析失败次数</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(diag.parse_failures_total || 0)}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">超时判定窗口</td><td style="padding:6px;border-bottom:1px solid var(--line);">120s</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">超时状态</td><td style="padding:6px;border-bottom:1px solid var(--line);">${esc(timeoutText)}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近文本消息</td><td style="padding:6px;border-bottom:1px solid var(--line);">${formatDiagTs(Number(diag.last_text_at_ms || 0))}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近数据事件</td><td style="padding:6px;border-bottom:1px solid var(--line);">${formatDiagTs(Number(diag.last_data_event_at_ms || 0))}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近解析失败</td><td style="padding:6px;border-bottom:1px solid var(--line);">${formatDiagTs(Number(diag.last_parse_failure_at_ms || 0))}</td></tr>
+        <tr><td style="padding:6px;">最近解析错误</td><td style="padding:6px;white-space:pre-wrap;">${esc(diag.last_parse_failure || '--')}</td></tr>
+      </tbody>
+    </table>
+  `;
+
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+
+  panel.querySelector('#dataDiagCloseBtn')?.addEventListener('click', () => overlay.remove());
+  overlay.addEventListener('click', (ev) => {
+    if (ev.target === overlay) overlay.remove();
+  });
 };
 
 document.getElementById('dataSourceStatusChip')?.addEventListener('click', showDataSourceLogPopup);
@@ -2006,8 +2104,17 @@ const refreshRealtimeQuotes = async () => {
       body: JSON.stringify({ symbols }),
     });
     latestQuoteMap = new Map(Object.entries(q.prices || {}));
+    latestQuoteExchangeTsMap = new Map(Object.entries(q.exchange_ts_ms || {}));
+    const exchangeMsValues = Object.values(q.exchange_ts_ms || {})
+      .map((v) => Number(v))
+      .filter((v) => Number.isFinite(v) && v > 0);
     const now = new Date();
     lastQuotesStampText = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+    if (exchangeMsValues.length > 0) {
+      const maxExchangeTs = Math.max(...exchangeMsValues);
+      const exchangeDate = new Date(maxExchangeTs);
+      lastExchangeStampText = `${String(exchangeDate.getHours()).padStart(2, '0')}:${String(exchangeDate.getMinutes()).padStart(2, '0')}:${String(exchangeDate.getSeconds()).padStart(2, '0')}`;
+    }
     renderQuotesAsOf();
   } catch {
     // Keep previous quote map silently
@@ -2199,7 +2306,7 @@ const renderChartSummaryStrip = () => {
 const refreshPaper = async () => {
   try {
     const st = await api('/api/paper/status');
-    setDataSourceChip(st?.data_live_source, !!st?.data_ws_connected);
+    setDataSourceChip(st?.data_live_source, !!st?.data_ws_connected, st?.data_ws_diagnostics);
     setPaperApplyAutoOptimizing(!!st?.auto_optimizing);
     hydratePaperOptimizationFromStatus(st);
     setPaperStatusChip(st);
@@ -2254,6 +2361,13 @@ const refreshPaper = async () => {
             ? `<span class='source-badge rt'>RT</span>`
             : `<span class='source-badge forecast'>FC</span>`;
           const updatedText = source === 'rt' ? lastQuotesStampText : '--';
+          const exchangeRawMs = Number(latestQuoteExchangeTsMap.get(sym));
+          const exchangeText = source === 'rt' && Number.isFinite(exchangeRawMs) && exchangeRawMs > 0
+            ? (() => {
+              const d = new Date(exchangeRawMs);
+              return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+            })()
+            : '--';
 
           const card = document.createElement('div');
           card.className = `rt-card ${cardMood}`;
@@ -2267,7 +2381,7 @@ const refreshPaper = async () => {
               ${hasCh ? `<span>${chSign}${ch.toFixed(3)}</span><span>(${chSign}${chPct.toFixed(3)}%)</span>` : '<span style="color:var(--muted-2)">1m: --</span>'}
             </div>
             <div class='rt-card-footer'>
-              <span class='rt-card-updated'>${updatedText}</span>
+              <span class='rt-card-updated'>Upd ${updatedText} · Exch ${exchangeText}</span>
             </div>
           `;
           rtGrid.appendChild(card);
@@ -2785,7 +2899,8 @@ const refreshBackendChip = async () => {
     const st = await api('/api/state');
     setDataSourceChip(
       st?.data_live_source || st?.paper?.data_live_source,
-      !!(st?.data_ws_connected ?? st?.paper?.data_ws_connected)
+      !!(st?.data_ws_connected ?? st?.paper?.data_ws_connected),
+      st?.data_ws_diagnostics || st?.paper?.data_ws_diagnostics || null
     );
     const backend = st?.forecast?.last_request?.compute_backend || st?.compute_backend || null;
     if (backend) {

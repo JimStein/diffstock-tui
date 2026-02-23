@@ -17,6 +17,37 @@ static POLYGON_WS_CLIENT: OnceLock<PolygonWsClient> = OnceLock::new();
 static DATA_PROVIDER_MODE: OnceLock<DataProviderMode> = OnceLock::new();
 static POLYGON_WS_CONNECTED: OnceLock<RwLock<bool>> = OnceLock::new();
 static WS_PRIORITY_RTH_ONLY: OnceLock<bool> = OnceLock::new();
+static WS_DIAGNOSTICS: OnceLock<RwLock<WsDiagnosticsState>> = OnceLock::new();
+
+#[derive(Clone, Debug, Serialize, Default)]
+pub struct WsDiagnostics {
+    pub connected: bool,
+    pub text_messages_total: u64,
+    pub status_messages_total: u64,
+    pub parse_failures_total: u64,
+    pub data_events_total: u64,
+    pub accepted_price_events_total: u64,
+    pub dropped_invalid_price_events_total: u64,
+    pub last_text_at_ms: Option<i64>,
+    pub last_data_event_at_ms: Option<i64>,
+    pub last_parse_failure_at_ms: Option<i64>,
+    pub last_parse_failure: Option<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct WsDiagnosticsState {
+    connected: bool,
+    text_messages_total: u64,
+    status_messages_total: u64,
+    parse_failures_total: u64,
+    data_events_total: u64,
+    accepted_price_events_total: u64,
+    dropped_invalid_price_events_total: u64,
+    last_text_at_ms: Option<i64>,
+    last_data_event_at_ms: Option<i64>,
+    last_parse_failure_at_ms: Option<i64>,
+    last_parse_failure: Option<String>,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DataProviderMode {
@@ -68,6 +99,14 @@ fn polygon_ws_connected_cell() -> &'static RwLock<bool> {
     POLYGON_WS_CONNECTED.get_or_init(|| RwLock::new(false))
 }
 
+fn ws_diagnostics_cell() -> &'static RwLock<WsDiagnosticsState> {
+    WS_DIAGNOSTICS.get_or_init(|| RwLock::new(WsDiagnosticsState::default()))
+}
+
+fn now_ts_ms() -> i64 {
+    Utc::now().timestamp_millis()
+}
+
 async fn set_live_data_source(source: &str) {
     let mut guard = live_data_source_cell().write().await;
     *guard = source.to_string();
@@ -79,6 +118,71 @@ pub async fn current_live_data_source() -> String {
 
 pub async fn polygon_ws_connected() -> bool {
     *polygon_ws_connected_cell().read().await
+}
+
+pub async fn current_ws_diagnostics() -> WsDiagnostics {
+    let diag = ws_diagnostics_cell().read().await;
+    WsDiagnostics {
+        connected: diag.connected,
+        text_messages_total: diag.text_messages_total,
+        status_messages_total: diag.status_messages_total,
+        parse_failures_total: diag.parse_failures_total,
+        data_events_total: diag.data_events_total,
+        accepted_price_events_total: diag.accepted_price_events_total,
+        dropped_invalid_price_events_total: diag.dropped_invalid_price_events_total,
+        last_text_at_ms: diag.last_text_at_ms,
+        last_data_event_at_ms: diag.last_data_event_at_ms,
+        last_parse_failure_at_ms: diag.last_parse_failure_at_ms,
+        last_parse_failure: diag.last_parse_failure.clone(),
+    }
+}
+
+async fn ws_diag_set_connected(connected: bool) {
+    let mut diag = ws_diagnostics_cell().write().await;
+    diag.connected = connected;
+}
+
+async fn ws_diag_mark_text() {
+    let mut diag = ws_diagnostics_cell().write().await;
+    diag.text_messages_total = diag.text_messages_total.saturating_add(1);
+    diag.last_text_at_ms = Some(now_ts_ms());
+}
+
+async fn ws_diag_mark_status(count: u64) {
+    if count == 0 {
+        return;
+    }
+    let mut diag = ws_diagnostics_cell().write().await;
+    diag.status_messages_total = diag.status_messages_total.saturating_add(count);
+}
+
+async fn ws_diag_mark_parse_failure(message: &str) {
+    let mut diag = ws_diagnostics_cell().write().await;
+    diag.parse_failures_total = diag.parse_failures_total.saturating_add(1);
+    diag.last_parse_failure_at_ms = Some(now_ts_ms());
+    diag.last_parse_failure = Some(message.to_string());
+}
+
+async fn ws_diag_mark_data_batch(accepted_count: u64, dropped_count: u64, last_accepted_ts_ms: Option<i64>) {
+    if accepted_count == 0 && dropped_count == 0 {
+        return;
+    }
+    let mut diag = ws_diagnostics_cell().write().await;
+    let total = accepted_count.saturating_add(dropped_count);
+    diag.data_events_total = diag.data_events_total.saturating_add(total);
+    if accepted_count > 0 {
+        diag.accepted_price_events_total = diag
+            .accepted_price_events_total
+            .saturating_add(accepted_count);
+        if let Some(ts) = last_accepted_ts_ms {
+            diag.last_data_event_at_ms = Some(ts);
+        }
+    }
+    if dropped_count > 0 {
+        diag.dropped_invalid_price_events_total = diag
+            .dropped_invalid_price_events_total
+            .saturating_add(dropped_count);
+    }
 }
 
 fn ws_priority_rth_only() -> bool {
@@ -126,6 +230,13 @@ struct TimedPrice {
     price: f64,
     timestamp_ms: i64,
     source: &'static str,
+}
+
+#[derive(Clone, Debug)]
+pub struct LivePrice {
+    pub price: f64,
+    pub exchange_ts_ms: i64,
+    pub source: String,
 }
 
 #[derive(Serialize)]
@@ -218,6 +329,7 @@ async fn run_polygon_ws_loop(
             let mut ws_connected = polygon_ws_connected_cell().write().await;
             *ws_connected = true;
         }
+        ws_diag_set_connected(true).await;
         let (mut write, mut read) = ws_stream.split();
 
         let auth = PolygonWsAuthReq {
@@ -282,6 +394,7 @@ async fn run_polygon_ws_loop(
                 msg = read.next() => {
                     match msg {
                         Some(Ok(Message::Text(text))) => {
+                            ws_diag_mark_text().await;
                             handle_polygon_ws_text(&text, &latest_prices).await;
                         }
                         Some(Ok(Message::Binary(_))) => {}
@@ -309,6 +422,7 @@ async fn run_polygon_ws_loop(
             let mut ws_connected = polygon_ws_connected_cell().write().await;
             *ws_connected = false;
         }
+        ws_diag_set_connected(false).await;
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     }
 }
@@ -320,23 +434,50 @@ async fn handle_polygon_ws_text(
     let parsed = serde_json::from_str::<serde_json::Value>(text);
     let value = match parsed {
         Ok(v) => v,
-        Err(_) => return,
+        Err(err) => {
+            ws_diag_mark_parse_failure(&format!("invalid json: {}", err)).await;
+            return;
+        }
     };
 
-    let mut events: Vec<PolygonWsEvent> = Vec::new();
-    if value.is_array() {
-        if let Ok(batch) = serde_json::from_value::<Vec<PolygonWsEvent>>(value) {
-            events = batch;
+    let mut status_count: u64 = 0;
+    if let Some(arr) = value.as_array() {
+        status_count = arr
+            .iter()
+            .filter(|item| item.get("status").is_some())
+            .count() as u64;
+    } else if value.get("status").is_some() {
+        status_count = 1;
+    }
+    ws_diag_mark_status(status_count).await;
+
+    let events: Vec<PolygonWsEvent> = if value.is_array() {
+        match serde_json::from_value::<Vec<PolygonWsEvent>>(value) {
+            Ok(batch) => batch,
+            Err(err) => {
+                ws_diag_mark_parse_failure(&format!("invalid event payload: {}", err)).await;
+                return;
+            }
         }
     } else if value.is_object() {
-        if let Ok(single) = serde_json::from_value::<PolygonWsEvent>(value) {
-            events.push(single);
+        match serde_json::from_value::<PolygonWsEvent>(value) {
+            Ok(single) => vec![single],
+            Err(err) => {
+                ws_diag_mark_parse_failure(&format!("invalid event payload: {}", err)).await;
+                return;
+            }
         }
-    }
+    } else {
+        return;
+    };
 
     if events.is_empty() {
         return;
     }
+
+    let mut accepted_events: u64 = 0;
+    let mut dropped_events: u64 = 0;
+    let mut last_accepted_ts_ms: Option<i64> = None;
 
     let mut latest = latest_prices.write().await;
     for event in events {
@@ -345,15 +486,20 @@ async fn handle_polygon_ws_text(
             continue;
         }
 
-        let price_opt = event.c.or(event.p);
-        if let (Some(sym), Some(price)) = (event.sym, price_opt) {
-            let ts_ms = event
-                .e
-                .or(event.s)
-                .or(event.t)
-                .map(normalize_polygon_timestamp_to_ms)
-                .unwrap_or_else(|| Utc::now().timestamp_millis());
+        let price_opt = event
+            .c
+            .or(event.p)
+            .filter(|price| valid_live_price(*price));
+        let ts_ms = event
+            .e
+            .or(event.s)
+            .or(event.t)
+            .map(normalize_polygon_timestamp_to_ms)
+            .unwrap_or_else(now_ts_ms);
 
+        if let (Some(sym), Some(price)) = (event.sym, price_opt) {
+            accepted_events = accepted_events.saturating_add(1);
+            last_accepted_ts_ms = Some(ts_ms);
             let source = if ev == Some("A") {
                 "Polygon-WS-SecondAgg"
             } else {
@@ -368,8 +514,13 @@ async fn handle_polygon_ws_text(
                     source,
                 },
             );
+        } else {
+            dropped_events = dropped_events.saturating_add(1);
         }
     }
+    drop(latest);
+
+    ws_diag_mark_data_batch(accepted_events, dropped_events, last_accepted_ts_ms).await;
 }
 
 async fn polygon_ws_subscribe_symbols(symbols: &[String]) {
@@ -507,6 +658,10 @@ fn normalize_polygon_timestamp_to_ms(ts: i64) -> i64 {
     } else {
         ts
     }
+}
+
+fn valid_live_price(price: f64) -> bool {
+    price.is_finite() && price > 0.0
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -828,6 +983,14 @@ async fn fetch_latest_price_1m_polygon(symbol: &str, api_key: &str) -> Result<Ti
         .and_then(|bars| bars.first())
         .ok_or(anyhow::anyhow!("No minute aggregate data for {} from Polygon", symbol))?;
 
+    if !valid_live_price(latest_bar.close) {
+        return Err(anyhow::anyhow!(
+            "Invalid minute aggregate price for {} from Polygon: {}",
+            symbol,
+            latest_bar.close
+        ));
+    }
+
     Ok(TimedPrice {
         price: latest_bar.close,
         timestamp_ms: latest_bar.timestamp_ms,
@@ -882,22 +1045,23 @@ async fn fetch_latest_price_snapshot_polygon(symbol: &str, api_key: &str) -> Res
 
     if let Some(last_trade) = ticker.last_trade {
         if let Some(price) = last_trade.p {
-            let ts_ms = last_trade
-                .t
-                .map(normalize_polygon_timestamp_to_ms)
-                .unwrap_or_else(|| Utc::now().timestamp_millis());
-            return Ok(TimedPrice {
-                price,
-                timestamp_ms: ts_ms,
-                source: "Polygon-Snapshot",
-            });
+            if !valid_live_price(price) {
+                return Err(anyhow::anyhow!(
+                    "Invalid snapshot lastTrade price for {} from Polygon: {}",
+                    symbol,
+                    price
+                ));
+            }
+            let ts_ms = last_trade.t.map(normalize_polygon_timestamp_to_ms).unwrap_or_else(|| Utc::now().timestamp_millis());
+            return Ok(TimedPrice { price, timestamp_ms: ts_ms, source: "Polygon-Snapshot" });
         }
     }
 
     let fallback_price = ticker
         .day
         .and_then(|d| d.c)
-        .or_else(|| ticker.prev_day.and_then(|d| d.c))
+        .filter(|p| valid_live_price(*p))
+        .or_else(|| ticker.prev_day.and_then(|d| d.c).filter(|p| valid_live_price(*p)))
         .ok_or(anyhow::anyhow!("No minute aggregate data for {} from Polygon", symbol))?;
 
     Ok(TimedPrice {
@@ -907,7 +1071,7 @@ async fn fetch_latest_price_snapshot_polygon(symbol: &str, api_key: &str) -> Res
     })
 }
 
-async fn fetch_latest_price_1m_yahoo(symbol: &str) -> Result<f64> {
+async fn fetch_latest_price_1m_yahoo(symbol: &str) -> Result<(f64, i64)> {
     let urls = [
         format!(
             "https://query1.finance.yahoo.com/v8/finance/chart/{}?interval=1m&range=1d",
@@ -952,9 +1116,15 @@ async fn fetch_latest_price_1m_yahoo(symbol: &str) -> Result<f64> {
                         .first()
                         .ok_or(anyhow::anyhow!("No quote result for {}", symbol))?;
 
-                    if let Some(latest) = quote.close.iter().rev().find_map(|value| *value) {
-                        set_live_data_source("Yfinance").await;
-                        return Ok(latest);
+                    for idx in (0..quote.close.len()).rev() {
+                        let close = quote.close.get(idx).and_then(|v| *v);
+                        let ts = result.timestamp.get(idx).copied();
+                        if let (Some(latest), Some(ts_sec)) = (close, ts) {
+                            if valid_live_price(latest) {
+                                set_live_data_source("Yfinance").await;
+                                return Ok((latest, ts_sec * 1000));
+                            }
+                        }
                     }
 
                     last_error = Some(anyhow::anyhow!("No valid 1m close for {}", symbol));
@@ -1153,6 +1323,10 @@ async fn fetch_from_api(symbol: &str, range: &str, cache_path: &std::path::Path)
 ///
 /// Uses `interval=1m` and `range=1d`, then returns the most recent non-null close.
 pub async fn fetch_latest_price_1m(symbol: &str) -> Result<f64> {
+    Ok(fetch_latest_price_with_meta(symbol).await?.price)
+}
+
+pub async fn fetch_latest_price_with_meta(symbol: &str) -> Result<LivePrice> {
     match configured_data_provider_mode() {
         DataProviderMode::Polygon => {
             let api_key = polygon_api_key()
@@ -1174,7 +1348,11 @@ pub async fn fetch_latest_price_1m(symbol: &str) -> Result<f64> {
                 if prefer_ws {
                     if let Some(price) = ws_candidate {
                         set_live_data_source(price.source).await;
-                        return Ok(price.price);
+                        return Ok(LivePrice {
+                            price: price.price,
+                            exchange_ts_ms: price.timestamp_ms,
+                            source: price.source.to_string(),
+                        });
                     }
                 } else if let Some(price) = ws_candidate {
                     candidates.push(price);
@@ -1196,7 +1374,11 @@ pub async fn fetch_latest_price_1m(symbol: &str) -> Result<f64> {
 
                 if let Some(best) = candidates.into_iter().max_by_key(|c| c.timestamp_ms) {
                     set_live_data_source(best.source).await;
-                    return Ok(best.price);
+                    return Ok(LivePrice {
+                        price: best.price,
+                        exchange_ts_ms: best.timestamp_ms,
+                        source: best.source.to_string(),
+                    });
                 }
 
                 if round < rounds {
@@ -1218,7 +1400,14 @@ pub async fn fetch_latest_price_1m(symbol: &str) -> Result<f64> {
                 )
             }));
         }
-        DataProviderMode::Yfinance => fetch_latest_price_1m_yahoo(symbol).await,
+        DataProviderMode::Yfinance => {
+            let (price, ts_ms) = fetch_latest_price_1m_yahoo(symbol).await?;
+            Ok(LivePrice {
+                price,
+                exchange_ts_ms: ts_ms,
+                source: "Yfinance".to_string(),
+            })
+        }
     }
 }
 
