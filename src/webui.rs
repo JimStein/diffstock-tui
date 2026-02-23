@@ -540,6 +540,37 @@ async fn forecast_batch(
         });
     }
 
+    let forecast_snapshot = {
+        let mut fs = state.forecast.lock().await;
+        if let Some(first) = responses.first().cloned() {
+            fs.last_result = Some(first);
+        }
+        for row in &responses {
+            let req_row = ForecastRequestState {
+                symbol: row.symbol.clone(),
+                horizon,
+                simulations,
+                compute_backend: format!("{:?}", backend).to_lowercase(),
+            };
+            fs.cached_results.insert(
+                row.symbol.clone(),
+                CachedForecastEntry {
+                    request: req_row,
+                    result: row.clone(),
+                    forecasted_at: row
+                        .forecasted_at
+                        .clone()
+                        .unwrap_or_else(|| chrono::Local::now().to_rfc3339()),
+                },
+            );
+        }
+        fs.clone()
+    };
+
+    if let Err(err) = save_forecast_state(&forecast_snapshot) {
+        warn!("failed to persist forecast cache: {}", err);
+    }
+
     Ok(Json(responses))
 }
 
