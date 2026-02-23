@@ -2812,7 +2812,9 @@ const restoreState = async () => {
       restoredFromBackendForecast = true;
     }
 
-    const restoredFromLocalBatch = restoreForecastBatchCache();
+    const restoredFromLocalBatch = restoredFromBackendForecast
+      ? false
+      : restoreForecastBatchCache();
     let restoredByRefetch = false;
     if (!restoredFromLocalBatch) {
       const meta = loadForecastMetaCache();
