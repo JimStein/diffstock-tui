@@ -72,6 +72,12 @@ pub struct LiveFetchDiagnostics {
     pub last_prefetch_mode: String,
     pub last_prefetch_at_ms: Option<i64>,
     pub last_prefetch_error: Option<String>,
+    pub last_history_symbol: Option<String>,
+    pub last_history_range: Option<String>,
+    pub last_history_source: Option<String>,
+    pub last_history_at_ms: Option<i64>,
+    pub last_history_error: Option<String>,
+    pub history_source_log: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -86,6 +92,12 @@ struct LiveFetchDiagnosticsState {
     last_prefetch_mode: String,
     last_prefetch_at_ms: Option<i64>,
     last_prefetch_error: Option<String>,
+    last_history_symbol: Option<String>,
+    last_history_range: Option<String>,
+    last_history_source: Option<String>,
+    last_history_at_ms: Option<i64>,
+    last_history_error: Option<String>,
+    history_source_log: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -209,6 +221,33 @@ pub async fn current_live_fetch_diagnostics() -> LiveFetchDiagnostics {
         last_prefetch_mode: diag.last_prefetch_mode.clone(),
         last_prefetch_at_ms: diag.last_prefetch_at_ms,
         last_prefetch_error: diag.last_prefetch_error.clone(),
+        last_history_symbol: diag.last_history_symbol.clone(),
+        last_history_range: diag.last_history_range.clone(),
+        last_history_source: diag.last_history_source.clone(),
+        last_history_at_ms: diag.last_history_at_ms,
+        last_history_error: diag.last_history_error.clone(),
+        history_source_log: diag.history_source_log.clone(),
+    }
+}
+
+async fn mark_history_source(symbol: &str, range: &str, source: &str, error: Option<&str>) {
+    let now_ms = now_ts_ms();
+    let mut diag = live_fetch_diagnostics_cell().write().await;
+    diag.last_history_symbol = Some(symbol.to_string());
+    diag.last_history_range = Some(range.to_string());
+    diag.last_history_source = Some(source.to_string());
+    diag.last_history_at_ms = Some(now_ms);
+    diag.last_history_error = error.map(|v| v.to_string());
+
+    let ts = chrono::Local::now().format("%H:%M:%S").to_string();
+    let line = if let Some(err) = error {
+        format!("{} {} {} -> {} (error: {})", ts, symbol, range, source, err)
+    } else {
+        format!("{} {} {} -> {}", ts, symbol, range, source)
+    };
+    diag.history_source_log.insert(0, line);
+    if diag.history_source_log.len() > 10 {
+        diag.history_source_log.truncate(10);
     }
 }
 
@@ -942,9 +981,10 @@ async fn fetch_polygon_aggs(symbol: &str, range: &str, api_key: &str) -> Result<
         api_key
     );
 
-    let attempts = polygon_retry_attempts();
+    let attempts = 5usize;
     let client = reqwest::Client::new();
     let mut last_err: Option<anyhow::Error> = None;
+    let mut saw_non_timeout_error = false;
 
     for attempt in 1..=attempts {
         match client
@@ -956,11 +996,26 @@ async fn fetch_polygon_aggs(symbol: &str, range: &str, api_key: &str) -> Result<
             Ok(resp) => match resp.error_for_status() {
                 Ok(ok_resp) => match ok_resp.json::<PolygonAggsResponse>().await {
                     Ok(parsed) => return Ok(parsed),
-                    Err(err) => last_err = Some(err.into()),
+                    Err(err) => {
+                        if !err.is_timeout() {
+                            saw_non_timeout_error = true;
+                        }
+                        last_err = Some(err.into());
+                    }
                 },
-                Err(err) => last_err = Some(err.into()),
+                Err(err) => {
+                    if !err.is_timeout() {
+                        saw_non_timeout_error = true;
+                    }
+                    last_err = Some(err.into());
+                }
             },
-            Err(err) => last_err = Some(err.into()),
+            Err(err) => {
+                if !err.is_timeout() {
+                    saw_non_timeout_error = true;
+                }
+                last_err = Some(err.into());
+            }
         }
 
         if attempt < attempts {
@@ -972,6 +1027,14 @@ async fn fetch_polygon_aggs(symbol: &str, range: &str, api_key: &str) -> Result<
             );
             polygon_retry_sleep(attempt).await;
         }
+    }
+
+    if !saw_non_timeout_error {
+        return Err(anyhow::anyhow!(
+            "Polygon history request timed out after {} attempts for {}",
+            attempts,
+            symbol
+        ));
     }
 
     Err(last_err.unwrap_or_else(|| anyhow::anyhow!("Polygon history fetch failed for {}", symbol)))
@@ -1043,9 +1106,9 @@ fn polygon_aggs_to_stock_data(symbol: &str, response: &PolygonAggsResponse) -> R
 }
 
 async fn fetch_polygon_range_with_cache(symbol: &str, range: &str, api_key: &str) -> Result<StockData> {
-    let cache_dir = std::path::Path::new(".cache");
+    let cache_dir = crate::config::project_root_path().join(".cache");
     if !cache_dir.exists() {
-        std::fs::create_dir(cache_dir)?;
+        std::fs::create_dir_all(&cache_dir)?;
     }
 
     let cache_file = cache_dir.join(format!("{}_{}_polygon.json", symbol, range));
@@ -1335,15 +1398,27 @@ pub async fn fetch_range_with_source(symbol: &str, range: &str) -> Result<(Stock
     if matches!(configured_data_provider_mode(), DataProviderMode::Polygon) {
         let api_key = polygon_api_key()
             .ok_or(anyhow::anyhow!("DIFFSTOCK_DATA_PROVIDER=polygon but POLYGON_API_KEY is missing"))?;
-        let data = fetch_polygon_range_with_cache(symbol, range, &api_key)
-            .await
-            .map_err(|e| anyhow::anyhow!("Polygon range fetch failed for {}: {}", symbol, e))?;
-        return Ok((data, "Polygon-History".to_string()));
+        match fetch_polygon_range_with_cache(symbol, range, &api_key).await {
+            Ok(data) => return Ok((data, "Polygon-History".to_string())),
+            Err(err) => {
+                let err_text = err.to_string();
+                if err_text.contains("Polygon history request timed out after") {
+                    warn!(
+                        "Polygon history timeout for {} (range={}): {}. Falling back to Yahoo history.",
+                        symbol,
+                        range,
+                        err
+                    );
+                } else {
+                    return Err(anyhow::anyhow!("Polygon range fetch failed for {}: {}", symbol, err));
+                }
+            }
+        }
     }
 
-    let cache_dir = std::path::Path::new(".cache");
+    let cache_dir = crate::config::project_root_path().join(".cache");
     if !cache_dir.exists() {
-        std::fs::create_dir(cache_dir)?;
+        std::fs::create_dir_all(&cache_dir)?;
     }
     
     let cache_file = cache_dir.join(format!("{}_{}.json", symbol, range));
