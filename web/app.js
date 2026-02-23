@@ -514,6 +514,9 @@ const showDataSourceLogPopup = () => {
   const missingSymbolsText = Array.isArray(lastQuoteMissingSymbols) && lastQuoteMissingSymbols.length
     ? lastQuoteMissingSymbols.join(', ')
     : '--';
+  const historySourceLogText = Array.isArray(fetchDiag.history_source_log) && fetchDiag.history_source_log.length
+    ? fetchDiag.history_source_log.join('\n')
+    : '--';
   const esc = (v) => String(v ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
   const overlay = document.createElement('div');
   overlay.id = 'dataDiagOverlay';
@@ -562,6 +565,12 @@ const showDataSourceLogPopup = () => {
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近批量耗时</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(fetchDiag.last_prefetch_duration_ms || 0)} ms</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近批量时间</td><td style="padding:6px;border-bottom:1px solid var(--line);">${formatDiagTs(Number(fetchDiag.last_prefetch_at_ms || 0))}</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近批量错误</td><td style="padding:6px;border-bottom:1px solid var(--line);white-space:pre-wrap;">${esc(fetchDiag.last_prefetch_error || '--')}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近历史symbol</td><td style="padding:6px;border-bottom:1px solid var(--line);">${esc(fetchDiag.last_history_symbol || '--')}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近历史range</td><td style="padding:6px;border-bottom:1px solid var(--line);">${esc(fetchDiag.last_history_range || '--')}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近历史来源</td><td style="padding:6px;border-bottom:1px solid var(--line);">${esc(fetchDiag.last_history_source || '--')}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近历史时间</td><td style="padding:6px;border-bottom:1px solid var(--line);">${formatDiagTs(Number(fetchDiag.last_history_at_ms || 0))}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近历史错误</td><td style="padding:6px;border-bottom:1px solid var(--line);white-space:pre-wrap;">${esc(fetchDiag.last_history_error || '--')}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">历史来源日志(最近10条)</td><td style="padding:6px;border-bottom:1px solid var(--line);white-space:pre-wrap;">${esc(historySourceLogText)}</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近请求symbol数</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(lastQuoteRequestSymbols.length || 0)}</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近缺失symbol数</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(lastQuoteMissingSymbols.length || 0)}</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近缺失symbols</td><td style="padding:6px;border-bottom:1px solid var(--line);white-space:pre-wrap;">${esc(missingSymbolsText)}</td></tr>

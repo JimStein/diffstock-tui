@@ -1399,7 +1399,10 @@ pub async fn fetch_range_with_source(symbol: &str, range: &str) -> Result<(Stock
         let api_key = polygon_api_key()
             .ok_or(anyhow::anyhow!("DIFFSTOCK_DATA_PROVIDER=polygon but POLYGON_API_KEY is missing"))?;
         match fetch_polygon_range_with_cache(symbol, range, &api_key).await {
-            Ok(data) => return Ok((data, "Polygon-History".to_string())),
+            Ok(data) => {
+                mark_history_source(symbol, range, "Polygon-History", None).await;
+                return Ok((data, "Polygon-History".to_string()));
+            }
             Err(err) => {
                 let err_text = err.to_string();
                 if err_text.contains("Polygon history request timed out after") {
@@ -1409,7 +1412,9 @@ pub async fn fetch_range_with_source(symbol: &str, range: &str) -> Result<(Stock
                         range,
                         err
                     );
+                    mark_history_source(symbol, range, "Yfinance-History(timeout-fallback)", Some(&err_text)).await;
                 } else {
+                    mark_history_source(symbol, range, "Polygon-History(failed)", Some(&err_text)).await;
                     return Err(anyhow::anyhow!("Polygon range fetch failed for {}: {}", symbol, err));
                 }
             }
@@ -1471,6 +1476,7 @@ pub async fn fetch_range_with_source(symbol: &str, range: &str) -> Result<(Stock
         symbol: symbol.to_uppercase(),
         history,
     };
+    mark_history_source(symbol, range, "Yfinance-History", None).await;
     set_live_data_source("Yfinance-History").await;
     Ok((data, "Yfinance-History".to_string()))
 }
