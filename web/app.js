@@ -71,6 +71,10 @@ let dataSourceLastValue = '';
 let dataSourceSwitchLog = [];
 let lastWsDiagnostics = null;
 let lastLiveFetchDiagnostics = null;
+let wsTimeoutCount = 0;
+let wsTimeoutActive = false;
+let wsLastTimeoutAtMs = 0;
+let wsLastTimeoutError = '--';
 const FORECAST_BATCH_CACHE_KEY = 'diffstock:forecast-batch:v2';
 const FORECAST_META_CACHE_KEY = 'diffstock:forecast-meta:v1';
 let paperFullContext = {
@@ -368,6 +372,19 @@ const classifyWsDiagnostics = (diag) => {
   return '正常';
 };
 
+const updateWsTimeoutState = (diag, wsStatus) => {
+  const timeoutSec = getWsTimeoutSeconds(diag);
+  const isTimeout = wsStatus === '超时(120s)';
+  if (isTimeout && !wsTimeoutActive) {
+    wsTimeoutCount += 1;
+    wsLastTimeoutAtMs = Date.now();
+    wsLastTimeoutError = Number.isFinite(timeoutSec)
+      ? `WS事件超时(${timeoutSec}s >= 120s)`
+      : 'WS事件超时(无有效数据时间戳)';
+  }
+  wsTimeoutActive = isTimeout;
+};
+
 const setDataSourceChip = (sourceRaw, wsConnected = false, wsDiagnostics = null, liveFetchDiagnostics = null) => {
   const dataSourceStatusChip = document.getElementById('dataSourceStatusChip');
   const dataSourceChip = document.getElementById('dataSourceChip');
@@ -382,6 +399,7 @@ const setDataSourceChip = (sourceRaw, wsConnected = false, wsDiagnostics = null,
 
   const source = String(sourceRaw || '').trim();
   const wsStatus = classifyWsDiagnostics(lastWsDiagnostics);
+  updateWsTimeoutState(lastWsDiagnostics, wsStatus);
   if (!source || source.toLowerCase() === 'unknown') {
     dataSourceChip.textContent = 'Data: --';
     if (dataSourceDot) dataSourceDot.style.background = 'var(--muted-2)';
@@ -439,6 +457,7 @@ const showDataSourceLogPopup = () => {
   const diag = lastWsDiagnostics || {};
   const fetchDiag = lastLiveFetchDiagnostics || {};
   const wsStatus = classifyWsDiagnostics(diag);
+  updateWsTimeoutState(diag, wsStatus);
   const timeoutSec = getWsTimeoutSeconds(diag);
   const timeoutText = !Number.isFinite(timeoutSec)
     ? '无数据事件'
@@ -473,7 +492,10 @@ const showDataSourceLogPopup = () => {
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">无效价格事件</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(diag.dropped_invalid_price_events_total || 0)}</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">解析失败次数</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(diag.parse_failures_total || 0)}</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">超时判定窗口</td><td style="padding:6px;border-bottom:1px solid var(--line);">120s</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">WS超时次数</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(wsTimeoutCount || 0)}</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">超时状态</td><td style="padding:6px;border-bottom:1px solid var(--line);">${esc(timeoutText)}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近超时发生</td><td style="padding:6px;border-bottom:1px solid var(--line);">${formatDiagTs(Number(wsLastTimeoutAtMs || 0))}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近超时错误</td><td style="padding:6px;border-bottom:1px solid var(--line);white-space:pre-wrap;">${esc(wsLastTimeoutError || '--')}</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">批量拉取总次数</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(fetchDiag.prefetch_calls_total || 0)}</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">批量失败退化次数</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(fetchDiag.prefetch_fallback_total || 0)}</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近批量symbol数</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(fetchDiag.last_prefetch_symbol_count || 0)}</td></tr>
