@@ -127,6 +127,100 @@ const loadForecastMetaCache = () => {
   }
 };
 
+const getForecastTimestampMs = (result) => {
+  if (!result || typeof result !== 'object') return 0;
+  const raw = String(result.forecasted_at || '').trim();
+  if (!raw) return 0;
+  const ms = new Date(raw).getTime();
+  return Number.isFinite(ms) ? ms : 0;
+};
+
+const loadLocalForecastBatchPayload = () => {
+  try {
+    const raw = localStorage.getItem(FORECAST_BATCH_CACHE_KEY);
+    if (!raw) return null;
+    const payload = JSON.parse(raw);
+    if (!payload || typeof payload !== 'object') return null;
+    const rows = Array.isArray(payload.results) ? payload.results : [];
+    if (rows.length === 0) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+};
+
+const mergeForecastBatchFromLocalByTimestamp = (requestState = null) => {
+  const payload = loadLocalForecastBatchPayload();
+  if (!payload) return false;
+
+  const localMap = new Map();
+  for (const row of payload.results || []) {
+    if (!row || !row.symbol || !row.data) continue;
+    localMap.set(String(row.symbol).toUpperCase(), row.data);
+  }
+  if (localMap.size === 0) return false;
+
+  let changed = false;
+
+  if (forecastBatchResults.size === 0) {
+    forecastBatchResults = new Map(localMap);
+    changed = true;
+  } else {
+    for (const [symbol, localData] of localMap.entries()) {
+      const existing = forecastBatchResults.get(symbol);
+      if (!existing) {
+        forecastBatchResults.set(symbol, localData);
+        changed = true;
+        continue;
+      }
+      const existingTs = getForecastTimestampMs(existing);
+      const localTs = getForecastTimestampMs(localData);
+      if (localTs > existingTs) {
+        forecastBatchResults.set(symbol, localData);
+        changed = true;
+      }
+    }
+  }
+
+  if (forecastBatchResults.size === 0) return false;
+
+  const reqSymbol = requestState?.symbol ? String(requestState.symbol).toUpperCase() : null;
+  const preferredLocal = payload.selectedSymbol ? String(payload.selectedSymbol).toUpperCase() : null;
+  const first = forecastBatchResults.keys().next().value;
+  if (reqSymbol && forecastBatchResults.has(reqSymbol)) {
+    forecastSelectedSymbol = reqSymbol;
+  } else if (forecastSelectedSymbol && forecastBatchResults.has(forecastSelectedSymbol)) {
+    // keep existing selection
+  } else if (preferredLocal && forecastBatchResults.has(preferredLocal)) {
+    forecastSelectedSymbol = preferredLocal;
+  } else {
+    forecastSelectedSymbol = first;
+  }
+
+  const allSymbols = Array.from(forecastBatchResults.keys());
+  const inputEl = document.getElementById('fSymbol');
+  const horizonEl = document.getElementById('fHorizon');
+  const simsEl = document.getElementById('fSims');
+  if (inputEl) inputEl.value = allSymbols.join(',');
+  if (horizonEl && Number.isFinite(Number(requestState?.horizon || payload.horizon))) {
+    horizonEl.value = Number(requestState?.horizon || payload.horizon);
+  }
+  if (simsEl && Number.isFinite(Number(requestState?.simulations || payload.simulations))) {
+    simsEl.value = Number(requestState?.simulations || payload.simulations);
+  }
+  syncQuickChips();
+
+  const selectedData = forecastBatchResults.get(forecastSelectedSymbol);
+  if (selectedData) {
+    applyForecastDataToChart(selectedData);
+    renderFcKpiCards(selectedData);
+  }
+  renderBatchGrid();
+  saveForecastBatchCache();
+
+  return changed;
+};
+
 const restoreForecastBatchCache = () => {
   try {
     const raw = localStorage.getItem(FORECAST_BATCH_CACHE_KEY);
@@ -2812,11 +2906,9 @@ const restoreState = async () => {
       restoredFromBackendForecast = true;
     }
 
-    const restoredFromLocalBatch = restoredFromBackendForecast
-      ? false
-      : restoreForecastBatchCache();
+    const restoredFromLocalBatch = mergeForecastBatchFromLocalByTimestamp(state?.forecast?.last_request);
     let restoredByRefetch = false;
-    if (!restoredFromLocalBatch) {
+    if (forecastBatchResults.size === 0 && !restoredFromLocalBatch) {
       const meta = loadForecastMetaCache();
       const rawSymbols = String(meta?.symbolsInput || '').trim();
       const symbols = [...new Set(rawSymbols.toUpperCase().split(',').map(s => s.trim()).filter(Boolean))];
