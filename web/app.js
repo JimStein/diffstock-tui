@@ -75,6 +75,7 @@ let wsTimeoutCount = 0;
 let wsTimeoutActive = false;
 let wsLastTimeoutAtMs = 0;
 let wsLastTimeoutError = '--';
+let wsNoTimeoutStreak = 0;
 const FORECAST_BATCH_CACHE_KEY = 'diffstock:forecast-batch:v2';
 const FORECAST_META_CACHE_KEY = 'diffstock:forecast-meta:v1';
 let paperFullContext = {
@@ -346,6 +347,7 @@ const formatDiagTs = (ms) => {
 };
 
 const WS_EVENT_TIMEOUT_MS = 120000;
+const WS_RECOVERY_FETCH_WINDOW_MS = 120000;
 
 const getWsTimeoutSeconds = (diag) => {
   if (!diag || typeof diag !== 'object') return null;
@@ -382,7 +384,36 @@ const updateWsTimeoutState = (diag, wsStatus) => {
       ? `WS事件超时(${timeoutSec}s >= 120s)`
       : 'WS事件超时(无有效数据时间戳)';
   }
+  if (isTimeout) {
+    wsNoTimeoutStreak = 0;
+    wsTimeoutActive = true;
+    return;
+  }
+  if (wsTimeoutCount > 0) {
+    wsNoTimeoutStreak = Math.min(3, wsNoTimeoutStreak + 1);
+  }
   wsTimeoutActive = isTimeout;
+};
+
+const hasRecentLiveFetchRecovery = (fetchDiag) => {
+  if (!fetchDiag || typeof fetchDiag !== 'object') return false;
+  const atMs = Number(fetchDiag.last_prefetch_at_ms || 0);
+  const success = Number(fetchDiag.last_prefetch_success_count || 0);
+  if (!Number.isFinite(atMs) || atMs <= 0 || success <= 0) return false;
+  return (Date.now() - atMs) <= WS_RECOVERY_FETCH_WINDOW_MS;
+};
+
+const classifyEffectiveWsStatus = (rawWsStatus, fetchDiag) => {
+  if (rawWsStatus !== '超时(120s)') return rawWsStatus;
+  if (hasRecentLiveFetchRecovery(fetchDiag)) return '正常(回补)';
+  return rawWsStatus;
+};
+
+const getWsRecoveryPhase = (wsStatus) => {
+  if (wsStatus === '超时(120s)') return 'timeout';
+  if (wsTimeoutCount > 0 && wsNoTimeoutStreak >= 3) return 'stable';
+  if (wsTimeoutCount > 0) return 'recovering';
+  return 'normal';
 };
 
 const setDataSourceChip = (sourceRaw, wsConnected = false, wsDiagnostics = null, liveFetchDiagnostics = null) => {
@@ -398,14 +429,15 @@ const setDataSourceChip = (sourceRaw, wsConnected = false, wsDiagnostics = null,
   }
 
   const source = String(sourceRaw || '').trim();
-  const wsStatus = classifyWsDiagnostics(lastWsDiagnostics);
+  const wsStatusRaw = classifyWsDiagnostics(lastWsDiagnostics);
+  const wsStatus = classifyEffectiveWsStatus(wsStatusRaw, lastLiveFetchDiagnostics);
   updateWsTimeoutState(lastWsDiagnostics, wsStatus);
   if (!source || source.toLowerCase() === 'unknown') {
     dataSourceChip.textContent = 'Data: --';
     if (dataSourceDot) dataSourceDot.style.background = 'var(--muted-2)';
     if (dataSourceStatusChip) {
       const wsHint = wsConnected ? ' | WS connected (not freshest)' : '';
-      dataSourceStatusChip.title = `Data source status${wsHint} | WS: ${wsStatus} (click for details)`;
+      dataSourceStatusChip.title = `Data source status${wsHint} | WS: ${wsStatus} | WS原始: ${wsStatusRaw} (click for details)`;
     }
     return;
   }
@@ -428,12 +460,17 @@ const setDataSourceChip = (sourceRaw, wsConnected = false, wsDiagnostics = null,
   if (dataSourceStatusChip) {
     const latest = dataSourceSwitchLog.length ? dataSourceSwitchLog[0] : '--';
     const wsHint = wsConnected && !lower.includes('polygon-ws') ? ' | WS connected (not freshest)' : '';
-    dataSourceStatusChip.title = `Data source status: ${label}${wsHint} | WS: ${wsStatus} | latest switch: ${latest} | click for details`;
+    dataSourceStatusChip.title = `Data source status: ${label}${wsHint} | WS: ${wsStatus} | WS原始: ${wsStatusRaw} | WS恢复计数: ${wsNoTimeoutStreak}/3 | latest switch: ${latest} | click for details`;
   }
 
   if (dataSourceDot) {
-    if (wsStatus === '超时(120s)') {
+    const phase = getWsRecoveryPhase(wsStatus);
+    if (phase === 'timeout') {
       dataSourceDot.style.background = 'var(--down)';
+    } else if (phase === 'recovering') {
+      dataSourceDot.style.background = 'var(--gold)';
+    } else if (phase === 'stable') {
+      dataSourceDot.style.background = 'var(--up)';
     } else if (lower.includes('polygon-ws')) {
       dataSourceDot.style.background = 'var(--up)';
     } else if (lower.includes('polygon')) {
@@ -456,8 +493,9 @@ const showDataSourceLogPopup = () => {
 
   const diag = lastWsDiagnostics || {};
   const fetchDiag = lastLiveFetchDiagnostics || {};
-  const wsStatus = classifyWsDiagnostics(diag);
-  updateWsTimeoutState(diag, wsStatus);
+  const wsStatusRaw = classifyWsDiagnostics(diag);
+  const wsStatus = classifyEffectiveWsStatus(wsStatusRaw, fetchDiag);
+  const wsPhase = getWsRecoveryPhase(wsStatus);
   const timeoutSec = getWsTimeoutSeconds(diag);
   const timeoutText = !Number.isFinite(timeoutSec)
     ? '无数据事件'
@@ -484,6 +522,7 @@ const showDataSourceLogPopup = () => {
       </thead>
       <tbody>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">WS状态</td><td style="padding:6px;border-bottom:1px solid var(--line);">${esc(wsStatus)}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">WS原始状态</td><td style="padding:6px;border-bottom:1px solid var(--line);">${esc(wsStatusRaw)}</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">WS连接</td><td style="padding:6px;border-bottom:1px solid var(--line);">${diag.connected ? '已连接' : '未连接'}</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">文本消息总数</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(diag.text_messages_total || 0)}</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">状态消息总数</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(diag.status_messages_total || 0)}</td></tr>
@@ -493,6 +532,8 @@ const showDataSourceLogPopup = () => {
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">解析失败次数</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(diag.parse_failures_total || 0)}</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">超时判定窗口</td><td style="padding:6px;border-bottom:1px solid var(--line);">120s</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">WS超时次数</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(wsTimeoutCount || 0)}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">WS恢复阶段</td><td style="padding:6px;border-bottom:1px solid var(--line);">${esc(wsPhase === 'timeout' ? '超时' : wsPhase === 'recovering' ? '恢复中(黄点)' : wsPhase === 'stable' ? '稳定(绿点)' : '正常')}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">连续无超时计数</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(wsNoTimeoutStreak || 0)} / 3</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">超时状态</td><td style="padding:6px;border-bottom:1px solid var(--line);">${esc(timeoutText)}</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近超时发生</td><td style="padding:6px;border-bottom:1px solid var(--line);">${formatDiagTs(Number(wsLastTimeoutAtMs || 0))}</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近超时错误</td><td style="padding:6px;border-bottom:1px solid var(--line);white-space:pre-wrap;">${esc(wsLastTimeoutError || '--')}</td></tr>
