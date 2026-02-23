@@ -634,7 +634,7 @@ async fn quotes(
         return Err(api_err(StatusCode::BAD_REQUEST, "symbols cannot be empty"));
     }
 
-    let quotes = data::fetch_latest_prices_with_meta_prefetch(&symbols)
+    let quotes = data::fetch_latest_prices_with_meta_ws_only(&symbols)
         .await
         .map_err(internal_err)?;
 

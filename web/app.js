@@ -14,6 +14,9 @@ let lastPortfolio = null;
 let lastPaperSeries = [];
 let latestQuoteMap = new Map();
 let latestQuoteExchangeTsMap = new Map();
+let lastQuoteRequestSymbols = [];
+let lastQuoteMissingSymbols = [];
+let lastQuoteMissingUpdatedAtMs = 0;
 let lastQuotesAt = 0;
 let lastQuotesStampText = '--';
 let lastExchangeStampText = '--';
@@ -336,7 +339,9 @@ const setStatus = (text, type = '') => {
 
 const renderQuotesAsOf = () => {
   if (!quotesAsOf) return;
-  quotesAsOf.textContent = `Updated: ${lastQuotesStampText} | Exchange: ${lastExchangeStampText}`;
+  const missingCount = Array.isArray(lastQuoteMissingSymbols) ? lastQuoteMissingSymbols.length : 0;
+  const missingText = missingCount > 0 ? ` | Missing: ${missingCount}` : '';
+  quotesAsOf.textContent = `Updated: ${lastQuotesStampText} | Exchange: ${lastExchangeStampText}${missingText}`;
 };
 
 const formatDiagTs = (ms) => {
@@ -351,21 +356,27 @@ const WS_RECOVERY_FETCH_WINDOW_MS = 120000;
 
 const getWsTimeoutSeconds = (diag) => {
   if (!diag || typeof diag !== 'object') return null;
+  const lastText = Number(diag.last_text_at_ms || 0);
   const lastData = Number(diag.last_data_event_at_ms || 0);
-  if (!Number.isFinite(lastData) || lastData <= 0) return null;
-  return Math.max(0, Math.floor((Date.now() - lastData) / 1000));
+  const lastSeen = Number.isFinite(lastText) && lastText > 0
+    ? lastText
+    : (Number.isFinite(lastData) && lastData > 0 ? lastData : 0);
+  if (!Number.isFinite(lastSeen) || lastSeen <= 0) return null;
+  return Math.max(0, Math.floor((Date.now() - lastSeen) / 1000));
 };
 
 const classifyWsDiagnostics = (diag) => {
   if (!diag || typeof diag !== 'object') return '无事件';
+  const lastText = Number(diag.last_text_at_ms || 0);
+  const hasText = Number.isFinite(lastText) && lastText > 0;
   const lastData = Number(diag.last_data_event_at_ms || 0);
   const lastParse = Number(diag.last_parse_failure_at_ms || 0);
   const parseFailures = Number(diag.parse_failures_total || 0);
   const timeoutSec = getWsTimeoutSeconds(diag);
-  if (parseFailures > 0 && (!lastData || (lastParse && lastParse >= lastData))) {
+  if (parseFailures > 0 && (!hasText || (lastParse && lastParse >= lastText))) {
     return '解析失败';
   }
-  if (!lastData) {
+  if (!hasText) {
     return '无事件';
   }
   if (diag.connected && Number.isFinite(timeoutSec) && timeoutSec * 1000 >= WS_EVENT_TIMEOUT_MS) {
@@ -500,6 +511,9 @@ const showDataSourceLogPopup = () => {
   const timeoutText = !Number.isFinite(timeoutSec)
     ? '无数据事件'
     : (timeoutSec * 1000 >= WS_EVENT_TIMEOUT_MS ? `已超时 (${timeoutSec}s)` : `未超时 (${timeoutSec}s)`);
+  const missingSymbolsText = Array.isArray(lastQuoteMissingSymbols) && lastQuoteMissingSymbols.length
+    ? lastQuoteMissingSymbols.join(', ')
+    : '--';
   const esc = (v) => String(v ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
   const overlay = document.createElement('div');
   overlay.id = 'dataDiagOverlay';
@@ -524,6 +538,8 @@ const showDataSourceLogPopup = () => {
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">WS状态</td><td style="padding:6px;border-bottom:1px solid var(--line);">${esc(wsStatus)}</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">WS原始状态</td><td style="padding:6px;border-bottom:1px solid var(--line);">${esc(wsStatusRaw)}</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">WS连接</td><td style="padding:6px;border-bottom:1px solid var(--line);">${diag.connected ? '已连接' : '未连接'}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">后端超时累计</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(diag.timeout_strikes_total || 0)}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">后端Failover状态</td><td style="padding:6px;border-bottom:1px solid var(--line);">${diag.failover_active ? '已切到REST/Snapshot' : 'WS优先'}</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">文本消息总数</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(diag.text_messages_total || 0)}</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">状态消息总数</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(diag.status_messages_total || 0)}</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">数据事件总数</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(diag.data_events_total || 0)}</td></tr>
@@ -546,6 +562,10 @@ const showDataSourceLogPopup = () => {
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近批量耗时</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(fetchDiag.last_prefetch_duration_ms || 0)} ms</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近批量时间</td><td style="padding:6px;border-bottom:1px solid var(--line);">${formatDiagTs(Number(fetchDiag.last_prefetch_at_ms || 0))}</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近批量错误</td><td style="padding:6px;border-bottom:1px solid var(--line);white-space:pre-wrap;">${esc(fetchDiag.last_prefetch_error || '--')}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近请求symbol数</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(lastQuoteRequestSymbols.length || 0)}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近缺失symbol数</td><td style="padding:6px;border-bottom:1px solid var(--line);">${Number(lastQuoteMissingSymbols.length || 0)}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近缺失symbols</td><td style="padding:6px;border-bottom:1px solid var(--line);white-space:pre-wrap;">${esc(missingSymbolsText)}</td></tr>
+        <tr><td style="padding:6px;border-bottom:1px solid var(--line);">缺失统计更新时间</td><td style="padding:6px;border-bottom:1px solid var(--line);">${formatDiagTs(Number(lastQuoteMissingUpdatedAtMs || 0))}</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近文本消息</td><td style="padding:6px;border-bottom:1px solid var(--line);">${formatDiagTs(Number(diag.last_text_at_ms || 0))}</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近数据事件</td><td style="padding:6px;border-bottom:1px solid var(--line);">${formatDiagTs(Number(diag.last_data_event_at_ms || 0))}</td></tr>
         <tr><td style="padding:6px;border-bottom:1px solid var(--line);">最近解析失败</td><td style="padding:6px;border-bottom:1px solid var(--line);">${formatDiagTs(Number(diag.last_parse_failure_at_ms || 0))}</td></tr>
@@ -2274,17 +2294,37 @@ const refreshRealtimeQuotes = async () => {
       method: 'POST',
       body: JSON.stringify({ symbols }),
     });
-    latestQuoteMap = new Map(Object.entries(q.prices || {}));
-    latestQuoteExchangeTsMap = new Map(Object.entries(q.exchange_ts_ms || {}));
-    const exchangeMsValues = Object.values(q.exchange_ts_ms || {})
-      .map((v) => Number(v))
-      .filter((v) => Number.isFinite(v) && v > 0);
-    const now = new Date();
-    lastQuotesStampText = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
-    if (exchangeMsValues.length > 0) {
-      const maxExchangeTs = Math.max(...exchangeMsValues);
-      const exchangeDate = new Date(maxExchangeTs);
-      lastExchangeStampText = `${String(exchangeDate.getHours()).padStart(2, '0')}:${String(exchangeDate.getMinutes()).padStart(2, '0')}:${String(exchangeDate.getSeconds()).padStart(2, '0')}`;
+    const incomingPrices = Object.entries(q.prices || {});
+    const returnedSymbols = new Set(incomingPrices.map(([symbol]) => String(symbol || '').toUpperCase()));
+    lastQuoteRequestSymbols = symbols.slice();
+    lastQuoteMissingSymbols = symbols.filter((symbol) => !returnedSymbols.has(symbol));
+    lastQuoteMissingUpdatedAtMs = Date.now();
+    let hasNewerQuote = false;
+    for (const [symbol, priceRaw] of incomingPrices) {
+      const price = Number(priceRaw);
+      if (!Number.isFinite(price)) continue;
+      const newTs = Number((q.exchange_ts_ms || {})[symbol]);
+      const prevTs = Number(latestQuoteExchangeTsMap.get(symbol));
+      if (!Number.isFinite(prevTs) || (Number.isFinite(newTs) && newTs > prevTs)) {
+        hasNewerQuote = true;
+      }
+      latestQuoteMap.set(symbol, price);
+      if (Number.isFinite(newTs) && newTs > 0) {
+        latestQuoteExchangeTsMap.set(symbol, newTs);
+      }
+    }
+
+    if (hasNewerQuote) {
+      const now = new Date();
+      lastQuotesStampText = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+      const exchangeMsValues = Array.from(latestQuoteExchangeTsMap.values())
+        .map((v) => Number(v))
+        .filter((v) => Number.isFinite(v) && v > 0);
+      if (exchangeMsValues.length > 0) {
+        const maxExchangeTs = Math.max(...exchangeMsValues);
+        const exchangeDate = new Date(maxExchangeTs);
+        lastExchangeStampText = `${String(exchangeDate.getHours()).padStart(2, '0')}:${String(exchangeDate.getMinutes()).padStart(2, '0')}:${String(exchangeDate.getSeconds()).padStart(2, '0')}`;
+      }
     }
     renderQuotesAsOf();
   } catch {

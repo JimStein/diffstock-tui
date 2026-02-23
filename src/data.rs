@@ -20,10 +20,19 @@ static POLYGON_WS_CONNECTED: OnceLock<RwLock<bool>> = OnceLock::new();
 static WS_PRIORITY_RTH_ONLY: OnceLock<bool> = OnceLock::new();
 static WS_DIAGNOSTICS: OnceLock<RwLock<WsDiagnosticsState>> = OnceLock::new();
 static LIVE_FETCH_DIAGNOSTICS: OnceLock<RwLock<LiveFetchDiagnosticsState>> = OnceLock::new();
+static WS_TIMEOUT_STRIKES: OnceLock<RwLock<u32>> = OnceLock::new();
+static WS_FAILOVER_ACTIVE: OnceLock<RwLock<bool>> = OnceLock::new();
+static WS_LAST_STRIKE_AT_MS: OnceLock<RwLock<i64>> = OnceLock::new();
+
+const WS_TIMEOUT_WINDOW_MS: i64 = 120_000;
+const WS_TIMEOUT_FAILOVER_THRESHOLD: u32 = 3;
+const WS_STRIKE_COOLDOWN_MS: i64 = 30_000;
 
 #[derive(Clone, Debug, Serialize, Default)]
 pub struct WsDiagnostics {
     pub connected: bool,
+    pub timeout_strikes_total: u32,
+    pub failover_active: bool,
     pub text_messages_total: u64,
     pub status_messages_total: u64,
     pub parse_failures_total: u64,
@@ -137,6 +146,18 @@ fn live_fetch_diagnostics_cell() -> &'static RwLock<LiveFetchDiagnosticsState> {
     LIVE_FETCH_DIAGNOSTICS.get_or_init(|| RwLock::new(LiveFetchDiagnosticsState::default()))
 }
 
+fn ws_timeout_strikes_cell() -> &'static RwLock<u32> {
+    WS_TIMEOUT_STRIKES.get_or_init(|| RwLock::new(0))
+}
+
+fn ws_failover_active_cell() -> &'static RwLock<bool> {
+    WS_FAILOVER_ACTIVE.get_or_init(|| RwLock::new(false))
+}
+
+fn ws_last_strike_at_ms_cell() -> &'static RwLock<i64> {
+    WS_LAST_STRIKE_AT_MS.get_or_init(|| RwLock::new(0))
+}
+
 fn now_ts_ms() -> i64 {
     Utc::now().timestamp_millis()
 }
@@ -155,9 +176,13 @@ pub async fn polygon_ws_connected() -> bool {
 }
 
 pub async fn current_ws_diagnostics() -> WsDiagnostics {
+    let timeout_strikes_total = *ws_timeout_strikes_cell().read().await;
+    let failover_active = *ws_failover_active_cell().read().await;
     let diag = ws_diagnostics_cell().read().await;
     WsDiagnostics {
         connected: diag.connected,
+        timeout_strikes_total,
+        failover_active,
         text_messages_total: diag.text_messages_total,
         status_messages_total: diag.status_messages_total,
         parse_failures_total: diag.parse_failures_total,
@@ -252,7 +277,7 @@ async fn ws_diag_mark_parse_failure(message: &str) {
     diag.last_parse_failure = Some(message.to_string());
 }
 
-async fn ws_diag_mark_data_batch(accepted_count: u64, dropped_count: u64, last_accepted_ts_ms: Option<i64>) {
+async fn ws_diag_mark_data_batch(accepted_count: u64, dropped_count: u64, _last_accepted_ts_ms: Option<i64>) {
     if accepted_count == 0 && dropped_count == 0 {
         return;
     }
@@ -263,15 +288,76 @@ async fn ws_diag_mark_data_batch(accepted_count: u64, dropped_count: u64, last_a
         diag.accepted_price_events_total = diag
             .accepted_price_events_total
             .saturating_add(accepted_count);
-        if let Some(ts) = last_accepted_ts_ms {
-            diag.last_data_event_at_ms = Some(ts);
-        }
+        diag.last_data_event_at_ms = Some(now_ts_ms());
     }
     if dropped_count > 0 {
         diag.dropped_invalid_price_events_total = diag
             .dropped_invalid_price_events_total
             .saturating_add(dropped_count);
     }
+}
+
+async fn ws_recently_healthy() -> bool {
+    let diag = ws_diagnostics_cell().read().await;
+    if !diag.connected {
+        return false;
+    }
+    let Some(last_ms) = diag.last_text_at_ms else {
+        return false;
+    };
+    now_ts_ms().saturating_sub(last_ms) <= WS_TIMEOUT_WINDOW_MS
+}
+
+async fn ws_record_timeout_strike_if_needed() -> u32 {
+    let now = now_ts_ms();
+    {
+        let last = ws_last_strike_at_ms_cell().read().await;
+        if now.saturating_sub(*last) < WS_STRIKE_COOLDOWN_MS {
+            return *ws_timeout_strikes_cell().read().await;
+        }
+    }
+
+    {
+        let mut last = ws_last_strike_at_ms_cell().write().await;
+        *last = now;
+    }
+
+    let mut strikes = ws_timeout_strikes_cell().write().await;
+    *strikes = strikes.saturating_add(1);
+    let current = *strikes;
+    drop(strikes);
+
+    if current >= WS_TIMEOUT_FAILOVER_THRESHOLD {
+        let mut failover = ws_failover_active_cell().write().await;
+        if !*failover {
+            warn!(
+                "Polygon WS timeout strikes reached {}/{}; switching temporary live-source failover to Snapshot",
+                current,
+                WS_TIMEOUT_FAILOVER_THRESHOLD
+            );
+        }
+        *failover = true;
+    }
+
+    current
+}
+
+async fn ws_reset_timeout_state(reason: &str) {
+    {
+        let mut strikes = ws_timeout_strikes_cell().write().await;
+        *strikes = 0;
+    }
+    {
+        let mut failover = ws_failover_active_cell().write().await;
+        if *failover {
+            info!("Polygon WS recovered ({}); switching live-source back to WS", reason);
+        }
+        *failover = false;
+    }
+}
+
+async fn ws_failover_active() -> bool {
+    *ws_failover_active_cell().read().await
 }
 
 fn ws_priority_rth_only() -> bool {
@@ -1544,6 +1630,45 @@ pub async fn fetch_latest_prices_1m_prefetch(symbols: &[String]) -> Result<HashM
     Ok(prices)
 }
 
+pub async fn fetch_latest_prices_with_meta_ws_only(
+    symbols: &[String],
+) -> Result<HashMap<String, LivePrice>> {
+    let mut normalized: Vec<String> = symbols
+        .iter()
+        .map(|s| s.trim().to_uppercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+    normalized.sort();
+    normalized.dedup();
+
+    if normalized.is_empty() {
+        return Err(anyhow::anyhow!("ws-only live quotes failed: symbol list is empty"));
+    }
+
+    if !matches!(configured_data_provider_mode(), DataProviderMode::Polygon) {
+        return fetch_latest_prices_with_meta_prefetch(&normalized).await;
+    }
+
+    polygon_ws_subscribe_symbols(&normalized).await;
+
+    let mut out: HashMap<String, LivePrice> = HashMap::new();
+    for symbol in &normalized {
+        if let Some(price) = polygon_ws_latest_price(symbol).await {
+            set_live_data_source(price.source).await;
+            out.insert(
+                symbol.clone(),
+                LivePrice {
+                    price: price.price,
+                    exchange_ts_ms: price.timestamp_ms,
+                    source: price.source.to_string(),
+                },
+            );
+        }
+    }
+
+    Ok(out)
+}
+
 pub async fn fetch_latest_price_with_meta(symbol: &str) -> Result<LivePrice> {
     match configured_data_provider_mode() {
         DataProviderMode::Polygon => {
@@ -1559,11 +1684,48 @@ pub async fn fetch_latest_price_with_meta(symbol: &str) -> Result<LivePrice> {
             let rounds = polygon_retry_attempts();
             let mut last_error: Option<anyhow::Error> = None;
 
+            let ws_candidate0 = polygon_ws_latest_price(symbol).await;
+            let ws_healthy_now = ws_recently_healthy().await;
+            if ws_healthy_now {
+                ws_reset_timeout_state("recent ws event").await;
+            } else {
+                let strikes = ws_record_timeout_strike_if_needed().await;
+                warn!(
+                    "Polygon WS appears stale for {}; timeout strikes={}/{}",
+                    symbol,
+                    strikes,
+                    WS_TIMEOUT_FAILOVER_THRESHOLD
+                );
+            }
+
+            if prefer_ws && !ws_failover_active().await {
+                if let Some(price) = ws_candidate0 {
+                    set_live_data_source(price.source).await;
+                    return Ok(LivePrice {
+                        price: price.price,
+                        exchange_ts_ms: price.timestamp_ms,
+                        source: price.source.to_string(),
+                    });
+                }
+            }
+
             for round in 1..=rounds {
                 let mut candidates: Vec<TimedPrice> = Vec::new();
 
                 let ws_candidate = polygon_ws_latest_price(symbol).await;
-                if prefer_ws {
+                if ws_failover_active().await {
+                    if let Some(price) = ws_candidate {
+                        if ws_recently_healthy().await {
+                            ws_reset_timeout_state("ws data available during failover").await;
+                            set_live_data_source(price.source).await;
+                            return Ok(LivePrice {
+                                price: price.price,
+                                exchange_ts_ms: price.timestamp_ms,
+                                source: price.source.to_string(),
+                            });
+                        }
+                    }
+                } else if prefer_ws {
                     if let Some(price) = ws_candidate {
                         set_live_data_source(price.source).await;
                         return Ok(LivePrice {
