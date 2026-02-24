@@ -24,30 +24,29 @@
     "IAU",
     "MSFT",
     "NVDA",
-    "QQQ",
     "TLT",
     "URA"
   ],
   "targets": [
     {
       "symbol": "COPX",
-      "target_weight": 0.23820790834262728
+      "target_weight": 0.14089745712558935
     },
     {
       "symbol": "ETN",
-      "target_weight": 0.17514398025112482
+      "target_weight": 0.2160365265712769
     },
     {
       "symbol": "IAU",
-      "target_weight": 0.3170458159800281
+      "target_weight": 0.39961114363525546
     },
     {
       "symbol": "TLT",
-      "target_weight": 0.029621863186280427
+      "target_weight": 0.2106609595631055
     },
     {
       "symbol": "URA",
-      "target_weight": 0.03281085313588632
+      "target_weight": 0.03279391310477269
     }
   ],
   "analyses": [
@@ -386,7 +385,7 @@
           "quantity": 21.0,
           "price": 89.09,
           "notional": 1870.89,
-          "fee": 0.9354450000000001
+          "fee": 0.935445
         },
         {
           "timestamp": "2026-02-22T23:30:57.467800400+08:00",
@@ -413,7 +412,7 @@
           "quantity": 6.0,
           "price": 54.36,
           "notional": 326.15999999999997,
-          "fee": 0.16307999999999997
+          "fee": 0.16307999999999995
         }
       ]
     },
@@ -423,6 +422,173 @@
       "portfolio_value_after": 80749.17048555984,
       "cash_after": 17323.120485559826,
       "trades": []
+    },
+    {
+      "timestamp": "2026-02-23T23:30:43.903998800+08:00",
+      "portfolio_value_before": 81062.66548555982,
+      "portfolio_value_after": 81058.05982305981,
+      "cash_after": 18239.58982305982,
+      "trades": [
+        {
+          "timestamp": "2026-02-23T23:30:43.903998800+08:00",
+          "symbol": "URA",
+          "side": "SELL",
+          "quantity": 48.0,
+          "price": 53.565,
+          "notional": 2571.12,
+          "fee": 1.28556
+        },
+        {
+          "timestamp": "2026-02-23T23:30:43.903998800+08:00",
+          "symbol": "COPX",
+          "side": "SELL",
+          "quantity": 19.0,
+          "price": 90.12,
+          "notional": 1712.2800000000002,
+          "fee": 0.8561400000000001
+        },
+        {
+          "timestamp": "2026-02-23T23:30:43.903998800+08:00",
+          "symbol": "ETN",
+          "side": "BUY",
+          "quantity": 3.0,
+          "price": 363.085,
+          "notional": 1089.2549999999999,
+          "fee": 0.5446274999999999
+        },
+        {
+          "timestamp": "2026-02-23T23:30:43.903998800+08:00",
+          "symbol": "IAU",
+          "side": "SELL",
+          "quantity": 8.0,
+          "price": 97.85,
+          "notional": 782.8,
+          "fee": 0.39139999999999997
+        },
+        {
+          "timestamp": "2026-02-23T23:30:43.903998800+08:00",
+          "symbol": "NVDA",
+          "side": "BUY",
+          "quantity": 8.0,
+          "price": 191.52,
+          "notional": 1532.16,
+          "fee": 0.7660800000000001
+        },
+        {
+          "timestamp": "2026-02-23T23:30:43.903998800+08:00",
+          "symbol": "TLT",
+          "side": "BUY",
+          "quantity": 17.0,
+          "price": 89.63,
+          "notional": 1523.71,
+          "fee": 0.7618550000000001
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-02-24T02:30:43.448546900+08:00",
+      "portfolio_value_before": 81106.47582305982,
+      "portfolio_value_after": 81106.42678055982,
+      "cash_after": 18337.62578055982,
+      "trades": [
+        {
+          "timestamp": "2026-02-24T02:30:43.448546900+08:00",
+          "symbol": "IAU",
+          "side": "SELL",
+          "quantity": 1.0,
+          "price": 98.085,
+          "notional": 98.085,
+          "fee": 0.049042499999999996
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-02-24T23:30:40.591952300+08:00",
+      "portfolio_value_before": 81536.40578055983,
+      "portfolio_value_after": 81519.18871055984,
+      "cash_after": 218.7487105598234,
+      "trades": [
+        {
+          "timestamp": "2026-02-24T23:30:40.591952300+08:00",
+          "symbol": "NVDA",
+          "side": "SELL",
+          "quantity": 8.0,
+          "price": 190.8,
+          "notional": 1526.4,
+          "fee": 0.7632000000000001
+        },
+        {
+          "timestamp": "2026-02-24T23:30:40.591952300+08:00",
+          "symbol": "COPX",
+          "side": "SELL",
+          "quantity": 72.0,
+          "price": 92.22,
+          "notional": 6639.84,
+          "fee": 3.31992
+        },
+        {
+          "timestamp": "2026-02-24T23:30:40.591952300+08:00",
+          "symbol": "ETN",
+          "side": "BUY",
+          "quantity": 7.0,
+          "price": 372.12,
+          "notional": 2604.84,
+          "fee": 1.3024200000000001
+        },
+        {
+          "timestamp": "2026-02-24T23:30:40.591952300+08:00",
+          "symbol": "IAU",
+          "side": "BUY",
+          "quantity": 80.0,
+          "price": 96.68,
+          "notional": 7734.400000000001,
+          "fee": 3.8672000000000004
+        },
+        {
+          "timestamp": "2026-02-24T23:30:40.591952300+08:00",
+          "symbol": "TLT",
+          "side": "BUY",
+          "quantity": 148.0,
+          "price": 89.9,
+          "notional": 13305.2,
+          "fee": 6.6526000000000005
+        },
+        {
+          "timestamp": "2026-02-24T23:30:40.591952300+08:00",
+          "symbol": "URA",
+          "side": "BUY",
+          "quantity": 49.0,
+          "price": 53.54,
+          "notional": 2623.46,
+          "fee": 1.31173
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-02-25T02:30:40.240670900+08:00",
+      "portfolio_value_before": 82089.72921055982,
+      "portfolio_value_after": 82089.63741805982,
+      "cash_after": 222.4019180598234,
+      "trades": [
+        {
+          "timestamp": "2026-02-25T02:30:40.240670900+08:00",
+          "symbol": "COPX",
+          "side": "SELL",
+          "quantity": 1.0,
+          "price": 93.665,
+          "notional": 93.665,
+          "fee": 0.046832500000000006
+        },
+        {
+          "timestamp": "2026-02-25T02:30:40.240670900+08:00",
+          "symbol": "TLT",
+          "side": "BUY",
+          "quantity": 1.0,
+          "price": 89.92,
+          "notional": 89.92,
+          "fee": 0.04496
+        }
+      ]
     }
   ]
 }

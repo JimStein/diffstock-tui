@@ -20,6 +20,15 @@ use std::io;
 use tracing::{info, error, warn};
 use tracing_subscriber::EnvFilter;
 
+fn load_env_file() {
+    let project_env = config::project_root_path().join(".env");
+    if project_env.exists() {
+        let _ = dotenvy::from_path(&project_env);
+    } else {
+        let _ = dotenvy::dotenv();
+    }
+}
+
 #[derive(Clone, Debug, ValueEnum)]
 enum GuiRendererChoice {
     Auto,
@@ -125,7 +134,7 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    let _ = dotenvy::dotenv();
+    load_env_file();
     config::init_cpu_parallelism();
 
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {

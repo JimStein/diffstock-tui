@@ -831,10 +831,10 @@ async fn start_paper(
                 } => {
                     ps.strategy_file = Some(strategy_file);
                     ps.runtime_file = Some(runtime_file);
-                    ps.logs.push("Paper trading started".to_string());
+                    ps.logs.push(runtime_log_with_ts("Paper trading started"));
                 }
                 paper_trading::PaperEvent::Info(msg) => {
-                    ps.logs.push(msg);
+                    ps.logs.push(runtime_log_with_ts(msg));
                 }
                 paper_trading::PaperEvent::AutoOptimizationStatus { running } => {
                     ps.auto_optimizing = running;
@@ -858,7 +858,7 @@ async fn start_paper(
                         .collect();
                 }
                 paper_trading::PaperEvent::Warning(msg) => {
-                    ps.logs.push(format!("WARNING: {}", msg));
+                    ps.logs.push(runtime_log_with_ts(format!("WARNING: {}", msg)));
                 }
                 paper_trading::PaperEvent::Analysis(a) => {
                     ps.trade_history.extend(a.trades.clone());
@@ -877,7 +877,7 @@ async fn start_paper(
                     }
                 }
                 paper_trading::PaperEvent::Error(msg) => {
-                    ps.logs.push(format!("Error: {}", msg));
+                    ps.logs.push(runtime_log_with_ts(format!("Error: {}", msg)));
                     ps.running = false;
                     ps.paused = false;
                     ps.auto_optimizing = false;
@@ -900,9 +900,9 @@ async fn start_paper(
         ps.auto_optimizing = false;
         ps.cmd_tx = None;
         if let Err(err) = res {
-            ps.logs.push(format!("Error: {}", err));
+            ps.logs.push(runtime_log_with_ts(format!("Error: {}", err)));
         } else {
-            ps.logs.push("Paper trading stopped".to_string());
+            ps.logs.push(runtime_log_with_ts("Paper trading stopped"));
         }
     });
 
@@ -973,10 +973,10 @@ async fn load_paper(
                     ps.strategy_file = Some(strategy_file);
                     ps.runtime_file = Some(runtime_file);
                     ps.logs
-                        .push("Paper history loaded · Restored holdings and running".to_string());
+                        .push(runtime_log_with_ts("Paper history loaded · Restored holdings and running"));
                 }
                 paper_trading::PaperEvent::Info(msg) => {
-                    ps.logs.push(msg);
+                    ps.logs.push(runtime_log_with_ts(msg));
                 }
                 paper_trading::PaperEvent::AutoOptimizationStatus { running } => {
                     ps.auto_optimizing = running;
@@ -1000,7 +1000,7 @@ async fn load_paper(
                         .collect();
                 }
                 paper_trading::PaperEvent::Warning(msg) => {
-                    ps.logs.push(format!("WARNING: {}", msg));
+                    ps.logs.push(runtime_log_with_ts(format!("WARNING: {}", msg)));
                 }
                 paper_trading::PaperEvent::Analysis(a) => {
                     ps.trade_history.extend(a.trades.clone());
@@ -1019,7 +1019,7 @@ async fn load_paper(
                     }
                 }
                 paper_trading::PaperEvent::Error(msg) => {
-                    ps.logs.push(format!("Error: {}", msg));
+                    ps.logs.push(runtime_log_with_ts(format!("Error: {}", msg)));
                     ps.running = false;
                     ps.paused = false;
                     ps.auto_optimizing = false;
@@ -1048,9 +1048,9 @@ async fn load_paper(
         ps.auto_optimizing = false;
         ps.cmd_tx = None;
         if let Err(err) = res {
-            ps.logs.push(format!("Error: {}", err));
+            ps.logs.push(runtime_log_with_ts(format!("Error: {}", err)));
         } else {
-            ps.logs.push("Paper trading stopped".to_string());
+            ps.logs.push(runtime_log_with_ts("Paper trading stopped"));
         }
     });
 
@@ -1420,6 +1420,10 @@ fn api_err(status: StatusCode, message: &str) -> (StatusCode, Json<ApiError>) {
             error: message.to_string(),
         }),
     )
+}
+
+fn runtime_log_with_ts(message: impl AsRef<str>) -> String {
+    format!("[{}] {}", chrono::Local::now().format("%H:%M:%S"), message.as_ref())
 }
 
 fn internal_err<E: std::fmt::Display>(err: E) -> (StatusCode, Json<ApiError>) {

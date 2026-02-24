@@ -572,18 +572,23 @@ pub async fn run_paper_trading(
             let scheduled_due = should_optimize_today && !already_optimized_today && now_time >= opt_time;
 
             if scheduled_due || retry_due {
+                let candidate_pool_text = runtime.strategy_log.candidate_symbols.join(", ");
                 let _ = event_tx
                     .send(PaperEvent::AutoOptimizationStatus { running: true })
                     .await;
                 let _ = event_tx
                     .send(PaperEvent::Info(if retry_due {
                         format!(
-                            "Scheduled optimization retry started ({}/{})",
+                            "Scheduled optimization retry started ({}/{}) in candidate pool [{}]",
                             auto_opt_retry_count.saturating_add(1),
-                            AUTO_OPT_MAX_RETRIES
+                            AUTO_OPT_MAX_RETRIES,
+                            candidate_pool_text
                         )
                     } else {
-                        "Scheduled optimization started".to_string()
+                        format!(
+                            "Scheduled optimization started in candidate pool [{}]",
+                            candidate_pool_text
+                        )
                     }))
                     .await;
                 match optimize_targets_from_candidate_pool(&mut runtime, config.optimization_backend).await {
@@ -1033,18 +1038,23 @@ pub async fn run_paper_trading_from_strategy_file(
             let scheduled_due = should_optimize_today && !already_optimized_today && now_time >= opt_time;
 
             if scheduled_due || retry_due {
+                let candidate_pool_text = runtime.strategy_log.candidate_symbols.join(", ");
                 let _ = event_tx
                     .send(PaperEvent::AutoOptimizationStatus { running: true })
                     .await;
                 let _ = event_tx
                     .send(PaperEvent::Info(if retry_due {
                         format!(
-                            "Scheduled optimization retry started ({}/{})",
+                            "Scheduled optimization retry started ({}/{}) in candidate pool [{}]",
                             auto_opt_retry_count.saturating_add(1),
-                            AUTO_OPT_MAX_RETRIES
+                            AUTO_OPT_MAX_RETRIES,
+                            candidate_pool_text
                         )
                     } else {
-                        "Scheduled optimization started".to_string()
+                        format!(
+                            "Scheduled optimization started in candidate pool [{}]",
+                            candidate_pool_text
+                        )
                     }))
                     .await;
                 match optimize_targets_from_candidate_pool(&mut runtime, cfg.optimization_backend).await {

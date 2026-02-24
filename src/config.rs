@@ -65,14 +65,22 @@ pub fn resolve_compute_backend(requested: ComputeBackend, context: &str) -> Comp
 
 pub fn find_directml_onnx_model_path() -> Option<std::path::PathBuf> {
     let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    let project_root = project_root_path();
 
     if let Ok(path) = std::env::var("DIFFSTOCK_ORT_MODEL") {
         let trimmed = path.trim();
         if !trimmed.is_empty() {
-            candidates.push(std::path::PathBuf::from(trimmed));
+            let env_path = std::path::PathBuf::from(trimmed);
+            candidates.push(env_path.clone());
+            if !env_path.is_absolute() {
+                candidates.push(project_root.join(env_path));
+            }
         }
     }
 
+    candidates.push(project_root.join("model_weights.onnx"));
+    candidates.push(project_root.join("model.onnx"));
+    candidates.push(project_root.join("onnx/model.onnx"));
     candidates.push(std::path::PathBuf::from("model_weights.onnx"));
     candidates.push(std::path::PathBuf::from("model.onnx"));
     candidates.push(std::path::PathBuf::from("onnx/model.onnx"));

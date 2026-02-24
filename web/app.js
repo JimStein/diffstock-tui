@@ -2141,7 +2141,9 @@ const fillHoldingsTable = (paperStatus) => {
   }
 
   if (holdingsPoolBadge) {
-    const candidateSymbols = Array.from(targetMap.keys());
+    const candidateSymbols = Array.from(new Set((paperStatus?.candidate_symbols || [])
+      .map((s) => String(s || '').toUpperCase())
+      .filter(Boolean)));
     const holdingCount = holdingsSet.size;
     const poolCount = candidateSymbols.length;
     const inPoolHeldCount = candidateSymbols.filter(symbol => holdingsSet.has(symbol)).length;
