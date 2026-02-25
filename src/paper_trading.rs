@@ -500,6 +500,25 @@ pub async fn run_paper_trading(
                         match fetch_prices_for_symbols(&runtime_symbols).await {
                             Ok(prices) => {
                                 current_prices = prices;
+                                let (reused_symbols, missing_symbols) =
+                                    reconcile_runtime_prices_with_previous(&runtime, &mut current_prices);
+                                if !reused_symbols.is_empty() {
+                                    let _ = event_tx
+                                        .send(PaperEvent::Warning(format!(
+                                            "Apply-now reused previous valid price for: [{}]",
+                                            reused_symbols.join(",")
+                                        )))
+                                        .await;
+                                }
+                                if !missing_symbols.is_empty() {
+                                    let _ = event_tx
+                                        .send(PaperEvent::Warning(format!(
+                                            "Apply-now rebalance skipped: missing live and previous price for: [{}]",
+                                            missing_symbols.join(",")
+                                        )))
+                                        .await;
+                                    continue;
+                                }
                                 let analysis = run_analysis_once(&mut runtime, &current_prices)?;
                                 let _ = event_tx.send(PaperEvent::Analysis(analysis)).await;
                                 let minute_snapshot = build_minute_snapshot(&mut runtime, &current_prices)?;
@@ -538,6 +557,26 @@ pub async fn run_paper_trading(
                     .await;
                 continue;
             }
+        }
+
+        let (reused_symbols, missing_symbols) =
+            reconcile_runtime_prices_with_previous(&runtime, &mut current_prices);
+        if !reused_symbols.is_empty() {
+            let _ = event_tx
+                .send(PaperEvent::Warning(format!(
+                    "Minute fallback reused previous valid price for: [{}]",
+                    reused_symbols.join(",")
+                )))
+                .await;
+        }
+        if !missing_symbols.is_empty() {
+            let _ = event_tx
+                .send(PaperEvent::Warning(format!(
+                    "Skipping minute: missing live and previous price for: [{}]",
+                    missing_symbols.join(",")
+                )))
+                .await;
+            continue;
         }
 
         let minute_snapshot = build_minute_snapshot(&mut runtime, &current_prices)?;
@@ -966,6 +1005,25 @@ pub async fn run_paper_trading_from_strategy_file(
                         match fetch_prices_for_symbols(&runtime_symbols).await {
                             Ok(prices) => {
                                 current_prices = prices;
+                                let (reused_symbols, missing_symbols) =
+                                    reconcile_runtime_prices_with_previous(&runtime, &mut current_prices);
+                                if !reused_symbols.is_empty() {
+                                    let _ = event_tx
+                                        .send(PaperEvent::Warning(format!(
+                                            "Apply-now reused previous valid price for: [{}]",
+                                            reused_symbols.join(",")
+                                        )))
+                                        .await;
+                                }
+                                if !missing_symbols.is_empty() {
+                                    let _ = event_tx
+                                        .send(PaperEvent::Warning(format!(
+                                            "Apply-now rebalance skipped: missing live and previous price for: [{}]",
+                                            missing_symbols.join(",")
+                                        )))
+                                        .await;
+                                    continue;
+                                }
                                 let analysis = run_analysis_once(&mut runtime, &current_prices)?;
                                 let _ = event_tx.send(PaperEvent::Analysis(analysis)).await;
                                 let minute_snapshot = build_minute_snapshot(&mut runtime, &current_prices)?;
@@ -1004,6 +1062,26 @@ pub async fn run_paper_trading_from_strategy_file(
                     .await;
                 continue;
             }
+        }
+
+        let (reused_symbols, missing_symbols) =
+            reconcile_runtime_prices_with_previous(&runtime, &mut current_prices);
+        if !reused_symbols.is_empty() {
+            let _ = event_tx
+                .send(PaperEvent::Warning(format!(
+                    "Minute fallback reused previous valid price for: [{}]",
+                    reused_symbols.join(",")
+                )))
+                .await;
+        }
+        if !missing_symbols.is_empty() {
+            let _ = event_tx
+                .send(PaperEvent::Warning(format!(
+                    "Skipping minute: missing live and previous price for: [{}]",
+                    missing_symbols.join(",")
+                )))
+                .await;
+            continue;
         }
 
         let minute_snapshot = build_minute_snapshot(&mut runtime, &current_prices)?;
@@ -1495,6 +1573,31 @@ fn tracked_symbols_for_runtime(runtime: &PaperRuntime) -> Vec<String> {
     let mut out: Vec<String> = symbols.into_iter().collect();
     out.sort();
     out
+}
+
+fn reconcile_runtime_prices_with_previous(
+    runtime: &PaperRuntime,
+    prices: &mut HashMap<String, f64>,
+) -> (Vec<String>, Vec<String>) {
+    let symbols = tracked_symbols_for_runtime(runtime);
+    let mut reused = Vec::new();
+    let mut missing = Vec::new();
+
+    for symbol in symbols {
+        if prices.contains_key(&symbol) {
+            continue;
+        }
+        if let Some(prev) = runtime.previous_prices.get(&symbol).copied() {
+            prices.insert(symbol.clone(), prev);
+            reused.push(symbol);
+        } else {
+            missing.push(symbol);
+        }
+    }
+
+    reused.sort();
+    missing.sort();
+    (reused, missing)
 }
 
 async fn fetch_prices_for_symbols(symbols: &[String]) -> Result<HashMap<String, f64>> {
