@@ -2941,19 +2941,52 @@ const refreshFutu = async () => {
     const futuAccountCash = document.getElementById('futuAccountCash');
     const futuBuyingPower = document.getElementById('futuBuyingPower');
     const futuLastSync = document.getElementById('futuLastSync');
+    const futuConnDot = document.getElementById('futuConnDot');
+    const futuConnCard = document.getElementById('futuConnCard');
+    const futuCashCard = document.getElementById('futuCashCard');
+    const futuBuyingPowerCard = document.getElementById('futuBuyingPowerCard');
+    const futuAccPill = document.getElementById('futuAccPill');
+    const futuAccIdBadge = document.getElementById('futuAccIdBadge');
+    const futuAccountId = document.getElementById('futuAccountId');
+    const futuAccType = document.getElementById('futuAccType');
+    const futuStartedAt = document.getElementById('futuStartedAt');
 
     if (st.connected) {
       futuExecStatus.textContent = 'RUNNING';
       futuExecDot?.classList.remove('paused');
       futuExecDot?.classList.add('active');
+      futuConnDot?.classList.add('active');
       if (futuConnStatus) futuConnStatus.textContent = 'CONNECTED';
-      if (futuConnSummary) futuConnSummary.textContent = 'Futu API connected and holdings syncing';
+      if (futuConnSummary) futuConnSummary.textContent = 'Futu API connected · holdings syncing';
+      if (futuConnCard) { futuConnCard.classList.remove('kpi-warn'); futuConnCard.classList.add('kpi-positive'); }
     } else {
       futuExecStatus.textContent = 'DISCONNECTED';
       futuExecDot?.classList.remove('active');
       futuExecDot?.classList.remove('paused');
+      futuConnDot?.classList.remove('active');
       if (futuConnStatus) futuConnStatus.textContent = 'DISCONNECTED';
       if (futuConnSummary) futuConnSummary.textContent = 'Waiting for Futu API or reconnecting';
+      if (futuConnCard) { futuConnCard.classList.remove('kpi-positive'); futuConnCard.classList.add('kpi-warn'); }
+    }
+
+    // Account pill / ID
+    if (st.accounts && st.accounts.length > 0) {
+      const acc = st.accounts[0];
+      const accId = acc.acc_id ?? '--';
+      const accTypeRaw = acc.trd_env ?? '';
+      const accTypeFmt = accTypeRaw === 'SIMULATE' ? 'Simulate' : accTypeRaw === 'REAL' ? 'Real' : accTypeRaw || '--';
+      if (futuAccountId) futuAccountId.textContent = String(accId);
+      if (futuAccType) futuAccType.textContent = `${accTypeFmt} · ${acc.acc_type ?? '--'}`;
+      if (futuAccPill) { futuAccPill.style.display = ''; }
+      if (futuAccIdBadge) futuAccIdBadge.textContent = `#${accId}`;
+    }
+
+    // Started-at sub
+    if (futuStartedAt && st.started_at) {
+      try {
+        const d = new Date(st.started_at);
+        futuStartedAt.textContent = `Since ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+      } catch (_) {}
     }
 
     if (futuExecCapital) {
@@ -2967,15 +3000,24 @@ const refreshFutu = async () => {
 
     if (futuAccountCash) {
       const v = Number(st?.account_cash_usd);
-      futuAccountCash.textContent = Number.isFinite(v) ? `$${v.toFixed(2)}` : '--';
+      const formatted = Number.isFinite(v) ? `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--';
+      futuAccountCash.textContent = formatted;
+      if (futuCashCard) {
+        futuCashCard.classList.remove('kpi-positive', 'kpi-neutral');
+        futuCashCard.classList.add(Number.isFinite(v) && v > 0 ? 'kpi-positive' : 'kpi-neutral');
+      }
     }
     if (futuBuyingPower) {
       const v = Number(st?.account_buying_power_usd);
-      futuBuyingPower.textContent = Number.isFinite(v) ? `$${v.toFixed(2)}` : '--';
+      futuBuyingPower.textContent = Number.isFinite(v) ? `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--';
+      if (futuBuyingPowerCard) {
+        futuBuyingPowerCard.classList.remove('kpi-positive', 'kpi-neutral');
+        futuBuyingPowerCard.classList.add(Number.isFinite(v) && v > 0 ? 'kpi-positive' : 'kpi-neutral');
+      }
     }
     if (futuLastSync) {
       const ts = st?.latest_snapshot?.timestamp;
-      futuLastSync.textContent = ts ? new Date(ts).toLocaleTimeString() : '--';
+      futuLastSync.textContent = ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--';
     }
 
     const ctx = buildPaperSeriesContext(st.snapshots || []);
