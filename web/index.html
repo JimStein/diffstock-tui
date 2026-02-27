@@ -630,6 +630,7 @@
     /* ─── Charts ─── */
     #forecastChart { height: 420px; border-radius: var(--radius); overflow: hidden; box-shadow: inset 0 0 30px rgba(0,0,0,.15); }
     #paperChart { height: 380px; border-radius: var(--radius); overflow: hidden; }
+    #futuChart { height: 380px; border-radius: var(--radius); overflow: hidden; }
     .paper-range-pad-band {
       position: absolute;
       left: 0;
@@ -1850,10 +1851,18 @@
           <span class="tab-label">Portfolio</span>
         </button>
         <div class="sidebar-section">Trading</div>
+        <button class="tab-btn" data-tab="strategy">
+          <span class="tab-icon-wrap"><span class="tab-icon">🧭</span></span>
+          <span class="tab-label">Strategy Engine</span>
+        </button>
         <button class="tab-btn" data-tab="paper">
           <span class="tab-icon-wrap"><span class="tab-icon">📄</span></span>
-          <span class="tab-label">Paper Trade</span>
+          <span class="tab-label">Paper Trading</span>
           <span class="tab-badge" id="paperTabBadge"></span>
+        </button>
+        <button class="tab-btn" data-tab="futu">
+          <span class="tab-icon-wrap"><span class="tab-icon">🛰️</span></span>
+          <span class="tab-label">Futu Simulation</span>
         </button>
         <div class="sidebar-section">System</div>
         <button class="tab-btn" data-tab="train">
@@ -2005,97 +2014,137 @@
         </div>
       </section>
 
+      <!-- ══════ Strategy Engine Tab ══════ -->
+      <section id="tab-strategy" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header" style="margin-bottom:8px;">
+            <div class="panel-title"><span class="panel-title-icon">🔀</span> Execution Routing</div>
+            <div class="panel-subtitle">Signal dispatch only</div>
+          </div>
+          <div class="small">
+            Strategy Engine 只负责下单意图与再平衡信号分发；具体执行模块保持隔离：
+            <strong>Paper Trading Executor</strong> 与 <strong>Futu Simulation Executor</strong> 分别在各自页面运行与监控。
+          </div>
+        </div>
+        <div id="strategyEngineMount">
+          <div class="panel paper-ctrl-panel">
+            <div class="paper-ctrl-header" id="paperCtrlHeader">
+              <div class="paper-ctrl-summary" id="paperCtrlSummary">
+                <span class="paper-ctrl-status">
+                  <span class="chip-dot" id="paperCtrlDot"></span>
+                  <span id="paperCtrlStatus">IDLE</span>
+                </span>
+                <span class="paper-ctrl-badge">&#128176;&nbsp;$<span id="paperCtrlCapital">80,000</span></span>
+                <span class="paper-ctrl-badge">&#128336;&nbsp;<span id="paperCtrlSchedule">23:30 / 02:30</span></span>
+                <span class="paper-ctrl-badge">&#9203;&nbsp;<span id="paperCtrlNextOpt">--</span></span>
+                <span class="paper-ctrl-badge">&#127919;&nbsp;<span id="paperCtrlPool">0 symbols</span></span>
+              </div>
+              <div class="paper-ctrl-quick">
+                <button class="primary" id="paperStart">&#9654; Start</button>
+                <button id="paperLoad">&#128194; Load</button>
+                <span class="btn-sep"></span>
+                <button class="warn" id="paperPause">&#9208; Pause</button>
+                <button class="success" id="paperResume">&#9654; Resume</button>
+                <button class="danger" id="paperStop">&#9209; Stop</button>
+                <input id="paperFilePicker" type="file" accept=".json,application/json" class="hidden" />
+              </div>
+              <button class="paper-ctrl-chevron" id="paperCtrlToggle" title="Expand / Collapse config" aria-label="Expand / Collapse config"></button>
+            </div>
+            <div class="paper-ctrl-body" id="paperCtrlBody">
+              <div class="row" style="margin-top:4px;">
+                <div class="field">
+                  <label class="field-label">Capital ($)</label>
+                  <input id="paperCapital" type="number" value="80000" style="width:110px" />
+                </div>
+                <div class="field">
+                  <label class="field-label">Schedule 1</label>
+                  <input id="paperTime1" type="time" value="23:30" step="60" style="width:108px" />
+                </div>
+                <div class="field">
+                  <label class="field-label">Schedule 2</label>
+                  <input id="paperTime2" type="time" value="02:30" step="60" style="width:108px" />
+                </div>
+                <div class="field">
+                  <label class="field-label">Optimize Time</label>
+                  <input id="paperOptTime" type="time" value="22:00" step="60" style="width:108px" />
+                </div>
+              </div>
+              <div class="row" style="margin-top:10px; align-items:flex-start;">
+                <div class="field">
+                  <label class="field-label">Optimize Days</label>
+                  <div class="weekday-group">
+                    <label class="weekday-label"><input type="checkbox" data-paper-opt-weekday="1" checked /><span class="weekday-pill">Mon</span></label>
+                    <label class="weekday-label"><input type="checkbox" data-paper-opt-weekday="2" checked /><span class="weekday-pill">Tue</span></label>
+                    <label class="weekday-label"><input type="checkbox" data-paper-opt-weekday="3" checked /><span class="weekday-pill">Wed</span></label>
+                    <label class="weekday-label"><input type="checkbox" data-paper-opt-weekday="4" checked /><span class="weekday-pill">Thu</span></label>
+                    <label class="weekday-label"><input type="checkbox" data-paper-opt-weekday="5" checked /><span class="weekday-pill">Fri</span></label>
+                    <label class="weekday-label"><input type="checkbox" data-paper-opt-weekday="6" /><span class="weekday-pill">Sat</span></label>
+                    <label class="weekday-label"><input type="checkbox" data-paper-opt-weekday="7" /><span class="weekday-pill">Sun</span></label>
+                  </div>
+                </div>
+                <div class="field" style="flex:1; min-width:200px;">
+                  <label class="field-label">History JSON Path</label>
+                  <input id="paperLoadPath" placeholder="e.g. log/paper_strategy_20260219_101500.json" style="width:100%" />
+                </div>
+              </div>
+              <div class="paper-target-editor">
+                <div class="paper-target-header">
+                  <div class="paper-target-title">
+                    <span>🎯</span>
+                    <span>Persistent Candidate Pool (Universe)</span>
+                    <span id="paperTargetCount" class="paper-target-count">0 symbols</span>
+                  </div>
+                  <span id="paperTargetDirtyBadge" class="paper-target-dirty-badge" style="display:none">● Unsaved</span>
+                </div>
+                <div class="paper-target-input-row">
+                  <input id="paperTargetInput" placeholder="NVDA or AAPL,MSFT,QQQ" style="flex:1;" />
+                  <button id="paperTargetAdd">＋ Add</button>
+                </div>
+                <div id="paperTargetChips" class="paper-target-chips"></div>
+                <div class="paper-target-apply-row">
+                  <button id="paperTargetApply" class="primary">⚡ Apply Candidate Universe</button>
+                  <label class="paper-toggle"><input id="paperApplyNow" type="checkbox" checked /> Rebalance immediately</label>
+                </div>
+              </div>
+              <div class="small" style="margin-top:8px;">这是持久候选股票池（universe），不会因某次优化权重为 0 而丢失；算法可选择暂时不持有其中部分标的。Apply 时会先对候选池做一次最新组合优化，再按勾选决定是否立即再平衡。定时优化会按上面的时间+周几自动刷新权重。</div>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header" style="margin-bottom:8px;">
+            <div class="panel-title"><span class="panel-title-icon">🛰️</span> Dispatch Payload Preview</div>
+            <div class="panel-subtitle">Review the exact start payload before strategy dispatch</div>
+          </div>
+          <div id="strategyPayloadPreview" class="train-raw-json"></div>
+          <div class="row" style="margin-top:10px; align-items:center;">
+            <button id="strategyCopyPayload">📋 Copy Start Payload</button>
+            <div id="strategyPayloadHint" class="small">Payload follows current strategy settings and candidate universe.</div>
+          </div>
+        </div>
+      </section>
+
       <!-- ══════ Paper Trading Tab ══════ -->
       <section id="tab-paper" class="tab-panel hidden">
         <div class="panel paper-ctrl-panel">
-          <!-- ── Always-visible summary header ── -->
-          <div class="paper-ctrl-header" id="paperCtrlHeader">
-            <div class="paper-ctrl-summary" id="paperCtrlSummary">
+          <div class="paper-ctrl-header">
+            <div class="paper-ctrl-summary">
               <span class="paper-ctrl-status">
-                <span class="chip-dot" id="paperCtrlDot"></span>
-                <span id="paperCtrlStatus">IDLE</span>
+                <span class="chip-dot" id="paperExecDot"></span>
+                <span id="paperExecStatus">IDLE</span>
               </span>
-              <span class="paper-ctrl-badge">&#128176;&nbsp;$<span id="paperCtrlCapital">80,000</span></span>
-              <span class="paper-ctrl-badge">&#128336;&nbsp;<span id="paperCtrlSchedule">23:30 / 02:30</span></span>
-              <span class="paper-ctrl-badge">&#9203;&nbsp;<span id="paperCtrlNextOpt">--</span></span>
-              <span class="paper-ctrl-badge">&#127919;&nbsp;<span id="paperCtrlPool">0 symbols</span></span>
+              <span class="paper-ctrl-badge">💰&nbsp;$<span id="paperExecCapital">--</span></span>
+              <span class="paper-ctrl-badge">🕐&nbsp;<span id="paperExecSchedule">-- / --</span></span>
+              <span class="paper-ctrl-badge">⏳&nbsp;<span id="paperExecNextOpt">--</span></span>
+              <span class="paper-ctrl-badge">🎯&nbsp;<span id="paperExecPool">0 symbols</span></span>
             </div>
             <div class="paper-ctrl-quick">
-              <button class="primary" id="paperStart">&#9654; Start</button>
-              <button id="paperLoad">&#128194; Load</button>
-              <span class="btn-sep"></span>
-              <button class="warn" id="paperPause">&#9208; Pause</button>
-              <button class="success" id="paperResume">&#9654; Resume</button>
-              <button class="danger" id="paperStop">&#9209; Stop</button>
-              <input id="paperFilePicker" type="file" accept=".json,application/json" class="hidden" />
+              <button id="paperJumpStrategy">⚙ Strategy Engine</button>
             </div>
-            <button class="paper-ctrl-chevron" id="paperCtrlToggle" title="Expand / Collapse config" aria-label="Expand / Collapse config"></button>
-          </div>
-          <!-- ── Collapsible config body ── -->
-          <div class="paper-ctrl-body" id="paperCtrlBody">
-            <!-- Row 1: execution params -->
-            <div class="row" style="margin-top:4px;">
-              <div class="field">
-                <label class="field-label">Capital ($)</label>
-                <input id="paperCapital" type="number" value="80000" style="width:110px" />
-              </div>
-              <div class="field">
-                <label class="field-label">Schedule 1</label>
-                <input id="paperTime1" type="time" value="23:30" step="60" style="width:108px" />
-              </div>
-              <div class="field">
-                <label class="field-label">Schedule 2</label>
-                <input id="paperTime2" type="time" value="02:30" step="60" style="width:108px" />
-              </div>
-              <div class="field">
-                <label class="field-label">Optimize Time</label>
-                <input id="paperOptTime" type="time" value="22:00" step="60" style="width:108px" />
-              </div>
-            </div>
-            <!-- Row 2: optimize days + history path -->
-            <div class="row" style="margin-top:10px; align-items:flex-start;">
-              <div class="field">
-                <label class="field-label">Optimize Days</label>
-                <div class="weekday-group">
-                  <label class="weekday-label"><input type="checkbox" data-paper-opt-weekday="1" checked /><span class="weekday-pill">Mon</span></label>
-                  <label class="weekday-label"><input type="checkbox" data-paper-opt-weekday="2" checked /><span class="weekday-pill">Tue</span></label>
-                  <label class="weekday-label"><input type="checkbox" data-paper-opt-weekday="3" checked /><span class="weekday-pill">Wed</span></label>
-                  <label class="weekday-label"><input type="checkbox" data-paper-opt-weekday="4" checked /><span class="weekday-pill">Thu</span></label>
-                  <label class="weekday-label"><input type="checkbox" data-paper-opt-weekday="5" checked /><span class="weekday-pill">Fri</span></label>
-                  <label class="weekday-label"><input type="checkbox" data-paper-opt-weekday="6" /><span class="weekday-pill">Sat</span></label>
-                  <label class="weekday-label"><input type="checkbox" data-paper-opt-weekday="7" /><span class="weekday-pill">Sun</span></label>
-                </div>
-              </div>
-              <div class="field" style="flex:1; min-width:200px;">
-                <label class="field-label">History JSON Path</label>
-                <input id="paperLoadPath" placeholder="e.g. log/paper_strategy_20260219_101500.json" style="width:100%" />
-              </div>
-            </div>
-            <div class="paper-target-editor">
-              <div class="paper-target-header">
-                <div class="paper-target-title">
-                  <span>🎯</span>
-                  <span>Persistent Candidate Pool (Universe)</span>
-                  <span id="paperTargetCount" class="paper-target-count">0 symbols</span>
-                </div>
-                <span id="paperTargetDirtyBadge" class="paper-target-dirty-badge" style="display:none">● Unsaved</span>
-              </div>
-              <div class="paper-target-input-row">
-                <input id="paperTargetInput" placeholder="NVDA or AAPL,MSFT,QQQ" style="flex:1;" />
-                <button id="paperTargetAdd">＋ Add</button>
-              </div>
-              <div id="paperTargetChips" class="paper-target-chips"></div>
-              <div class="paper-target-apply-row">
-                <button id="paperTargetApply" class="primary">⚡ Apply Candidate Universe</button>
-                <label class="paper-toggle"><input id="paperApplyNow" type="checkbox" checked /> Rebalance immediately</label>
-              </div>
-            </div>
-            <div class="small" style="margin-top:8px;">这是持久候选股票池（universe），不会因某次优化权重为 0 而丢失；算法可选择暂时不持有其中部分标的。Apply 时会先对候选池做一次最新组合优化，再按勾选决定是否立即再平衡。定时优化会按上面的时间+周几自动刷新权重。</div>
           </div>
         </div>
         <div class="panel" id="paperRiskPanel" style="display:none;">
           <div class="panel-header" style="margin-bottom:8px;">
-            <div class="panel-title"><span class="panel-title-icon">⚠️</span> Risk Alerts</div>
+            <div class="panel-title"><span class="panel-title-icon">⚠️</span> Paper Risk Alerts</div>
             <div class="panel-subtitle">UI-only monitoring hints</div>
           </div>
           <div id="paperRiskList" class="paper-risk-list"></div>
@@ -2200,6 +2249,93 @@
             <div class="panel-subtitle">Last 20 entries</div>
           </div>
           <div id="logBox" style="max-height:200px;overflow:auto;font-size:11px;font-family:var(--mono);line-height:1.7;color:var(--muted);padding:4px 0;"></div>
+        </div>
+      </section>
+
+      <!-- ══════ Futu Simulation Tab ══════ -->
+      <section id="tab-futu" class="tab-panel hidden">
+        <div class="panel paper-ctrl-panel">
+          <div class="paper-ctrl-header">
+            <div class="paper-ctrl-summary">
+              <span class="paper-ctrl-status">
+                <span class="chip-dot" id="futuExecDot"></span>
+                <span id="futuExecStatus">DISCONNECTED</span>
+              </span>
+              <span class="paper-ctrl-badge">💰&nbsp;$<span id="futuExecCapital">--</span></span>
+              <span class="paper-ctrl-badge">🕐&nbsp;<span id="futuExecSchedule">Signal-driven</span></span>
+              <span class="paper-ctrl-badge">⏳&nbsp;<span id="futuExecNextOpt">Awaiting signal</span></span>
+              <span class="paper-ctrl-badge">🎯&nbsp;<span id="futuExecPool">--</span></span>
+            </div>
+            <div class="paper-ctrl-quick">
+              <button id="futuJumpStrategy">⚙ Strategy Engine</button>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header" style="margin-bottom:8px;">
+            <div class="panel-title"><span class="panel-title-icon">🔌</span> Connection & Account</div>
+            <div class="panel-subtitle" id="futuConnSummary">Waiting for Futu API...</div>
+          </div>
+          <div class="grid cols-4">
+            <div class="kpi"><span>Connection</span><strong id="futuConnStatus">DISCONNECTED</strong></div>
+            <div class="kpi"><span>Cash</span><strong id="futuAccountCash">--</strong></div>
+            <div class="kpi"><span>Buying Power</span><strong id="futuBuyingPower">--</strong></div>
+            <div class="kpi"><span>Last Sync</span><strong id="futuLastSync">--</strong></div>
+          </div>
+        </div>
+
+        <div class="panel" style="padding:12px;">
+          <div class="chart-summary-strip" id="futuChartSummaryStrip" style="display:none;"></div>
+          <div class="chart-wrap">
+            <div id="futuChart"></div>
+            <div class="chart-legend" id="futuLegend">
+              <div class="legend-title">Futu Metrics</div>
+              <div class="legend-row"><span class="legend-key">Portfolio</span><span class="legend-val" id="futuLegendPortfolio">--</span></div>
+              <div class="legend-row"><span class="legend-key">Portfolio PnL</span><span class="legend-val" id="futuLegendPortfolioPnl">--</span></div>
+              <div class="legend-row"><span class="legend-key">QQQ Benchmark</span><span class="legend-val" id="futuLegendBenchmark">--</span></div>
+              <div class="legend-row"><span class="legend-key">QQQ Return</span><span class="legend-val" id="futuLegendBenchmarkPnl">--</span></div>
+              <div class="legend-row"><span class="legend-key">Spread</span><span class="legend-val" id="futuLegendSpread">--</span></div>
+              <div class="legend-row"><span class="legend-key">Last Update</span><span class="legend-val" id="futuLegendUpdated">--</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title"><span class="panel-title-icon">💼</span> Futu Holdings</div>
+            <div class="panel-subtitle" id="futuHoldingsPoolBadge">Holding -- · In Pool -- · Not Held --</div>
+          </div>
+          <table id="futuHoldingsTable">
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Status</th>
+                <th class="num">Quantity</th>
+                <th class="num">Current Price</th>
+                <th class="num">Avg Cost</th>
+                <th class="num">Asset Value</th>
+                <th class="num">Target Weight</th>
+                <th class="num">Floating PnL</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title"><span class="panel-title-icon">📡</span> Realtime Market</div>
+            <div class="panel-subtitle">Shared quote engine with Paper Trading</div>
+          </div>
+          <div id="futuRtMarketGrid" class="rt-market-grid"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title"><span class="panel-title-icon">📜</span> Runtime Logs</div>
+            <div class="panel-subtitle">Futu execution + holdings sync</div>
+          </div>
+          <div id="futuLogBox" style="max-height:200px;overflow:auto;font-size:11px;font-family:var(--mono);line-height:1.7;color:var(--muted);padding:4px 0;"></div>
         </div>
       </section>
 

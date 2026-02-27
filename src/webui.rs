@@ -1,4 +1,4 @@
-use crate::{config, data, inference, paper_trading, portfolio, train};
+use crate::{config, data, futu, inference, paper_trading, portfolio, train};
 use anyhow::Result;
 use axum::extract::State;
 use axum::http::{header, StatusCode};
@@ -19,6 +19,7 @@ struct WebState {
     backend_default: config::ComputeBackend,
     train: Arc<Mutex<TrainRuntimeState>>,
     paper: Arc<Mutex<PaperRuntimeState>>,
+    futu: Arc<Mutex<FutuRuntimeState>>,
     forecast: Arc<Mutex<ForecastRuntimeState>>,
     portfolio: Arc<Mutex<PortfolioRuntimeState>>,
 }
@@ -121,6 +122,7 @@ struct FullUiState {
     portfolio: PortfolioRuntimeState,
     train: TrainRuntimeState,
     paper: PaperRuntimeState,
+    futu: FutuRuntimeState,
     data_live_source: String,
     data_ws_connected: bool,
     data_ws_diagnostics: data::WsDiagnostics,
@@ -165,6 +167,52 @@ struct PaperRuntimeState {
     data_live_fetch_diagnostics: data::LiveFetchDiagnostics,
     #[serde(skip_serializing)]
     cmd_tx: Option<mpsc::Sender<paper_trading::PaperCommand>>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct FutuPositionState {
+    symbol: String,
+    quantity: f64,
+    avg_cost: f64,
+    market_price: f64,
+    updated_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct FutuRuntimeState {
+    connected: bool,
+    started_at: Option<String>,
+    account_cash_usd: f64,
+    account_buying_power_usd: f64,
+    latest_snapshot: Option<paper_trading::MinutePortfolioSnapshot>,
+    snapshots: Vec<paper_trading::MinutePortfolioSnapshot>,
+    positions: Vec<FutuPositionState>,
+    logs: Vec<String>,
+    data_live_source: String,
+    data_ws_connected: bool,
+    data_ws_diagnostics: data::WsDiagnostics,
+    data_live_fetch_diagnostics: data::LiveFetchDiagnostics,
+}
+
+impl Default for FutuRuntimeState {
+    fn default() -> Self {
+        Self {
+            connected: false,
+            started_at: Some(chrono::Local::now().to_rfc3339()),
+            account_cash_usd: 0.0,
+            account_buying_power_usd: 0.0,
+            latest_snapshot: None,
+            snapshots: Vec::new(),
+            positions: Vec::new(),
+            logs: vec![runtime_log_with_ts(
+                "Futu execution initialized (waiting for FUTU_API_BASE_URL)",
+            )],
+            data_live_source: "Unknown".to_string(),
+            data_ws_connected: false,
+            data_ws_diagnostics: data::WsDiagnostics::default(),
+            data_live_fetch_diagnostics: data::LiveFetchDiagnostics::default(),
+        }
+    }
 }
 
 impl Default for PaperRuntimeState {
@@ -313,9 +361,12 @@ pub async fn run_webui_server(port: u16, backend_default: config::ComputeBackend
         backend_default,
         train: Arc::new(Mutex::new(TrainRuntimeState::default())),
         paper: Arc::new(Mutex::new(PaperRuntimeState::default())),
+        futu: Arc::new(Mutex::new(FutuRuntimeState::default())),
         forecast: Arc::new(Mutex::new(forecast_state)),
         portfolio: Arc::new(Mutex::new(PortfolioRuntimeState::default())),
     };
+
+    tokio::spawn(futu_execution_loop(state.futu.clone()));
 
     let app = Router::new()
         .route("/", get(index))
@@ -336,6 +387,8 @@ pub async fn run_webui_server(port: u16, backend_default: config::ComputeBackend
         .route("/api/paper/pause", post(paper_pause))
         .route("/api/paper/resume", post(paper_resume))
         .route("/api/paper/stop", post(paper_stop))
+        .route("/api/futu/status", get(futu_status))
+        .route("/api/futu/account-list", get(futu_account_list))
         .with_state(state);
 
     let addr = format!("0.0.0.0:{}", port);
@@ -658,6 +711,7 @@ async fn full_state(
     State(state): State<WebState>,
 ) -> Result<Json<FullUiState>, (StatusCode, Json<ApiError>)> {
     let mut paper = state.paper.lock().await.clone();
+    let mut futu = state.futu.lock().await.clone();
     paper.cmd_tx = None;
     let data_live_source = data::current_live_data_source().await;
     let data_ws_connected = data::polygon_ws_connected().await;
@@ -667,17 +721,233 @@ async fn full_state(
     paper.data_ws_connected = data_ws_connected;
     paper.data_ws_diagnostics = data_ws_diagnostics.clone();
     paper.data_live_fetch_diagnostics = data_live_fetch_diagnostics.clone();
+    futu.data_live_source = data_live_source.clone();
+    futu.data_ws_connected = data_ws_connected;
+    futu.data_ws_diagnostics = data_ws_diagnostics.clone();
+    futu.data_live_fetch_diagnostics = data_live_fetch_diagnostics.clone();
 
     Ok(Json(FullUiState {
         forecast: state.forecast.lock().await.clone(),
         portfolio: state.portfolio.lock().await.clone(),
         train: state.train.lock().await.clone(),
         paper,
+        futu,
         data_live_source,
         data_ws_connected,
         data_ws_diagnostics,
         data_live_fetch_diagnostics,
     }))
+}
+
+async fn futu_status(
+    State(state): State<WebState>,
+) -> Result<Json<FutuRuntimeState>, (StatusCode, Json<ApiError>)> {
+    let mut status = state.futu.lock().await.clone();
+    status.data_live_source = data::current_live_data_source().await;
+    status.data_ws_connected = data::polygon_ws_connected().await;
+    status.data_ws_diagnostics = data::current_ws_diagnostics().await;
+    status.data_live_fetch_diagnostics = data::current_live_fetch_diagnostics().await;
+    Ok(Json(status))
+}
+
+async fn futu_account_list() -> Result<Json<serde_json::Value>, (StatusCode, Json<ApiError>)> {
+    let client = futu::FutuApiClient::from_env().map_err(internal_err)?;
+    let payload = client.get_account_list().await.map_err(internal_err)?;
+    Ok(Json(payload))
+}
+
+async fn futu_execution_loop(futu_state: Arc<Mutex<FutuRuntimeState>>) {
+    let mut prev_prices: HashMap<String, f64> = HashMap::new();
+    let mut prev_qty: HashMap<String, f64> = HashMap::new();
+    let mut initial_capital: Option<f64> = None;
+
+    loop {
+        let payload = match futu::FutuApiClient::from_env() {
+            Ok(client) => client.poll_execution_snapshot().await,
+            Err(err) => Err(err),
+        };
+
+        match payload {
+            Ok(payload) => {
+                let symbols = payload
+                    .positions
+                    .iter()
+                    .filter(|p| p.quantity.abs() > 0.0)
+                    .map(|p| p.symbol.clone())
+                    .collect::<Vec<_>>();
+
+                let quote_map = if symbols.is_empty() {
+                    HashMap::new()
+                } else {
+                    match data::fetch_latest_prices_with_meta_ws_only(&symbols).await {
+                        Ok(quotes) => quotes,
+                        Err(err) => {
+                            let mut fs = futu_state.lock().await;
+                            fs.logs.push(runtime_log_with_ts(format!(
+                                "WARNING: Futu execution quote sync failed, fallback to broker last price: {}",
+                                err
+                            )));
+                            if fs.logs.len() > 200 {
+                                let keep_from = fs.logs.len().saturating_sub(200);
+                                fs.logs = fs.logs.split_off(keep_from);
+                            }
+                            HashMap::new()
+                        }
+                    }
+                };
+
+                let timestamp = chrono::Local::now().to_rfc3339();
+                let mut minute_symbols = Vec::new();
+                let mut minute_holdings = Vec::new();
+                let mut holdings_symbols = Vec::new();
+                let mut total_holdings_value = 0.0;
+
+                for position in &payload.positions {
+                    let live_price = quote_map
+                        .get(&position.symbol)
+                        .map(|q| q.price)
+                        .filter(|v| v.is_finite() && *v > 0.0)
+                        .or_else(|| {
+                            if position.market_price.is_finite() && position.market_price > 0.0 {
+                                Some(position.market_price)
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(position.avg_cost.max(0.0));
+
+                    let prev = prev_prices.get(&position.symbol).copied().unwrap_or(live_price);
+                    let change_1m = live_price - prev;
+                    let change_1m_pct = if prev > 0.0 {
+                        (change_1m / prev) * 100.0
+                    } else {
+                        0.0
+                    };
+
+                    minute_symbols.push(paper_trading::MinuteSymbolSnapshot {
+                        symbol: position.symbol.clone(),
+                        price: live_price,
+                        change_1m,
+                        change_1m_pct,
+                    });
+
+                    if position.quantity.abs() > 1e-9 {
+                        let asset_value = live_price * position.quantity;
+                        minute_holdings.push(paper_trading::MinuteHoldingSnapshot {
+                            symbol: position.symbol.clone(),
+                            quantity: position.quantity,
+                            price: live_price,
+                            asset_value,
+                            avg_cost: position.avg_cost,
+                        });
+                        holdings_symbols.push(position.symbol.clone());
+                        total_holdings_value += asset_value;
+                    }
+
+                    prev_prices.insert(position.symbol.clone(), live_price);
+                }
+
+                holdings_symbols.sort();
+                minute_symbols.sort_by(|a, b| a.symbol.cmp(&b.symbol));
+                minute_holdings.sort_by(|a, b| a.symbol.cmp(&b.symbol));
+
+                let total_value = payload.cash_usd + total_holdings_value;
+                if initial_capital.is_none() && total_value.is_finite() && total_value > 0.0 {
+                    initial_capital = Some(total_value);
+                }
+                let base = initial_capital.unwrap_or(total_value.max(1.0));
+                let pnl_usd = total_value - base;
+                let pnl_pct = if base > 0.0 { (pnl_usd / base) * 100.0 } else { 0.0 };
+
+                let snapshot = paper_trading::MinutePortfolioSnapshot {
+                    timestamp: timestamp.clone(),
+                    total_value,
+                    cash_usd: payload.cash_usd,
+                    pnl_usd,
+                    pnl_pct,
+                    benchmark_return_pct: 0.0,
+                    symbols: minute_symbols,
+                    holdings: minute_holdings,
+                    holdings_symbols,
+                };
+
+                let mut qty_changed = false;
+                let mut new_qty_map = HashMap::new();
+                for position in &payload.positions {
+                    if position.quantity.abs() <= 1e-9 {
+                        continue;
+                    }
+                    new_qty_map.insert(position.symbol.clone(), position.quantity);
+                    let prev = prev_qty.get(&position.symbol).copied().unwrap_or(0.0);
+                    if (prev - position.quantity).abs() > 1e-6 {
+                        qty_changed = true;
+                    }
+                }
+                if prev_qty.len() != new_qty_map.len() {
+                    qty_changed = true;
+                }
+                prev_qty = new_qty_map;
+
+                let mut fs = futu_state.lock().await;
+                let was_connected = fs.connected;
+                fs.connected = true;
+                fs.account_cash_usd = payload.cash_usd;
+                fs.account_buying_power_usd = payload.buying_power_usd;
+                fs.positions = payload
+                    .positions
+                    .iter()
+                    .map(|position| FutuPositionState {
+                        symbol: position.symbol.clone(),
+                        quantity: position.quantity,
+                        avg_cost: position.avg_cost,
+                        market_price: position.market_price,
+                        updated_at: position.updated_at.clone(),
+                    })
+                    .collect();
+                fs.latest_snapshot = Some(snapshot.clone());
+                fs.snapshots.push(snapshot);
+                if fs.snapshots.len() > 6000 {
+                    let keep_from = fs.snapshots.len().saturating_sub(6000);
+                    fs.snapshots = fs.snapshots.split_off(keep_from);
+                }
+
+                if !was_connected {
+                    fs.logs.push(runtime_log_with_ts("Futu execution connected"));
+                }
+                if qty_changed {
+                    let holdings_count = fs
+                        .latest_snapshot
+                        .as_ref()
+                        .map(|snap| snap.holdings_symbols.len())
+                        .unwrap_or(0);
+                    fs.logs.push(runtime_log_with_ts(format!(
+                        "Futu execution synced holdings ({} symbols)",
+                        holdings_count
+                    )));
+                }
+                if fs.logs.len() > 200 {
+                    let keep_from = fs.logs.len().saturating_sub(200);
+                    fs.logs = fs.logs.split_off(keep_from);
+                }
+            }
+            Err(err) => {
+                let mut fs = futu_state.lock().await;
+                if fs.connected {
+                    fs.logs.push(runtime_log_with_ts(format!(
+                        "WARNING: Futu execution disconnected: {}",
+                        err
+                    )));
+                }
+                fs.connected = false;
+                if fs.logs.len() > 200 {
+                    let keep_from = fs.logs.len().saturating_sub(200);
+                    fs.logs = fs.logs.split_off(keep_from);
+                }
+            }
+        }
+
+        tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+    }
 }
 
 async fn start_train(

@@ -10,6 +10,27 @@ const api = async (url, options = {}) => {
 
 const tabs = document.querySelectorAll('.tab-btn');
 const panels = document.querySelectorAll('.tab-panel');
+
+const switchTabByName = (tabName) => {
+  for (const b of tabs) b.classList.remove('active');
+  const targetBtn = Array.from(tabs).find(b => b.dataset.tab === tabName);
+  if (targetBtn) targetBtn.classList.add('active');
+  for (const p of panels) p.classList.add('hidden');
+  document.getElementById(`tab-${tabName}`)?.classList.remove('hidden');
+
+  if (tabName === 'forecast') {
+    fChart.resize();
+    fChart.fit();
+  }
+  if (tabName === 'paper') {
+    paperChart.resize();
+    paperChart.fit();
+  }
+  if (tabName === 'futu') {
+    futuChart.resize();
+    futuChart.fit();
+  }
+};
 let lastPortfolio = null;
 let lastPaperSeries = [];
 let latestQuoteMap = new Map();
@@ -37,6 +58,9 @@ const paperOptWeekdayChecks = Array.from(document.querySelectorAll('[data-paper-
 const paperTargetChips = document.getElementById('paperTargetChips');
 const paperTargetCount = document.getElementById('paperTargetCount');
 const paperTargetDirtyBadge = document.getElementById('paperTargetDirtyBadge');
+const strategyPayloadPreview = document.getElementById('strategyPayloadPreview');
+const strategyCopyPayloadBtn = document.getElementById('strategyCopyPayload');
+const strategyPayloadHint = document.getElementById('strategyPayloadHint');
 const paperRangePadBand = document.getElementById('paperRangePadBand');
 const paperLegend = document.getElementById('paperLegend');
 const legendPortfolio = document.getElementById('legendPortfolio');
@@ -52,6 +76,7 @@ let legendForecastP50 = document.getElementById('legendForecastP50');
 let legendForecastP10 = document.getElementById('legendForecastP10');
 let legendForecastP90 = document.getElementById('legendForecastP90');
 let paperMetricsByTime = new Map();
+let futuMetricsByTime = new Map();
 let lastForecastContext = null;
 let forecastBatchResults = new Map(); // symbol → {data, selectedSymbol}
 let forecastSelectedSymbol = null;
@@ -87,7 +112,23 @@ let paperFullContext = {
   metricsByTime: new Map(),
   latest: null,
 };
+let futuFullContext = {
+  portfolioSeries: [],
+  benchmarkSeries: [],
+  metricsByTime: new Map(),
+  latest: null,
+};
+let latestPaperStatus = null;
+let latestFutuStatus = null;
 const paperRangeButtons = Array.from(document.querySelectorAll('[data-paper-range-days]'));
+
+const futuLegend = document.getElementById('futuLegend');
+const futuLegendPortfolio = document.getElementById('futuLegendPortfolio');
+const futuLegendPortfolioPnl = document.getElementById('futuLegendPortfolioPnl');
+const futuLegendBenchmark = document.getElementById('futuLegendBenchmark');
+const futuLegendBenchmarkPnl = document.getElementById('futuLegendBenchmarkPnl');
+const futuLegendSpread = document.getElementById('futuLegendSpread');
+const futuLegendUpdated = document.getElementById('futuLegendUpdated');
 
 const tradeFilterButtons = Array.from(document.querySelectorAll('[data-trade-filter]'));
 const tradeSearchInput = document.getElementById('tradeSearchInput');
@@ -690,21 +731,8 @@ const attachChartAutoResize = (chartRef) => {
 
 for (const btn of tabs) {
   btn.addEventListener('click', () => {
-    for (const b of tabs) b.classList.remove('active');
-    btn.classList.add('active');
     const t = btn.dataset.tab;
-    for (const p of panels) p.classList.add('hidden');
-    document.getElementById(`tab-${t}`).classList.remove('hidden');
-
-    // Hidden tabs initialize with 0 width. Force chart reflow when tab becomes visible.
-    if (t === 'forecast') {
-      fChart.resize();
-      fChart.fit();
-    }
-    if (t === 'paper') {
-      paperChart.resize();
-      paperChart.fit();
-    }
+    switchTabByName(t);
   });
 }
 
@@ -1150,6 +1178,7 @@ const renderPaperTargetChips = () => {
       renderPaperTargetChips();
     });
   });
+  renderStrategyDispatchPreview();
 };
 
 const hydratePaperTargetsFromStatus = (st) => {
@@ -1186,6 +1215,7 @@ const hydratePaperOptimizationFromStatus = (st) => {
   }
 
   syncNextOptimizationBadge();
+  renderStrategyDispatchPreview();
 };
 
 const forceSyncPaperTargetsFromStatus = async () => {
@@ -1675,9 +1705,50 @@ const setLegendText = (metrics) => {
   legendSpread.classList.add(metrics.spreadUsd >= 0 ? 'legend-up' : 'legend-down');
 };
 
+const setFutuLegendText = (metrics) => {
+  if (!futuLegendPortfolio || !futuLegendPortfolioPnl || !futuLegendBenchmark || !futuLegendBenchmarkPnl || !futuLegendSpread || !futuLegendUpdated) return;
+
+  if (!metrics) {
+    futuLegendPortfolio.textContent = '--';
+    futuLegendPortfolioPnl.textContent = '--';
+    futuLegendBenchmark.textContent = '--';
+    futuLegendBenchmarkPnl.textContent = '--';
+    futuLegendSpread.textContent = '--';
+    futuLegendUpdated.textContent = '--';
+    futuLegendPortfolioPnl.classList.remove('legend-up', 'legend-down');
+    futuLegendBenchmarkPnl.classList.remove('legend-up', 'legend-down');
+    futuLegendSpread.classList.remove('legend-up', 'legend-down');
+    return;
+  }
+
+  futuLegendPortfolio.textContent = formatMoney(metrics.portfolioValue);
+  futuLegendPortfolioPnl.textContent = `${metrics.portfolioPnlUsd >= 0 ? '+' : ''}${formatMoney(metrics.portfolioPnlUsd)} (${metrics.portfolioPnlPct >= 0 ? '+' : ''}${metrics.portfolioPnlPct.toFixed(2)}%)`;
+  futuLegendBenchmark.textContent = formatMoney(metrics.benchmarkValue);
+  futuLegendBenchmarkPnl.textContent = `${metrics.benchmarkPnlUsd >= 0 ? '+' : ''}${formatMoney(metrics.benchmarkPnlUsd)} (${metrics.benchmarkPnlPct >= 0 ? '+' : ''}${metrics.benchmarkPnlPct.toFixed(2)}%)`;
+  futuLegendSpread.textContent = `${metrics.spreadUsd >= 0 ? '+' : ''}${formatMoney(metrics.spreadUsd)} (${metrics.spreadPct >= 0 ? '+' : ''}${metrics.spreadPct.toFixed(2)}%)`;
+  futuLegendUpdated.textContent = metrics.updatedText || '--';
+
+  futuLegendPortfolioPnl.classList.remove('legend-up', 'legend-down');
+  futuLegendPortfolioPnl.classList.add(metrics.portfolioPnlUsd >= 0 ? 'legend-up' : 'legend-down');
+  futuLegendBenchmarkPnl.classList.remove('legend-up', 'legend-down');
+  futuLegendBenchmarkPnl.classList.add(metrics.benchmarkPnlUsd >= 0 ? 'legend-up' : 'legend-down');
+  futuLegendSpread.classList.remove('legend-up', 'legend-down');
+  futuLegendSpread.classList.add(metrics.spreadUsd >= 0 ? 'legend-up' : 'legend-down');
+};
+
 const showPaperLegend = () => {
   if (!paperLegend) return;
   paperLegend.classList.add('visible');
+};
+
+const showFutuLegend = () => {
+  if (!futuLegend) return;
+  futuLegend.classList.add('visible');
+};
+
+const hideFutuLegend = () => {
+  if (!futuLegend) return;
+  futuLegend.classList.remove('visible');
 };
 
 const hidePaperLegend = () => {
@@ -2287,7 +2358,7 @@ const fillCapitalSummaryTable = (paperStatus) => {
   tb.appendChild(totalTr);
 };
 
-const refreshRealtimeQuotes = async () => {
+const collectTrackedSymbols = () => {
   const typedSymbols = (document.getElementById('pSymbols')?.value || '')
     .split(',')
     .map((s) => s.trim().toUpperCase())
@@ -2295,7 +2366,208 @@ const refreshRealtimeQuotes = async () => {
   const portfolioSymbols = (lastPortfolio?.asset_forecasts || [])
     .map((x) => String(x.symbol || '').toUpperCase())
     .filter(Boolean);
-  const symbols = Array.from(new Set([...portfolioSymbols, ...typedSymbols]));
+  const paperSnapshotSymbols = (latestPaperStatus?.latest_snapshot?.symbols || [])
+    .map((x) => String(x.symbol || '').toUpperCase())
+    .filter(Boolean);
+  const futuSnapshotSymbols = (latestFutuStatus?.latest_snapshot?.symbols || [])
+    .map((x) => String(x.symbol || '').toUpperCase())
+    .filter(Boolean);
+
+  return Array.from(new Set([
+    ...portfolioSymbols,
+    ...typedSymbols,
+    ...paperSnapshotSymbols,
+    ...futuSnapshotSymbols,
+  ]));
+};
+
+const renderRealtimeMarketGrid = (gridId, snapshot, fallbackSymbols = []) => {
+  const rtGrid = document.getElementById(gridId);
+  if (!rtGrid) return;
+
+  rtGrid.innerHTML = '';
+  const holdings = new Set(snapshot?.holdings_symbols || []);
+  const snapshotMap = new Map((snapshot?.symbols || []).map(x => [x.symbol, x]));
+  const allInputs = new Set([...(fallbackSymbols || [])]);
+  for (const s of (snapshot?.symbols || [])) allInputs.add(s.symbol);
+
+  if (allInputs.size === 0) {
+    rtGrid.innerHTML = `<div class='empty-state'><div class='empty-state-icon'>📡</div>No symbols tracked yet.<br>Waiting for execution snapshot.</div>`;
+    return;
+  }
+
+  for (const sym of allInputs) {
+    const row = snapshotMap.get(sym);
+    const quotePx = Number(latestQuoteMap.get(sym));
+    const rowPrice = Number(row?.price);
+    const rtPrice = Number.isFinite(rowPrice) ? rowPrice : (Number.isFinite(quotePx) ? quotePx : null);
+    const source = rtPrice != null ? 'rt' : 'snapshot';
+    const price = rtPrice;
+    const isHolding = holdings.has(sym);
+
+    const ch = row?.change_1m;
+    const chPct = row?.change_1m_pct;
+    const hasCh = Number.isFinite(ch);
+    const chSign = hasCh ? (ch >= 0 ? '+' : '') : '';
+    const chClass = hasCh ? (ch >= 0 ? 'up' : 'down') : '';
+    const cardMood = hasCh ? (ch >= 0 ? 'card-up' : 'card-down') : 'card-neutral';
+
+    const sourceBadge = source === 'rt'
+      ? `<span class='source-badge rt'>RT</span>`
+      : `<span class='source-badge forecast'>SNAP</span>`;
+    const updatedText = source === 'rt' ? lastQuotesStampText : '--';
+    const exchangeRawMs = Number(latestQuoteExchangeTsMap.get(sym));
+    const exchangeText = source === 'rt' && Number.isFinite(exchangeRawMs) && exchangeRawMs > 0
+      ? (() => {
+        const d = new Date(exchangeRawMs);
+        return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+      })()
+      : '--';
+
+    const card = document.createElement('div');
+    card.className = `rt-card ${cardMood}`;
+    card.innerHTML = `
+      <div class='rt-card-header'>
+        <div class='rt-card-symbol'>${isHolding ? "<span class='rt-card-holding-dot' title='Holding'></span>" : ''}${sym}</div>
+        ${sourceBadge}
+      </div>
+      <div class='rt-card-price'>${price == null ? '--' : '$' + price.toFixed(2)}</div>
+      <div class='rt-card-change ${chClass}'>
+        ${hasCh ? `<span>${chSign}${ch.toFixed(3)}</span><span>(${chSign}${chPct.toFixed(3)}%)</span>` : '<span style="color:var(--muted-2)">1m: --</span>'}
+      </div>
+      <div class='rt-card-footer'>
+        <span class='rt-card-updated'>Upd ${updatedText} · Exch ${exchangeText}</span>
+      </div>
+    `;
+    rtGrid.appendChild(card);
+  }
+};
+
+const renderFutuChartSummaryStrip = () => {
+  const strip = document.getElementById('futuChartSummaryStrip');
+  if (!strip) return;
+
+  const latest = futuFullContext?.latest;
+  const series = futuFullContext?.portfolioSeries || [];
+  if (!latest || series.length === 0) {
+    strip.style.display = 'none';
+    return;
+  }
+
+  const nav = Number(latest.portfolioValue);
+  const pnlPct = Number(latest.portfolioPnlPct);
+  const spreadPct = Number(latest.spreadPct);
+
+  let dailyChange = null;
+  let dailyChangePct = null;
+  if (series.length >= 2) {
+    const cur = Number(series[series.length - 1]?.value);
+    const prev = Number(series[series.length - 2]?.value);
+    if (Number.isFinite(cur) && Number.isFinite(prev) && prev > 0) {
+      dailyChange = cur - prev;
+      dailyChangePct = ((cur - prev) / prev) * 100;
+    }
+  }
+
+  const upDown = (v) => Number.isFinite(v) ? (v >= 0 ? 'up' : 'down') : '';
+  strip.style.display = '';
+  strip.innerHTML = `
+    <div class='strip-item'>
+      <span class='strip-label'>NAV</span>
+      <span class='strip-val'>${Number.isFinite(nav) ? '$' + nav.toFixed(2) : '--'}</span>
+    </div>
+    <div class='strip-item'>
+      <span class='strip-label'>PnL</span>
+      <span class='strip-val ${upDown(pnlPct)}'>${Number.isFinite(pnlPct) ? `${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%` : '--'}</span>
+    </div>
+    <div class='strip-item'>
+      <span class='strip-label'>Last Δ</span>
+      <span class='strip-val ${upDown(dailyChange)}'>${Number.isFinite(dailyChange) ? `${dailyChange >= 0 ? '+' : ''}$${dailyChange.toFixed(2)} (${dailyChangePct.toFixed(2)}%)` : '--'}</span>
+    </div>
+    <div class='strip-item'>
+      <span class='strip-label'>vs Bench</span>
+      <span class='strip-val ${upDown(spreadPct)}'>${Number.isFinite(spreadPct) ? `${spreadPct >= 0 ? '+' : ''}${spreadPct.toFixed(2)}%` : '--'}</span>
+    </div>
+  `;
+};
+
+const renderFutuChartFromCurrentContext = () => {
+  futuMetricsByTime = futuFullContext?.metricsByTime || new Map();
+  if (futuFullContext?.portfolioSeries?.length > 0) {
+    futuPortfolioLine.setData(ensureVisibleSeries(futuFullContext.portfolioSeries));
+    futuBenchmarkLine.setData(futuFullContext.benchmarkSeries?.length > 0 ? ensureVisibleSeries(futuFullContext.benchmarkSeries) : []);
+    futuChart.fit();
+    setFutuLegendText(futuFullContext.latest || null);
+  } else {
+    futuPortfolioLine.setData([]);
+    futuBenchmarkLine.setData([]);
+    setFutuLegendText(null);
+  }
+};
+
+const fillFutuHoldingsTable = (futuStatus) => {
+  const tb = document.querySelector('#futuHoldingsTable tbody');
+  if (!tb) return;
+  const holdingsPoolBadge = document.getElementById('futuHoldingsPoolBadge');
+  tb.innerHTML = '';
+
+  const snapshot = futuStatus?.latest_snapshot;
+  const holdingsSet = new Set(snapshot?.holdings_symbols || []);
+  const snapshotMap = new Map((snapshot?.symbols || []).map(x => [x.symbol, x]));
+  const holdingsMap = new Map((snapshot?.holdings || []).map(x => [x.symbol, x]));
+
+  if (holdingsPoolBadge) {
+    const symbols = Array.from(new Set((snapshot?.symbols || []).map((x) => String(x.symbol || '').toUpperCase()).filter(Boolean)));
+    const holdingCount = holdingsSet.size;
+    const poolCount = symbols.length;
+    const inPoolHeldCount = symbols.filter(symbol => holdingsSet.has(symbol)).length;
+    const notHeldCount = Math.max(0, poolCount - inPoolHeldCount);
+    holdingsPoolBadge.textContent = `Holding ${holdingCount} · In Pool ${poolCount} · Not Held ${notHeldCount}`;
+  }
+
+  const orderedSymbols = Array.from(holdingsSet).sort();
+  if (orderedSymbols.length === 0) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td colspan='8'><div class='empty-state'><div class='empty-state-icon'>📊</div>No Futu holdings yet.<br>Check Futu API connection and position stream.</div></td>`;
+    tb.appendChild(tr);
+    return;
+  }
+
+  for (const sym of orderedSymbols) {
+    const row = snapshotMap.get(sym);
+    const holding = holdingsMap.get(sym);
+    const currentPrice = row?.price ?? latestQuoteMap.get(sym);
+    const quantity = holding?.quantity ?? null;
+    const assetValue = holding?.asset_value ?? (quantity != null && currentPrice != null ? quantity * currentPrice : null);
+    const avgCost = Number(holding?.avg_cost);
+    const validAvgCost = Number.isFinite(avgCost) && avgCost > 0 ? avgCost : null;
+
+    let unrealizedText = '--';
+    let unrealizedClass = '';
+    if (quantity != null && currentPrice != null && validAvgCost != null && quantity > 0) {
+      const unrealizedUsd = (currentPrice - validAvgCost) * quantity;
+      const unrealizedPct = validAvgCost !== 0 ? ((currentPrice - validAvgCost) / validAvgCost) * 100 : 0;
+      unrealizedText = `${formatSignedMoney(unrealizedUsd)} (${unrealizedPct >= 0 ? '+' : ''}${unrealizedPct.toFixed(2)}%)`;
+      unrealizedClass = unrealizedUsd >= 0 ? 'up' : 'down';
+    }
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${sym}</td>
+      <td class='up'>Holding</td>
+      <td class='num'>${quantity == null ? '--' : quantity.toFixed(2)}</td>
+      <td class='num'>${currentPrice == null ? '--' : '$' + currentPrice.toFixed(2)}</td>
+      <td class='num'>${validAvgCost == null ? '--' : '$' + validAvgCost.toFixed(2)}</td>
+      <td class='num'>${assetValue == null ? '--' : '$' + assetValue.toFixed(2)}</td>
+      <td class='num'>--</td>
+      <td class='num ${unrealizedClass}'>${unrealizedText}</td>
+    `;
+    tb.appendChild(tr);
+  }
+};
+
+const refreshRealtimeQuotes = async () => {
+  const symbols = collectTrackedSymbols();
   if (!symbols.length) return;
   const now = Date.now();
   if (now - lastQuotesAt < 25000) return;
@@ -2362,6 +2634,11 @@ const portfolioLine = paperChart.addLineSeries({ color: '#00d4aa', lineWidth: 2 
 const benchmarkLine = paperChart.addLineSeries({ color: '#f59e0b', lineWidth: 2 });
 attachChartAutoResize(paperChart);
 
+const futuChart = createChartCompat('futuChart');
+const futuPortfolioLine = futuChart.addLineSeries({ color: '#00d4aa', lineWidth: 2 });
+const futuBenchmarkLine = futuChart.addLineSeries({ color: '#f59e0b', lineWidth: 2 });
+attachChartAutoResize(futuChart);
+
 for (const btn of tradeFilterButtons) {
   btn.addEventListener('click', () => {
     for (const b of tradeFilterButtons) b.classList.remove('active');
@@ -2417,9 +2694,31 @@ if (paperChart?.chart && typeof paperChart.chart.subscribeCrosshairMove === 'fun
   });
 }
 
+if (futuChart?.container) {
+  futuChart.container.addEventListener('mouseenter', showFutuLegend);
+  futuChart.container.addEventListener('mouseleave', hideFutuLegend);
+}
+
+if (futuChart?.chart && typeof futuChart.chart.subscribeCrosshairMove === 'function') {
+  futuChart.chart.subscribeCrosshairMove((param) => {
+    if (!param || !param.time) return;
+    const t = typeof param.time === 'number'
+      ? param.time
+      : (typeof param.time?.timestamp === 'number' ? param.time.timestamp : null);
+    if (t == null) return;
+
+    const metrics = futuMetricsByTime.get(t);
+    if (metrics) {
+      setFutuLegendText(metrics);
+      showFutuLegend();
+    }
+  });
+}
+
 window.addEventListener('resize', () => {
   fChart.resize();
   paperChart.resize();
+  futuChart.resize();
 });
 
 const setPaperStatusChip = (status) => {
@@ -2528,6 +2827,7 @@ const renderChartSummaryStrip = () => {
 const refreshPaper = async () => {
   try {
     const st = await api('/api/paper/status');
+    latestPaperStatus = st;
     setDataSourceChip(
       st?.data_live_source,
       !!st?.data_ws_connected,
@@ -2537,84 +2837,60 @@ const refreshPaper = async () => {
     setPaperApplyAutoOptimizing(!!st?.auto_optimizing);
     hydratePaperOptimizationFromStatus(st);
     setPaperStatusChip(st);
+
+    const paperExecDot = document.getElementById('paperExecDot');
+    const paperExecStatus = document.getElementById('paperExecStatus');
+    const paperExecCapital = document.getElementById('paperExecCapital');
+    const paperExecSchedule = document.getElementById('paperExecSchedule');
+    const paperExecNextOpt = document.getElementById('paperExecNextOpt');
+    const paperExecPool = document.getElementById('paperExecPool');
+    if (paperExecStatus) {
+      if (st.running && st.paused) {
+        paperExecStatus.textContent = 'PAUSED';
+        paperExecDot?.classList.remove('active');
+        paperExecDot?.classList.add('paused');
+      } else if (st.running) {
+        paperExecStatus.textContent = 'RUNNING';
+        paperExecDot?.classList.remove('paused');
+        paperExecDot?.classList.add('active');
+      } else {
+        paperExecStatus.textContent = 'IDLE';
+        paperExecDot?.classList.remove('active');
+        paperExecDot?.classList.remove('paused');
+      }
+    }
+    if (paperExecCapital) {
+      const capVal = Number(document.getElementById('paperCapital')?.value) || 0;
+      paperExecCapital.textContent = capVal > 0 ? capVal.toLocaleString() : '--';
+    }
+    if (paperExecSchedule) {
+      const t1 = document.getElementById('paperTime1')?.value || '--';
+      const t2 = document.getElementById('paperTime2')?.value || '--';
+      paperExecSchedule.textContent = `${t1} / ${t2}`;
+    }
+    if (paperExecNextOpt) {
+      paperExecNextOpt.textContent = document.getElementById('paperCtrlNextOpt')?.textContent || '--';
+    }
+    if (paperExecPool) {
+      paperExecPool.textContent = document.getElementById('paperCtrlPool')?.textContent || '0 symbols';
+    }
+
     syncPaperButtons(st);
     hydratePaperTargetsFromStatus(st);
+    renderStrategyDispatchPreview();
 
     const ctx = buildPaperSeriesContext(st.snapshots || []);
     paperFullContext = ctx.portfolioSeries.length > 0 ? ctx : buildFallbackPaperContext(st.latest_snapshot);
     renderPaperChartFromCurrentContext();
     renderChartSummaryStrip();
-    await refreshRealtimeQuotes();
-
-    const rtGrid = document.getElementById('rtMarketGrid');
-    if (rtGrid) rtGrid.innerHTML = '';
-
-    const snapshot = st.latest_snapshot;
-    const holdings = new Set(snapshot?.holdings_symbols || []);
-    const forecastMap = new Map((lastPortfolio?.asset_forecasts || []).map(x => [x.symbol, x.current_price]));
-    const snapshotMap = new Map((snapshot?.symbols || []).map(x => [x.symbol, x]));
-    const typedInputs = (document.getElementById('pSymbols')?.value || '')
-      .split(',')
-      .map(s => s.trim().toUpperCase())
-      .filter(Boolean);
-
-    const allInputs = new Set([...(lastPortfolio?.asset_forecasts || []).map(x => x.symbol), ...typedInputs]);
-    for (const s of (snapshot?.symbols || [])) allInputs.add(s.symbol);
-
-    if (rtGrid) {
-      if (allInputs.size === 0) {
-        rtGrid.innerHTML = `<div class='empty-state'><div class='empty-state-icon'>📡</div>No symbols tracked yet.<br>Run portfolio optimization or start paper trading.</div>`;
-      } else {
-        for (const sym of allInputs) {
-          const row = snapshotMap.get(sym);
-          const forecastPx = Number(forecastMap.get(sym));
-          const quotePx = Number(latestQuoteMap.get(sym));
-          const fallback = Number.isFinite(forecastPx) ? forecastPx : null;
-          const rowPrice = Number(row?.price);
-          const rtPrice = Number.isFinite(rowPrice) ? rowPrice : (Number.isFinite(quotePx) ? quotePx : null);
-          const source = rtPrice != null ? 'rt' : 'forecast';
-          const price = rtPrice ?? fallback;
-          const isHolding = holdings.has(sym);
-
-          // 1m change from snapshot
-          const ch = row?.change_1m;
-          const chPct = row?.change_1m_pct;
-          const hasCh = Number.isFinite(ch);
-          const chSign = hasCh ? (ch >= 0 ? '+' : '') : '';
-          const chClass = hasCh ? (ch >= 0 ? 'up' : 'down') : '';
-          const cardMood = hasCh ? (ch >= 0 ? 'card-up' : 'card-down') : 'card-neutral';
-
-          const sourceBadge = source === 'rt'
-            ? `<span class='source-badge rt'>RT</span>`
-            : `<span class='source-badge forecast'>FC</span>`;
-          const updatedText = source === 'rt' ? lastQuotesStampText : '--';
-          const exchangeRawMs = Number(latestQuoteExchangeTsMap.get(sym));
-          const exchangeText = source === 'rt' && Number.isFinite(exchangeRawMs) && exchangeRawMs > 0
-            ? (() => {
-              const d = new Date(exchangeRawMs);
-              return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
-            })()
-            : '--';
-
-          const card = document.createElement('div');
-          card.className = `rt-card ${cardMood}`;
-          card.innerHTML = `
-            <div class='rt-card-header'>
-              <div class='rt-card-symbol'>${isHolding ? "<span class='rt-card-holding-dot' title='Holding'></span>" : ''}${sym}</div>
-              ${sourceBadge}
-            </div>
-            <div class='rt-card-price'>${price == null ? '--' : '$' + price.toFixed(2)}</div>
-            <div class='rt-card-change ${chClass}'>
-              ${hasCh ? `<span>${chSign}${ch.toFixed(3)}</span><span>(${chSign}${chPct.toFixed(3)}%)</span>` : '<span style="color:var(--muted-2)">1m: --</span>'}
-            </div>
-            <div class='rt-card-footer'>
-              <span class='rt-card-updated'>Upd ${updatedText} · Exch ${exchangeText}</span>
-            </div>
-          `;
-          rtGrid.appendChild(card);
-        }
-      }
-    }
+    const fallbackSymbols = [
+      ...(lastPortfolio?.asset_forecasts || []).map((x) => x.symbol),
+      ...(document.getElementById('pSymbols')?.value || '')
+        .split(',')
+        .map((s) => s.trim().toUpperCase())
+        .filter(Boolean),
+    ];
+    renderRealtimeMarketGrid('rtMarketGrid', st.latest_snapshot, fallbackSymbols);
 
     const logBox = document.getElementById('logBox');
     if (logBox) {
@@ -2651,6 +2927,91 @@ const refreshPaper = async () => {
 
 setInterval(refreshPaper, 4000);
 
+const refreshFutu = async () => {
+  try {
+    const st = await api('/api/futu/status');
+    latestFutuStatus = st;
+
+    const futuExecDot = document.getElementById('futuExecDot');
+    const futuExecStatus = document.getElementById('futuExecStatus');
+    const futuExecCapital = document.getElementById('futuExecCapital');
+    const futuExecPool = document.getElementById('futuExecPool');
+    const futuConnStatus = document.getElementById('futuConnStatus');
+    const futuConnSummary = document.getElementById('futuConnSummary');
+    const futuAccountCash = document.getElementById('futuAccountCash');
+    const futuBuyingPower = document.getElementById('futuBuyingPower');
+    const futuLastSync = document.getElementById('futuLastSync');
+
+    if (st.connected) {
+      futuExecStatus.textContent = 'RUNNING';
+      futuExecDot?.classList.remove('paused');
+      futuExecDot?.classList.add('active');
+      if (futuConnStatus) futuConnStatus.textContent = 'CONNECTED';
+      if (futuConnSummary) futuConnSummary.textContent = 'Futu API connected and holdings syncing';
+    } else {
+      futuExecStatus.textContent = 'DISCONNECTED';
+      futuExecDot?.classList.remove('active');
+      futuExecDot?.classList.remove('paused');
+      if (futuConnStatus) futuConnStatus.textContent = 'DISCONNECTED';
+      if (futuConnSummary) futuConnSummary.textContent = 'Waiting for Futu API or reconnecting';
+    }
+
+    if (futuExecCapital) {
+      const totalVal = Number(st?.latest_snapshot?.total_value);
+      futuExecCapital.textContent = Number.isFinite(totalVal) ? totalVal.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '--';
+    }
+    if (futuExecPool) {
+      const count = Number(st?.latest_snapshot?.symbols?.length || 0);
+      futuExecPool.textContent = `${count} symbols`;
+    }
+
+    if (futuAccountCash) {
+      const v = Number(st?.account_cash_usd);
+      futuAccountCash.textContent = Number.isFinite(v) ? `$${v.toFixed(2)}` : '--';
+    }
+    if (futuBuyingPower) {
+      const v = Number(st?.account_buying_power_usd);
+      futuBuyingPower.textContent = Number.isFinite(v) ? `$${v.toFixed(2)}` : '--';
+    }
+    if (futuLastSync) {
+      const ts = st?.latest_snapshot?.timestamp;
+      futuLastSync.textContent = ts ? new Date(ts).toLocaleTimeString() : '--';
+    }
+
+    const ctx = buildPaperSeriesContext(st.snapshots || []);
+    futuFullContext = ctx.portfolioSeries.length > 0 ? ctx : buildFallbackPaperContext(st.latest_snapshot);
+    renderFutuChartFromCurrentContext();
+    renderFutuChartSummaryStrip();
+
+    fillFutuHoldingsTable(st);
+    renderRealtimeMarketGrid('futuRtMarketGrid', st.latest_snapshot);
+
+    const futuLogBox = document.getElementById('futuLogBox');
+    if (futuLogBox) {
+      const escapeHtml = (value) => String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+      futuLogBox.innerHTML = (st.logs || []).slice(-20).map((x) => {
+        const text = String(x || '');
+        const lower = text.toLowerCase();
+        const cls = lower.includes('error:')
+          ? 'log-error'
+          : (lower.includes('warning:') || lower.includes('[warning]') || lower.includes('disconnect')
+            ? 'log-warn'
+            : '');
+        return `<div class="${cls}">${escapeHtml(text)}</div>`;
+      }).join('');
+    }
+  } catch (e) {
+    console.warn(e);
+  }
+};
+
+setInterval(refreshFutu, 4000);
+
 const paperControl = async (path, body = {}, options = {}) => {
   try {
     await api(path, { method: 'POST', body: JSON.stringify(body) });
@@ -2674,6 +3035,32 @@ const paperControl = async (path, body = {}, options = {}) => {
 const buildPaperTargetsPayload = (symbols) => {
   const weight = symbols.length > 0 ? 1 / symbols.length : 0;
   return symbols.map(symbol => ({ symbol, weight }));
+};
+
+const buildStrategyStartPayloadPreview = () => {
+  let symbols = [...manualPaperTargets];
+  if (!symbols.length && lastPortfolio?.weights?.length) {
+    symbols = lastPortfolio.weights
+      .map(([symbol]) => String(symbol || '').toUpperCase())
+      .filter(Boolean);
+  }
+  symbols = [...new Set(symbols)].sort();
+  const targets = buildPaperTargetsPayload(symbols);
+
+  return {
+    targets,
+    initial_capital: Number(document.getElementById('paperCapital')?.value),
+    time1: document.getElementById('paperTime1')?.value || '23:30',
+    time2: document.getElementById('paperTime2')?.value || '02:30',
+    optimization_time: (paperOptTimeInput?.value || '22:00').trim() || '22:00',
+    optimization_weekdays: getPaperOptimizationWeekdays(),
+    apply_now_on_universe_update: paperApplyNowCheckbox ? !!paperApplyNowCheckbox.checked : true,
+  };
+};
+
+const renderStrategyDispatchPreview = () => {
+  if (!strategyPayloadPreview) return;
+  strategyPayloadPreview.textContent = JSON.stringify(buildStrategyStartPayloadPreview(), null, 2);
 };
 
 const formatOptWeekday = (w) => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][w - 1] || '--';
@@ -2979,8 +3366,11 @@ document.getElementById('trainStart').addEventListener('click', async () => {
 });
 
 refreshPaper();
+refreshFutu();
 refreshTrain();
 renderPaperTargetChips();
+refreshRealtimeQuotes();
+setInterval(refreshRealtimeQuotes, 12000);
 
 const restoreState = async () => {
   try {
@@ -3093,6 +3483,16 @@ const restoreState = async () => {
       renderPaperRiskAlerts(state.paper);
     }
 
+    if (state.futu) {
+      latestFutuStatus = state.futu;
+      const ctx = buildPaperSeriesContext(state.futu.snapshots || []);
+      futuFullContext = ctx.portfolioSeries.length > 0 ? ctx : buildFallbackPaperContext(state.futu.latest_snapshot);
+      renderFutuChartFromCurrentContext();
+      renderFutuChartSummaryStrip();
+      fillFutuHoldingsTable(state.futu);
+      renderRealtimeMarketGrid('futuRtMarketGrid', state.futu.latest_snapshot);
+    }
+
     if (state.train) {
       const rawBox = document.getElementById('trainRawJson');
       if (rawBox) rawBox.textContent = JSON.stringify(state.train, null, 2);
@@ -3164,10 +3564,12 @@ const syncPaperCtrlBadges = () => {
   if (capEl) capEl.textContent = capVal > 0 ? capVal.toLocaleString() : '--';
   if (schedEl) schedEl.textContent = `${t1} / ${t2}`;
   syncNextOptimizationBadge();
+  renderStrategyDispatchPreview();
 };
 document.getElementById('paperCapital')?.addEventListener('input', syncPaperCtrlBadges);
 document.getElementById('paperTime1')?.addEventListener('input', syncPaperCtrlBadges);
 document.getElementById('paperTime2')?.addEventListener('input', syncPaperCtrlBadges);
+paperApplyNowCheckbox?.addEventListener('change', renderStrategyDispatchPreview);
 paperOptTimeInput?.addEventListener('input', () => {
   syncNextOptimizationBadge();
   persistPaperOptimizationSettings(250);
@@ -3177,7 +3579,30 @@ paperOptWeekdayChecks.forEach(el => el.addEventListener('change', () => {
   persistPaperOptimizationSettings(120);
 }));
 syncPaperCtrlBadges();
+renderStrategyDispatchPreview();
 setInterval(syncNextOptimizationBadge, 60000);
+
+document.getElementById('paperJumpStrategy')?.addEventListener('click', () => {
+  switchTabByName('strategy');
+});
+
+document.getElementById('futuJumpStrategy')?.addEventListener('click', () => {
+  switchTabByName('strategy');
+});
+
+if (strategyCopyPayloadBtn) {
+  strategyCopyPayloadBtn.addEventListener('click', async () => {
+    const text = JSON.stringify(buildStrategyStartPayloadPreview(), null, 2);
+    try {
+      await navigator.clipboard.writeText(text);
+      if (strategyPayloadHint) strategyPayloadHint.textContent = 'Copied start payload to clipboard.';
+      setStatus('Strategy start payload copied.', 'ok');
+    } catch (e) {
+      if (strategyPayloadHint) strategyPayloadHint.textContent = 'Copy failed. Please copy manually from preview.';
+      setStatus(e?.message || 'Copy failed', 'err');
+    }
+  });
+}
 
 const paperCtrlBodyEl = document.getElementById('paperCtrlBody');
 const paperCtrlChevron = document.getElementById('paperCtrlToggle');

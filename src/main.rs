@@ -12,6 +12,7 @@ mod train;
 mod tui;
 mod ui;
 mod gui;
+mod futu;
 mod webui;
 
 use app::App;
