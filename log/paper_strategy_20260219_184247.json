@@ -30,23 +30,23 @@
   "targets": [
     {
       "symbol": "COPX",
-      "target_weight": 0.10717809172921454
+      "target_weight": 0.09423970608894709
     },
     {
       "symbol": "ETN",
-      "target_weight": 0.15989717649507035
+      "target_weight": 0.12060621923898487
     },
     {
       "symbol": "IAU",
-      "target_weight": 0.3995442806441529
+      "target_weight": 0.39996178931126597
     },
     {
       "symbol": "NVDA",
-      "target_weight": 0.09110390083434532
+      "target_weight": 0.07228530264315638
     },
     {
       "symbol": "TLT",
-      "target_weight": 0.24227655029721695
+      "target_weight": 0.31290698271764567
     }
   ],
   "analyses": [
@@ -647,7 +647,7 @@
           "quantity": 1.0,
           "price": 96.35,
           "notional": 96.35,
-          "fee": 0.048174999999999996
+          "fee": 0.048175
         },
         {
           "timestamp": "2026-02-26T02:30:01.473492100+08:00",
@@ -656,7 +656,7 @@
           "quantity": 1.0,
           "price": 375.16,
           "notional": 375.16,
-          "fee": 0.18758000000000002
+          "fee": 0.18758
         },
         {
           "timestamp": "2026-02-26T02:30:01.473492100+08:00",
@@ -682,7 +682,7 @@
           "quantity": 24.0,
           "price": 92.15,
           "notional": 2211.6000000000004,
-          "fee": 1.1058000000000001
+          "fee": 1.1058
         },
         {
           "timestamp": "2026-02-26T23:30:45.059707700+08:00",
@@ -700,7 +700,7 @@
           "quantity": 2.0,
           "price": 97.1,
           "notional": 194.2,
-          "fee": 0.09709999999999999
+          "fee": 0.0971
         },
         {
           "timestamp": "2026-02-26T23:30:45.059707700+08:00",
@@ -709,7 +709,7 @@
           "quantity": 36.0,
           "price": 187.05,
           "notional": 6733.8,
-          "fee": 3.3669000000000002
+          "fee": 3.3669
         },
         {
           "timestamp": "2026-02-26T23:30:45.059707700+08:00",
@@ -717,7 +717,7 @@
           "side": "SELL",
           "quantity": 11.0,
           "price": 90.185,
-          "notional": 992.0350000000001,
+          "notional": 992.035,
           "fee": 0.49601750000000006
         }
       ]
@@ -745,6 +745,94 @@
           "price": 90.2,
           "notional": 90.2,
           "fee": 0.0451
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-02-27T23:30:52.666106900+08:00",
+      "portfolio_value_before": 82554.93274575981,
+      "portfolio_value_after": 82548.81253075982,
+      "cash_after": 563.0325307598232,
+      "trades": [
+        {
+          "timestamp": "2026-02-27T23:30:52.666106900+08:00",
+          "symbol": "COPX",
+          "side": "SELL",
+          "quantity": 14.0,
+          "price": 96.24,
+          "notional": 1347.36,
+          "fee": 0.67368
+        },
+        {
+          "timestamp": "2026-02-27T23:30:52.666106900+08:00",
+          "symbol": "ETN",
+          "side": "SELL",
+          "quantity": 9.0,
+          "price": 373.29,
+          "notional": 3359.61,
+          "fee": 1.679805
+        },
+        {
+          "timestamp": "2026-02-27T23:30:52.666106900+08:00",
+          "symbol": "IAU",
+          "side": "SELL",
+          "quantity": 1.0,
+          "price": 98.62,
+          "notional": 98.62,
+          "fee": 0.04931000000000001
+        },
+        {
+          "timestamp": "2026-02-27T23:30:52.666106900+08:00",
+          "symbol": "NVDA",
+          "side": "SELL",
+          "quantity": 8.0,
+          "price": 181.905,
+          "notional": 1455.24,
+          "fee": 0.72762
+        },
+        {
+          "timestamp": "2026-02-27T23:30:52.666106900+08:00",
+          "symbol": "TLT",
+          "side": "BUY",
+          "quantity": 66.0,
+          "price": 90.6,
+          "notional": 5979.599999999999,
+          "fee": 2.9898
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-02-28T02:30:01.933715+08:00",
+      "portfolio_value_before": 82292.29464075982,
+      "portfolio_value_after": 82292.06680731382,
+      "cash_after": 470.0715893138232,
+      "trades": [
+        {
+          "timestamp": "2026-02-28T02:30:01.933715+08:00",
+          "symbol": "COPX",
+          "side": "BUY",
+          "quantity": 1.0,
+          "price": 94.955,
+          "notional": 94.955,
+          "fee": 0.0474775
+        },
+        {
+          "timestamp": "2026-02-28T02:30:01.933715+08:00",
+          "symbol": "NVDA",
+          "side": "BUY",
+          "quantity": 1.0,
+          "price": 179.245,
+          "notional": 179.245,
+          "fee": 0.08962250000000001
+        },
+        {
+          "timestamp": "2026-02-28T02:30:01.933715+08:00",
+          "symbol": "TLT",
+          "side": "SELL",
+          "quantity": 2.0,
+          "price": 90.733446,
+          "notional": 181.466892,
+          "fee": 0.09073344600000001
         }
       ]
     }
