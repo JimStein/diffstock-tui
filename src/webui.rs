@@ -212,6 +212,10 @@ struct FutuRuntimeState {
     data_ws_connected: bool,
     data_ws_diagnostics: data::WsDiagnostics,
     data_live_fetch_diagnostics: data::LiveFetchDiagnostics,
+    #[serde(skip_serializing)]
+    modify_order_request_ms: Vec<i64>,
+    #[serde(skip_serializing)]
+    last_modify_order_request_ms: i64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -295,6 +299,8 @@ impl Default for FutuRuntimeState {
             data_ws_connected: false,
             data_ws_diagnostics: data::WsDiagnostics::default(),
             data_live_fetch_diagnostics: data::LiveFetchDiagnostics::default(),
+            modify_order_request_ms: Vec::new(),
+            last_modify_order_request_ms: 0,
         }
     }
 }
@@ -457,6 +463,21 @@ struct FutuManualOrderRequest {
 }
 
 #[derive(Debug, Deserialize)]
+struct FutuModifyOrderApiRequest {
+    modify_order_op: String,
+    order_id: String,
+    qty: Option<f64>,
+    price: Option<f64>,
+    adjust_limit: Option<f64>,
+    trd_env: Option<String>,
+    acc_id: Option<String>,
+    aux_price: Option<f64>,
+    trail_type: Option<String>,
+    trail_value: Option<f64>,
+    trail_spread: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
 struct FutuAccountApplyRequest {
     acc_id: String,
 }
@@ -513,6 +534,7 @@ pub async fn run_webui_server(port: u16, backend_default: config::ComputeBackend
         .route("/api/futu/status", get(futu_status))
         .route("/api/futu/activity-config", post(futu_activity_config))
         .route("/api/futu/manual-order", post(futu_manual_order))
+        .route("/api/futu/modify-order", post(futu_modify_order))
         .route("/api/futu/account-list", get(futu_account_list))
         .route("/api/futu/account-apply", post(futu_account_apply))
         .route("/api/futu/start", post(futu_start))
@@ -1025,6 +1047,193 @@ async fn futu_manual_order(
         "order_type": order_type,
         "time_in_force": req.time_in_force,
         "session": req.session,
+        "response": response,
+    })))
+}
+
+async fn futu_modify_order(
+    State(state): State<WebState>,
+    Json(req): Json<FutuModifyOrderApiRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ApiError>)> {
+    const MODIFY_ORDER_WINDOW_MS: i64 = 30_000;
+    const MODIFY_ORDER_MAX_REQ: usize = 20;
+    const MODIFY_ORDER_MIN_INTERVAL_MS: i64 = 40;
+
+    let order_id = req.order_id.trim().to_string();
+    if order_id.is_empty() {
+        return Err(api_err(StatusCode::BAD_REQUEST, "order_id is required"));
+    }
+
+    let op_raw = req.modify_order_op.trim().to_uppercase();
+    let modify_order_op = if op_raw.contains("CANCEL") || op_raw.contains("DELETE") {
+        "CANCEL".to_string()
+    } else if op_raw.contains("NORMAL") {
+        "NORMAL".to_string()
+    } else {
+        return Err(api_err(
+            StatusCode::BAD_REQUEST,
+            "modify_order_op must be NORMAL or CANCEL",
+        ));
+    };
+
+    let qty = req.qty.unwrap_or(0.0);
+    let price = req.price.unwrap_or(0.0);
+    if modify_order_op == "NORMAL" {
+        if !qty.is_finite() || qty <= 0.0 {
+            return Err(api_err(StatusCode::BAD_REQUEST, "qty must be > 0 for NORMAL"));
+        }
+        if !price.is_finite() || price <= 0.0 {
+            return Err(api_err(StatusCode::BAD_REQUEST, "price must be > 0 for NORMAL"));
+        }
+    }
+
+    let mut acc_id;
+    let mut trd_env;
+    let mut order_symbol = "--".to_string();
+    let mut order_side = "--".to_string();
+    let mut order_status = "--".to_string();
+    {
+        let fs = state.futu.lock().await;
+        acc_id = fs.selected_acc_id.clone();
+        trd_env = fs
+            .selected_trd_env
+            .clone()
+            .unwrap_or_else(|| "SIMULATE".to_string())
+            .to_uppercase();
+
+        if let Some(row) = fs.open_orders.iter().find(|row| {
+            futu_json_get_string(row, &["order_id", "id"]).unwrap_or_default() == order_id
+        }) {
+            order_symbol = futu_json_get_string(row, &["code", "symbol", "ticker"])
+                .unwrap_or_else(|| "--".to_string());
+            order_side =
+                futu_json_get_string(row, &["trd_side", "side"]).unwrap_or_else(|| "--".to_string());
+            order_status = futu_json_get_string(row, &["order_status", "status"])
+                .unwrap_or_else(|| "--".to_string());
+        }
+    }
+
+    if let Some(req_env) = req.trd_env.as_ref().map(|v| v.trim().to_uppercase()) {
+        if !req_env.is_empty() {
+            trd_env = req_env;
+        }
+    }
+    if let Some(req_acc) = req.acc_id.as_ref().map(|v| v.trim().to_string()) {
+        if !req_acc.is_empty() {
+            acc_id = Some(req_acc);
+        }
+    }
+
+    if trd_env != "SIMULATE" {
+        return Err(api_err(
+            StatusCode::BAD_REQUEST,
+            "modify/cancel is allowed only in SIMULATE mode",
+        ));
+    }
+
+    let mut wait_ms = 0_i64;
+    {
+        let mut fs = state.futu.lock().await;
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        fs.modify_order_request_ms
+            .retain(|ts| now_ms.saturating_sub(*ts) <= MODIFY_ORDER_WINDOW_MS);
+        if fs.modify_order_request_ms.len() >= MODIFY_ORDER_MAX_REQ {
+            return Err(api_err(
+                StatusCode::TOO_MANY_REQUESTS,
+                "modify/cancel rate limit exceeded: max 20 requests per 30 seconds",
+            ));
+        }
+        if fs.last_modify_order_request_ms > 0 {
+            let elapsed = now_ms.saturating_sub(fs.last_modify_order_request_ms);
+            if elapsed < MODIFY_ORDER_MIN_INTERVAL_MS {
+                wait_ms = MODIFY_ORDER_MIN_INTERVAL_MS - elapsed;
+            }
+        }
+        if wait_ms == 0 {
+            fs.last_modify_order_request_ms = now_ms;
+            fs.modify_order_request_ms.push(now_ms);
+        }
+    }
+
+    if wait_ms > 0 {
+        tokio::time::sleep(std::time::Duration::from_millis(wait_ms as u64)).await;
+        let mut fs = state.futu.lock().await;
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        fs.modify_order_request_ms
+            .retain(|ts| now_ms.saturating_sub(*ts) <= MODIFY_ORDER_WINDOW_MS);
+        if fs.modify_order_request_ms.len() >= MODIFY_ORDER_MAX_REQ {
+            return Err(api_err(
+                StatusCode::TOO_MANY_REQUESTS,
+                "modify/cancel rate limit exceeded: max 20 requests per 30 seconds",
+            ));
+        }
+        fs.last_modify_order_request_ms = now_ms;
+        fs.modify_order_request_ms.push(now_ms);
+    }
+
+    let mut client = futu::FutuApiClient::from_env().map_err(internal_err)?;
+    client.set_account_id_override(acc_id.clone());
+
+    let request = futu::FutuModifyOrderRequest {
+        order_id: order_id.clone(),
+        action: modify_order_op.clone(),
+        quantity: Some(if modify_order_op == "CANCEL" { 0.0 } else { qty }),
+        price: Some(if modify_order_op == "CANCEL" { 0.0 } else { price }),
+        adjust_limit: req.adjust_limit.or(Some(0.0)),
+        trd_env: Some(trd_env.clone()),
+        acc_id: acc_id.clone(),
+        aux_price: req.aux_price,
+        trail_type: req.trail_type.clone(),
+        trail_value: req.trail_value,
+        trail_spread: req.trail_spread,
+    };
+
+    let response = client.modify_or_cancel_order(&request).await.map_err(internal_err)?;
+
+    {
+        let mut fs = state.futu.lock().await;
+        fs.logs.push(runtime_log_with_ts(format!(
+            "Futu SIM manual {} order_id={} symbol={} side={} qty={:.4} price={:.4}",
+            modify_order_op,
+            order_id,
+            order_symbol,
+            order_side,
+            qty,
+            price,
+        )));
+
+        if modify_order_op == "CANCEL" {
+            fs.cancel_history.push(serde_json::json!({
+                "timestamp": chrono::Local::now().to_rfc3339(),
+                "order_id": order_id,
+                "symbol": order_symbol,
+                "trd_side": order_side,
+                "qty": qty,
+                "price": price,
+                "order_status": order_status,
+                "reason": "Manual cancel from Open Orders",
+                "signal_id": "manual",
+            }));
+            if fs.cancel_history.len() > 500 {
+                let keep_from = fs.cancel_history.len().saturating_sub(500);
+                fs.cancel_history = fs.cancel_history.split_off(keep_from);
+            }
+        }
+
+        if fs.logs.len() > 200 {
+            let keep_from = fs.logs.len().saturating_sub(200);
+            fs.logs = fs.logs.split_off(keep_from);
+        }
+    }
+
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "modify_order_op": modify_order_op,
+        "order_id": request.order_id,
+        "qty": request.quantity,
+        "price": request.price,
+        "trd_env": request.trd_env,
+        "acc_id": request.acc_id,
         "response": response,
     })))
 }
@@ -1768,8 +1977,13 @@ async fn futu_execution_loop(
                                                                     action: "CANCEL".to_string(),
                                                                     quantity: None,
                                                                     price: None,
+                                                                    adjust_limit: None,
                                                                     trd_env: env_value.clone(),
                                                                     acc_id: acc_value.clone(),
+                                                                    aux_price: None,
+                                                                    trail_type: None,
+                                                                    trail_value: None,
+                                                                    trail_spread: None,
                                                                 };
                                                                 match trade_client
                                                                     .modify_or_cancel_order(&cancel_req)

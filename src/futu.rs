@@ -3,7 +3,7 @@
 use anyhow::{Result, anyhow};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::process::Command;
+use std::process::{Command, Output};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FutuApiMode {
@@ -179,8 +179,13 @@ pub struct FutuModifyOrderRequest {
     pub action: String,
     pub quantity: Option<f64>,
     pub price: Option<f64>,
+    pub adjust_limit: Option<f64>,
     pub trd_env: Option<String>,
     pub acc_id: Option<String>,
+    pub aux_price: Option<f64>,
+    pub trail_type: Option<String>,
+    pub trail_value: Option<f64>,
+    pub trail_spread: Option<f64>,
 }
 
 impl FutuApiClient {
@@ -203,6 +208,18 @@ impl FutuApiClient {
 
     pub fn set_account_id_override(&mut self, account_id: Option<String>) {
         self.config.account_id = account_id.filter(|v| !v.trim().is_empty());
+    }
+
+    fn run_python_script(&self, script: String, context: &str) -> Result<Output> {
+        Command::new(&self.config.python_bin)
+            .env("PYTHONIOENCODING", "utf-8")
+            .env("PYTHONUTF8", "1")
+            .arg("-X")
+            .arg("utf8")
+            .arg("-c")
+            .arg(script)
+            .output()
+            .map_err(|e| anyhow!("failed to run python futu {} script: {}", context, e))
     }
 
     async fn get_json(&self, path: &str) -> Result<serde_json::Value> {
@@ -504,11 +521,7 @@ finally:
             .replace("__TRAIL_VALUE__", &trail_value.to_string())
             .replace("__TRAIL_SPREAD__", &trail_spread.to_string());
 
-        let output = Command::new(&self.config.python_bin)
-            .arg("-c")
-            .arg(script)
-            .output()
-            .map_err(|e| anyhow!("failed to run python futu place_order script: {}", e))?;
+        let output = self.run_python_script(script, "place_order")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -564,11 +577,18 @@ finally:
 
         let payload = serde_json::json!({
             "order_id": req.order_id,
+            "modify_order_op": req.action,
             "action": req.action,
             "quantity": req.quantity,
             "price": req.price,
+            "qty": req.quantity,
+            "adjust_limit": req.adjust_limit,
             "trd_env": req.trd_env.clone().or_else(|| self.config.trd_env.clone()),
             "acc_id": req.acc_id.clone().or_else(|| self.config.account_id.clone()),
+            "aux_price": req.aux_price,
+            "trail_type": req.trail_type,
+            "trail_value": req.trail_value,
+            "trail_spread": req.trail_spread,
         });
         self.post_json(&self.config.modify_order_path, &payload).await
     }
@@ -746,11 +766,7 @@ finally:
             .replace("__START__", &format!("{:?}", start_text))
             .replace("__END__", &format!("{:?}", end_text));
 
-        let output = Command::new(&self.config.python_bin)
-            .arg("-c")
-            .arg(script)
-            .output()
-            .map_err(|e| anyhow!("failed to run python futu history_order_list script: {}", e))?;
+        let output = self.run_python_script(script, "history_order_list")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -860,11 +876,7 @@ finally:
             .replace("__TRD_ENV__", &format!("{:?}", desired_env))
             .replace("__ACC_ID__", &format!("{:?}", desired_acc_id));
 
-        let output = Command::new(&self.config.python_bin)
-            .arg("-c")
-            .arg(script)
-            .output()
-            .map_err(|e| anyhow!("failed to run python futu deal_list script: {}", e))?;
+        let output = self.run_python_script(script, "deal_list")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -965,11 +977,7 @@ finally:
             .replace("__TRD_ENV__", &format!("{:?}", desired_env))
             .replace("__ACC_ID__", &format!("{:?}", desired_acc_id));
 
-        let output = Command::new(&self.config.python_bin)
-            .arg("-c")
-            .arg(script)
-            .output()
-            .map_err(|e| anyhow!("failed to run python futu order_list script: {}", e))?;
+        let output = self.run_python_script(script, "order_list")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -1033,6 +1041,16 @@ finally:
             .unwrap_or_default();
         let qty = req.quantity.unwrap_or(0.0);
         let price = req.price.unwrap_or(0.0);
+        let adjust_limit = req.adjust_limit.unwrap_or(0.0);
+        let aux_price = req.aux_price.unwrap_or(0.0);
+        let trail_type_text = req
+            .trail_type
+            .clone()
+            .unwrap_or_else(|| "NONE".to_string())
+            .trim()
+            .to_uppercase();
+        let trail_value = req.trail_value.unwrap_or(0.0);
+        let trail_spread = req.trail_spread.unwrap_or(0.0);
 
         let script = r#"
 import json
@@ -1060,10 +1078,19 @@ order_id = __ORDER_ID__.strip()
 op_text = __OP__.strip().upper()
 qty = float(__QTY__)
 price = float(__PRICE__)
+adjust_limit = float(__ADJUST_LIMIT__)
+aux_price = float(__AUX_PRICE__)
+trail_type_text = __TRAIL_TYPE__.strip().upper()
+trail_value = float(__TRAIL_VALUE__)
+trail_spread = float(__TRAIL_SPREAD__)
 
 market_enum = getattr(TrdMarket, market_text, TrdMarket.US)
 trd_env = TrdEnv.SIMULATE if trd_env_text == 'SIMULATE' else TrdEnv.REAL
 modify_op = ModifyOrderOp.CANCEL if op_text == 'CANCEL' else ModifyOrderOp.NORMAL
+
+trail_type = None
+if trail_type_text and trail_type_text != 'NONE':
+    trail_type = getattr(TrailType, trail_type_text, None)
 
 acc_id = 0
 if acc_id_text:
@@ -1079,8 +1106,13 @@ try:
         order_id,
         qty,
         price,
+        adjust_limit=adjust_limit,
         trd_env=trd_env,
         acc_id=acc_id,
+        aux_price=aux_price if aux_price > 0 else None,
+        trail_type=trail_type,
+        trail_value=trail_value if trail_value > 0 else None,
+        trail_spread=trail_spread if trail_spread > 0 else None,
     )
     if ret != RET_OK:
         print(json.dumps({'ok': False, 'ret': ret, 'error': str(data)}, ensure_ascii=False))
@@ -1101,13 +1133,14 @@ finally:
             .replace("__ORDER_ID__", &format!("{:?}", order_id))
             .replace("__OP__", &format!("{:?}", op_text))
             .replace("__QTY__", &qty.to_string())
-            .replace("__PRICE__", &price.to_string());
+            .replace("__PRICE__", &price.to_string())
+            .replace("__ADJUST_LIMIT__", &adjust_limit.to_string())
+            .replace("__AUX_PRICE__", &aux_price.to_string())
+            .replace("__TRAIL_TYPE__", &format!("{:?}", trail_type_text))
+            .replace("__TRAIL_VALUE__", &trail_value.to_string())
+            .replace("__TRAIL_SPREAD__", &trail_spread.to_string());
 
-        let output = Command::new(&self.config.python_bin)
-            .arg("-c")
-            .arg(script)
-            .output()
-            .map_err(|e| anyhow!("failed to run python futu modify_order script: {}", e))?;
+        let output = self.run_python_script(script, "modify_order")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -1199,11 +1232,7 @@ finally:
             .replace("__MARKET__", &self.config.py_filter_trdmarket)
             .replace("__SEC_FIRM__", &self.config.py_security_firm);
 
-        let output = Command::new(&self.config.python_bin)
-            .arg("-c")
-            .arg(script)
-            .output()
-            .map_err(|e| anyhow!("failed to run python futu account script: {}", e))?;
+        let output = self.run_python_script(script, "account")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -1379,11 +1408,7 @@ finally:
             .replace("__TRD_ENV__", &format!("{:?}", desired_env))
             .replace("__MARKET_STR__", &format!("{:?}", self.config.py_filter_trdmarket));
 
-        let output = Command::new(&self.config.python_bin)
-            .arg("-c")
-            .arg(script)
-            .output()
-            .map_err(|e| anyhow!("failed to run python futu snapshot script: {}", e))?;
+        let output = self.run_python_script(script, "snapshot")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();

@@ -96,6 +96,11 @@ let selectedTradeFilter = 'all';
 let tradeSearchText = '';
 let futuActivityFilterText = '';
 let futuActivityRangeDays = 30;
+let futuOpenOrderEditState = {
+  orderId: '',
+  qty: '',
+  price: '',
+};
 let selectedPaperRangeDays = 0.5;
 let selectedFutuRangeDays = 0.5;
 let paperSessionStartMs = null;
@@ -1533,26 +1538,32 @@ const renderPaperKpis = (paperStatus) => {
     <div class='paper-kpi-card kpi-neutral'>
       <div class='paper-kpi-label'>Total Assets</div>
       <div class='paper-kpi-value'>${Number.isFinite(totalAssets) ? `$${totalAssets.toFixed(2)}` : '--'}</div>
+      <div class='futu-kpi-sub'>USD</div>
     </div>
     <div class='paper-kpi-card ${pnlMood}'>
       <div class='paper-kpi-label'>Session PnL</div>
       <div class='paper-kpi-value ${Number.isFinite(pnlUsd) && pnlUsd < 0 ? 'down' : 'up'}'>${Number.isFinite(pnlUsd) ? `${formatSignedMoney(pnlUsd)} (${formatPct(pnlPct)})` : '--'}</div>
+      <div class='futu-kpi-sub'>USD</div>
     </div>
     <div class='paper-kpi-card ${investedMood}'>
       <div class='paper-kpi-label'>Open Risk</div>
       <div class='paper-kpi-value ${investedClass}'>${Number.isFinite(investedPct) ? `${investedPct.toFixed(1)}%` : '--'}</div>
+      <div class='futu-kpi-sub'>%</div>
     </div>
     <div class='paper-kpi-card ${ddMood}'>
       <div class='paper-kpi-label'>Max Drawdown</div>
       <div class='paper-kpi-value ${Number.isFinite(maxDrawdownPct) && maxDrawdownPct < 0 ? 'down' : ''}'>${Number.isFinite(maxDrawdownPct) ? `${maxDrawdownPct.toFixed(2)}%` : '--'}</div>
+      <div class='futu-kpi-sub'>%</div>
     </div>
     <div class='paper-kpi-card ${winMood}'>
       <div class='paper-kpi-label'>Win Rate (SELL)</div>
       <div class='paper-kpi-value'>${Number.isFinite(winRate) ? `${winRate.toFixed(1)}%` : '--'}</div>
+      <div class='futu-kpi-sub'>%</div>
     </div>
     <div class='paper-kpi-card ${spreadMood}'>
       <div class='paper-kpi-label'>vs Benchmark</div>
       <div class='paper-kpi-value ${spreadClass}'>${Number.isFinite(spreadPct) ? `${spreadPct >= 0 ? '+' : ''}${spreadPct.toFixed(2)}%` : '--'}</div>
+      <div class='futu-kpi-sub'>%</div>
     </div>
   `;
 
@@ -1565,6 +1576,115 @@ const renderPaperKpis = (paperStatus) => {
       const m = Math.floor((elapsed % 3600000) / 60000);
       badge.textContent = `⏱ ${h > 0 ? h + 'h ' : ''}${m}m`;
       badge.style.display = '';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+};
+
+const computeFutuSellWinRate = (futuStatus) => {
+  const rows = Array.isArray(futuStatus?.trade_history) ? futuStatus.trade_history : [];
+  if (!rows.length) return null;
+
+  const sellRows = rows.filter((row) => String(futuReadField(row, ['trd_side', 'side'], '')).toUpperCase().includes('SELL'));
+  if (!sellRows.length) return null;
+
+  let validCount = 0;
+  let winners = 0;
+  for (const row of sellRows) {
+    const pnl = futuReadNumber(row, ['realized_pnl', 'realized_pl', 'pl_val', 'profit', 'pnl_usd']);
+    if (!Number.isFinite(pnl)) continue;
+    validCount += 1;
+    if (pnl > 0) winners += 1;
+  }
+  if (validCount === 0) return null;
+  return (winners / validCount) * 100;
+};
+
+const renderFutuConnectionKpis = (futuStatus, futuContext) => {
+  const grid = document.getElementById('futuConnKpiGrid');
+  const badge = document.getElementById('futuKpiDurationBadge');
+  if (!grid) return;
+
+  const snapshot = futuStatus?.latest_snapshot;
+  if (!snapshot) {
+    grid.innerHTML = `<div class='empty-state'><div class='empty-state-icon'>📉</div>No live FUTU snapshot yet.</div>`;
+    if (badge) badge.style.display = 'none';
+    return;
+  }
+
+  const totalAssets = Number(snapshot.total_value);
+  const pnlUsd = Number(snapshot.pnl_usd);
+  const pnlPct = Number(snapshot.pnl_pct);
+  const cashUsd = Number.isFinite(Number(futuStatus?.account_cash_usd))
+    ? Number(futuStatus?.account_cash_usd)
+    : Number(snapshot.cash_usd);
+  const investedPct = Number.isFinite(totalAssets) && totalAssets > 0 && Number.isFinite(cashUsd)
+    ? ((totalAssets - cashUsd) / totalAssets) * 100
+    : null;
+
+  const maxDrawdownPct = computeMaxDrawdownPct(futuContext?.portfolioSeries || []);
+  const winRate = computeFutuSellWinRate(futuStatus);
+  const spreadPct = Number(futuContext?.latest?.spreadPct);
+
+  const pnlMood = Number.isFinite(pnlUsd) ? (pnlUsd >= 0 ? 'kpi-positive' : 'kpi-negative') : 'kpi-neutral';
+  const investedMood = Number.isFinite(investedPct) && investedPct > 90 ? 'kpi-warn' : 'kpi-neutral';
+  const ddMood = Number.isFinite(maxDrawdownPct) && maxDrawdownPct < -5 ? 'kpi-negative' : 'kpi-neutral';
+  const winMood = Number.isFinite(winRate) ? (winRate >= 50 ? 'kpi-positive' : 'kpi-negative') : 'kpi-neutral';
+  const spreadMood = Number.isFinite(spreadPct) ? (spreadPct >= 0 ? 'kpi-positive' : 'kpi-negative') : 'kpi-neutral';
+  const investedClass = Number.isFinite(investedPct) && investedPct > 90 ? 'down' : 'up';
+  const spreadClass = Number.isFinite(spreadPct) && spreadPct < 0 ? 'down' : 'up';
+
+  grid.innerHTML = `
+    <div class='paper-kpi-card kpi-neutral'>
+      <div class='paper-kpi-label'>Total Assets</div>
+      <div class='paper-kpi-value'>${Number.isFinite(totalAssets) ? `$${totalAssets.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--'}</div>
+      <div class='futu-kpi-sub'>USD</div>
+    </div>
+    <div class='paper-kpi-card ${pnlMood}'>
+      <div class='paper-kpi-label'>Session PnL</div>
+      <div class='paper-kpi-value ${Number.isFinite(pnlUsd) && pnlUsd < 0 ? 'down' : 'up'}'>${Number.isFinite(pnlUsd) ? `${formatSignedMoney(pnlUsd)} (${formatPct(pnlPct)})` : '--'}</div>
+      <div class='futu-kpi-sub'>USD</div>
+    </div>
+    <div class='paper-kpi-card ${investedMood}'>
+      <div class='paper-kpi-label'>Open Risk</div>
+      <div class='paper-kpi-value ${investedClass}'>${Number.isFinite(investedPct) ? `${investedPct.toFixed(1)}%` : '--'}</div>
+      <div class='futu-kpi-sub'>%</div>
+    </div>
+    <div class='paper-kpi-card ${ddMood}'>
+      <div class='paper-kpi-label'>Max Drawdown</div>
+      <div class='paper-kpi-value ${Number.isFinite(maxDrawdownPct) && maxDrawdownPct < 0 ? 'down' : ''}'>${Number.isFinite(maxDrawdownPct) ? `${maxDrawdownPct.toFixed(2)}%` : '--'}</div>
+      <div class='futu-kpi-sub'>%</div>
+    </div>
+    <div class='paper-kpi-card ${winMood}'>
+      <div class='paper-kpi-label'>Win Rate (SELL)</div>
+      <div class='paper-kpi-value'>${Number.isFinite(winRate) ? `${winRate.toFixed(1)}%` : '--'}</div>
+      <div class='futu-kpi-sub'>%</div>
+    </div>
+    <div class='paper-kpi-card ${spreadMood}'>
+      <div class='paper-kpi-label'>vs Benchmark</div>
+      <div class='paper-kpi-value ${spreadClass}'>${Number.isFinite(spreadPct) ? `${spreadPct >= 0 ? '+' : ''}${spreadPct.toFixed(2)}%` : '--'}</div>
+      <div class='futu-kpi-sub'>%</div>
+    </div>
+    <div class='paper-kpi-card kpi-neutral'>
+      <div class='paper-kpi-label'>Cash Available</div>
+      <div class='paper-kpi-value' id='futuAccountCash'>${Number.isFinite(cashUsd) ? `$${cashUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--'}</div>
+      <div class='futu-kpi-sub'>USD</div>
+    </div>
+  `;
+
+  if (badge) {
+    if (futuStatus?.running && futuStatus?.started_at) {
+      const startedMs = new Date(futuStatus.started_at).getTime();
+      if (Number.isFinite(startedMs) && startedMs > 0) {
+        const elapsed = Math.max(0, Date.now() - startedMs);
+        const h = Math.floor(elapsed / 3600000);
+        const m = Math.floor((elapsed % 3600000) / 60000);
+        badge.textContent = `⏱ ${h > 0 ? h + 'h ' : ''}${m}m`;
+        badge.style.display = '';
+      } else {
+        badge.style.display = 'none';
+      }
     } else {
       badge.style.display = 'none';
     }
@@ -2883,15 +3003,15 @@ const fillFutuHoldingsTable = (futuStatus) => {
 
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${sym}</td>
-      <td class='up'>Holding</td>
+      <td style='font-weight:600;letter-spacing:.2px;'>${sym}</td>
+      <td class='up' style='font-weight:600;font-size:11px;font-family:var(--mono);'>Holding</td>
       <td class='num'>${quantity == null ? '--' : quantity.toFixed(2)}</td>
       <td class='num'>${currentPrice == null ? '--' : '$' + currentPrice.toFixed(2)}</td>
       <td class='num'>${validAvgCost == null ? '--' : '$' + validAvgCost.toFixed(2)}</td>
-      <td class='num'>${assetValue == null ? '--' : '$' + assetValue.toFixed(2)}</td>
+      <td class='num'>${assetValue == null ? '--' : '$' + assetValue.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</td>
       <td class='num'>--</td>
-      <td class='num ${unrealizedClass}'>${unrealizedText}</td>
-      <td><button class='ghost futu-manual-fill-btn' data-symbol='${sym}' data-price='${currentPrice == null ? '' : currentPrice.toFixed(4)}'>Use</button></td>
+      <td class='num ${unrealizedClass}' style='font-weight:600;'>${unrealizedText}</td>
+      <td><button class='ghost futu-manual-fill-btn' data-symbol='${sym}' data-price='${currentPrice == null ? '' : currentPrice.toFixed(4)}'>Prefill</button></td>
     `;
     tb.appendChild(tr);
   }
@@ -2945,6 +3065,38 @@ const submitFutuManualOrder = async () => {
   return response;
 };
 
+const submitFutuModifyOrder = async ({ orderId, modifyOrderOp, qty = null, price = null }) => {
+  const selectedEnv = String(latestFutuStatus?.selected_trd_env || '').toUpperCase();
+  if (selectedEnv && selectedEnv !== 'SIMULATE') {
+    throw new Error('Modify/cancel is allowed only in SIMULATE mode.');
+  }
+
+  const payload = {
+    order_id: String(orderId || '').trim(),
+    modify_order_op: String(modifyOrderOp || '').trim().toUpperCase(),
+    qty: qty == null ? null : Number(qty),
+    price: price == null ? null : Number(price),
+    trd_env: selectedEnv || null,
+    acc_id: latestFutuStatus?.selected_acc_id || null,
+    adjust_limit: 0,
+  };
+
+  if (!payload.order_id) throw new Error('order_id is required.');
+  if (payload.modify_order_op !== 'CANCEL' && payload.modify_order_op !== 'NORMAL') {
+    throw new Error('modify_order_op must be CANCEL or NORMAL.');
+  }
+  if (payload.modify_order_op === 'NORMAL') {
+    if (!Number.isFinite(payload.qty) || payload.qty <= 0) throw new Error('qty must be > 0 for change.');
+    if (!Number.isFinite(payload.price) || payload.price <= 0) throw new Error('price must be > 0 for change.');
+  }
+
+  const response = await api('/api/futu/modify-order', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return response;
+};
+
 const futuReadField = (row, keys, fallback = '--') => {
   if (!row || typeof row !== 'object') return fallback;
   for (const key of keys) {
@@ -2964,6 +3116,44 @@ const futuReadNumber = (row, keys) => {
     if (Number.isFinite(value)) return value;
   }
   return null;
+};
+
+const futuReadBool = (row, keys) => {
+  if (!row || typeof row !== 'object') return null;
+  for (const key of keys) {
+    const raw = row?.[key];
+    if (raw === null || raw === undefined) continue;
+    if (typeof raw === 'boolean') return raw;
+    const text = String(raw).trim().toLowerCase();
+    if (!text) continue;
+    if (text === 'true' || text === '1' || text === 'yes' || text === 'y') return true;
+    if (text === 'false' || text === '0' || text === 'no' || text === 'n') return false;
+  }
+  return null;
+};
+
+const futuOrderLooksOpen = (row) => {
+  const canCancel = futuReadBool(row, ['can_cancel', 'is_can_cancel', 'can_cancelled']);
+  if (canCancel === true) return true;
+
+  const status = futuReadField(row, ['order_status', 'status', 'orderStatus'], '').toUpperCase();
+  if (!status) return true;
+
+  const terminalStatuses = [
+    'FILLED_ALL',
+    'FILLED',
+    'CANCELLED_ALL',
+    'CANCELLED_PART',
+    'CANCELLED',
+    'FAILED',
+    'DELETED',
+    'DISABLED',
+    'WITHDRAWN',
+    'REJECTED',
+    'EXPIRED',
+  ];
+
+  return !terminalStatuses.some((terminal) => status.includes(terminal));
 };
 
 const futuSymbolMatchesFilter = (symbol) => {
@@ -3000,11 +3190,12 @@ const renderFutuOpenOrdersTable = (futuStatus) => {
   tb.innerHTML = '';
 
   const rows = (Array.isArray(futuStatus?.open_orders) ? futuStatus.open_orders : [])
+    .filter((row) => futuOrderLooksOpen(row))
     .filter((row) => futuSymbolMatchesFilter(futuReadField(row, ['code', 'symbol', 'ticker'], '')))
     .filter((row) => futuActivityTimeMatchesFilter(row, ['create_time', 'updated_time', 'time']));
   if (!rows.length) {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td colspan='11'><div class='empty-state'><div class='empty-state-icon'>🧾</div>No open orders.<br>Pending / unfilled orders will appear here.</div></td>`;
+    tr.innerHTML = `<td colspan='12'><div class='empty-state'><div class='empty-state-icon'>🧾</div>No open orders.<br>Pending / unfilled orders will appear here.</div></td>`;
     tb.appendChild(tr);
     return;
   }
@@ -3036,20 +3227,43 @@ const renderFutuOpenOrdersTable = (futuStatus) => {
       `err=${futuReadField(row, ['last_err_msg'], '--')}`,
     ];
     const paramsText = paramsParts.join(' · ');
+    const actionDisabled = !orderId || String(latestFutuStatus?.selected_trd_env || '').toUpperCase() !== 'SIMULATE';
+    const actionDisabledAttr = actionDisabled ? 'disabled' : '';
+    const editingThisRow = futuOpenOrderEditState.orderId === orderId;
+    const defaultQty = qty == null || !Number.isFinite(qty) ? '' : String(qty);
+    const defaultPrice = price == null || !Number.isFinite(price) ? '' : String(price);
+
+    const statusUpper = String(orderStatus).toUpperCase();
+    const statusCls = statusUpper.includes('FILL') ? 'up'
+      : (statusUpper.includes('CANCEL') || statusUpper.includes('FAIL') || statusUpper.includes('REJECT') || statusUpper.includes('EXPIRED') ? 'down'
+      : (statusUpper.includes('SUBMIT') || statusUpper.includes('WAITING') ? 'flat' : ''));
 
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${created}</td>
-      <td title='${orderId}'>${orderId}</td>
-      <td>${symbol}</td>
-      <td class='${String(side).toUpperCase().includes('BUY') ? 'up' : (String(side).toUpperCase().includes('SELL') ? 'down' : '')}'>${side}</td>
+      <td style='white-space:nowrap;'>${created}</td>
+      <td title='${orderId}'><span style='font-family:var(--mono);font-size:11px;color:var(--muted);'>${orderId}</span></td>
+      <td style='font-weight:600;letter-spacing:.2px;'>${symbol}</td>
+      <td class='${String(side).toUpperCase().includes('BUY') ? 'up' : (String(side).toUpperCase().includes('SELL') ? 'down' : '')}' style='font-weight:700;letter-spacing:.3px;'>${side}</td>
       <td class='num'>${qty == null ? '--' : qty.toFixed(2)}</td>
       <td class='num'>${price == null ? '--' : '$' + price.toFixed(4)}</td>
       <td class='num'>${dealtQty == null ? '--' : dealtQty.toFixed(2)}</td>
       <td class='num'>${dealtAvg == null ? '--' : '$' + dealtAvg.toFixed(4)}</td>
-      <td>${orderType}</td>
-      <td>${orderStatus}</td>
-      <td title='${paramsText.replaceAll("'", '&apos;')}'>${paramsText}</td>
+      <td><span style='font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.3px;'>${orderType}</span></td>
+      <td class='${statusCls}'><span style='font-weight:600;font-size:11px;font-family:var(--mono);'>${orderStatus}</span></td>
+      <td title='${paramsText.replaceAll("'", '&apos;')}' style='max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;color:var(--muted);'>${paramsText}</td>
+      <td>
+        <div style='display:flex;gap:6px;justify-content:flex-end;align-items:center;flex-wrap:wrap;'>
+          ${editingThisRow ? `
+            <input class='futu-order-edit-qty' type='number' step='0.01' min='0.01' value='${futuOpenOrderEditState.qty || defaultQty}' style='width:90px;' />
+            <input class='futu-order-edit-price' type='number' step='0.0001' min='0.0001' value='${futuOpenOrderEditState.price || defaultPrice}' style='width:100px;' />
+            <button class='ghost futu-order-edit-save-btn' data-order-id='${orderId}' ${actionDisabledAttr}>Save</button>
+            <button class='ghost futu-order-edit-cancel-btn' data-order-id='${orderId}'>Abort</button>
+          ` : `
+            <button class='ghost futu-order-change-btn' data-order-id='${orderId}' data-qty='${qty == null ? '' : qty}' data-price='${price == null ? '' : price}' ${actionDisabledAttr}>Change</button>
+          `}
+          <button class='ghost futu-order-cancel-btn' data-order-id='${orderId}' ${actionDisabledAttr}>Cancel</button>
+        </div>
+      </td>
     `;
     tb.appendChild(tr);
   }
@@ -3060,7 +3274,33 @@ const renderFutuCancelHistoryTable = (futuStatus) => {
   if (!tb) return;
   tb.innerHTML = '';
 
-  const rows = (Array.isArray(futuStatus?.cancel_history) ? futuStatus.cancel_history.slice().reverse() : [])
+  const localCancelRows = Array.isArray(futuStatus?.cancel_history) ? futuStatus.cancel_history.slice().reverse() : [];
+  const fallbackCancelRows = (Array.isArray(futuStatus?.history_orders) ? futuStatus.history_orders : [])
+    .filter((row) => {
+      const status = futuReadField(row, ['order_status', 'status', 'orderStatus'], '').toUpperCase();
+      if (!status) return false;
+      return status.includes('CANCEL') || status.includes('WITHDRAW') || status.includes('DELETE');
+    })
+    .map((row) => ({
+      timestamp: futuReadField(row, ['updated_time', 'create_time', 'time'], '--'),
+      order_id: futuReadField(row, ['order_id', 'id'], '--'),
+      symbol: futuReadField(row, ['code', 'symbol', 'ticker'], '--'),
+      trd_side: futuReadField(row, ['trd_side', 'side'], '--'),
+      qty: futuReadNumber(row, ['qty', 'quantity']),
+      price: futuReadNumber(row, ['price']),
+      order_status: futuReadField(row, ['order_status', 'status', 'orderStatus'], '--'),
+      reason: futuReadField(row, ['last_err_msg', 'remark'], 'Cancelled (history)'),
+      signal_id: futuReadField(row, ['signal_id'], '--'),
+    }));
+
+  const dedup = new Map();
+  for (const row of [...localCancelRows, ...fallbackCancelRows]) {
+    const orderId = futuReadField(row, ['order_id', 'id'], '--');
+    const ts = futuReadField(row, ['timestamp', 'updated_time', 'create_time', 'time'], '--');
+    dedup.set(`${orderId}::${ts}`, row);
+  }
+
+  const rows = Array.from(dedup.values())
     .filter((row) => futuSymbolMatchesFilter(futuReadField(row, ['symbol', 'code'], '')))
     .filter((row) => futuActivityTimeMatchesFilter(row, ['timestamp', 'updated_time', 'create_time', 'time']));
   if (!rows.length) {
@@ -3081,17 +3321,21 @@ const renderFutuCancelHistoryTable = (futuStatus) => {
     const reason = futuReadField(row, ['reason']);
     const signalId = futuReadField(row, ['signal_id']);
 
+    const statusCancelUpper = String(status).toUpperCase();
+    const statusCancelCls = statusCancelUpper.includes('CANCEL') ? 'down'
+      : (statusCancelUpper.includes('FILL') ? 'up' : 'flat');
+
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${ts}</td>
-      <td>${orderId}</td>
-      <td>${symbol}</td>
-      <td class='${String(side).toUpperCase().includes('BUY') ? 'up' : (String(side).toUpperCase().includes('SELL') ? 'down' : '')}'>${side}</td>
+      <td style='white-space:nowrap;'>${ts}</td>
+      <td><span style='font-family:var(--mono);font-size:11px;color:var(--muted);'>${orderId}</span></td>
+      <td style='font-weight:600;letter-spacing:.2px;'>${symbol}</td>
+      <td class='${String(side).toUpperCase().includes('BUY') ? 'up' : (String(side).toUpperCase().includes('SELL') ? 'down' : '')}' style='font-weight:700;letter-spacing:.3px;'>${side}</td>
       <td class='num'>${qty == null ? '--' : qty.toFixed(2)}</td>
       <td class='num'>${price == null ? '--' : '$' + price.toFixed(4)}</td>
-      <td>${status}</td>
-      <td>${reason}</td>
-      <td>${signalId}</td>
+      <td class='${statusCancelCls}'><span style='font-weight:600;font-size:11px;font-family:var(--mono);'>${status}</span></td>
+      <td style='max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;' title='${String(reason).replaceAll("'", '&apos;')}'>${reason}</td>
+      <td><span style='font-family:var(--mono);font-size:10px;color:var(--muted);'>${signalId}</span></td>
     `;
     tb.appendChild(tr);
   }
@@ -3101,11 +3345,20 @@ const renderFutuTradeHistory = (futuStatus) => {
   const box = document.getElementById('futuTradeHistory');
   if (!box) return;
 
-  const rowsRaw = Array.isArray(futuStatus?.history_orders) ? futuStatus.history_orders : [];
+  const executedRows = Array.isArray(futuStatus?.trade_history) ? futuStatus.trade_history : [];
+  const historyOrders = Array.isArray(futuStatus?.history_orders) ? futuStatus.history_orders : [];
+  const rowsRaw = executedRows.length
+    ? executedRows
+    : historyOrders.filter((row) => {
+        const dealtQty = futuReadNumber(row, ['dealt_qty', 'filled_qty', 'exec_qty']);
+        if (dealtQty != null && dealtQty > 0) return true;
+        const status = String(futuReadField(row, ['order_status', 'status'], '') || '').toUpperCase();
+        return status.includes('FILLED');
+      });
   const rows = rowsRaw
     .filter((row) => futuSymbolMatchesFilter(futuReadField(row, ['code', 'symbol', 'ticker'], '')));
   if (!rows.length) {
-    box.innerHTML = `<div class='empty-state'><div class='empty-state-icon'>📒</div>No FUTU history orders yet.<br>Backend FUTU historical data will appear here.</div>`;
+    box.innerHTML = `<div class='empty-state'><div class='empty-state-icon'>📒</div>No executed FUTU trades yet.<br>Filled executions will appear here.</div>`;
     return;
   }
 
@@ -3122,14 +3375,19 @@ const renderFutuTradeHistory = (futuStatus) => {
     const remark = futuReadField(tr, ['remark'], '--');
     const currency = futuReadField(tr, ['currency'], '--');
 
+    const statusRow = futuReadField(tr, ['order_status', 'status'], '--');
+    const statusRowUpper = String(statusRow).toUpperCase();
+    const statusTrCls = statusRowUpper.includes('FILL') ? 'up'
+      : (statusRowUpper.includes('CANCEL') || statusRowUpper.includes('FAIL') ? 'down' : 'flat');
+
     return `
       <div class='trade-item'>
         <div class='trade-time'>${ts}</div>
         <div><span class='trade-side ${sideClass}'>${side || '--'}</span></div>
         <div class='trade-main'>
           <span class='trade-symbol'>${symbol}</span>
-          <span>${qty == null ? '--' : qty.toFixed(2)} @ ${price == null ? '--' : '$' + price.toFixed(4)}</span>
-          <span class='trade-meta'>Notional ${amount == null ? '--' : '$' + amount.toFixed(2)} · ${currency} · order ${orderId}</span>
+          <span style='font-family:var(--mono);font-variant-numeric:tabular-nums;'>${qty == null ? '--' : qty.toFixed(2)} @ ${price == null ? '--' : '$' + price.toFixed(4)}</span>
+          <span class='trade-meta'>Notional ${amount == null ? '--' : '$' + amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} · ${currency} · <span class='${statusTrCls}' style='font-weight:600;'>${statusRow}</span> · #${orderId}</span>
         </div>
         <div class='trade-pnl flat'>${remark === '--' ? '' : remark}</div>
       </div>
@@ -3289,6 +3547,90 @@ document.addEventListener('click', (event) => {
     futuManualQtyInput.value = '1';
   }
   setFutuManualOrderHint(`Manual form prefilled from holding ${symbol || '--'}.`);
+});
+
+document.addEventListener('click', async (event) => {
+  const cancelBtn = event?.target?.closest?.('.futu-order-cancel-btn');
+  if (cancelBtn) {
+    if (cancelBtn.disabled) return;
+    const orderId = String(cancelBtn.getAttribute('data-order-id') || '').trim();
+    if (!orderId) return;
+    const confirmed = window.confirm(`Cancel order ${orderId}?`);
+    if (!confirmed) return;
+    cancelBtn.disabled = true;
+    const prevText = cancelBtn.textContent;
+    cancelBtn.textContent = 'Canceling...';
+    try {
+      await submitFutuModifyOrder({ orderId, modifyOrderOp: 'CANCEL' });
+      setStatus(`FUTU order canceled: ${orderId}`, 'ok');
+      await refreshFutu();
+    } catch (e) {
+      const msg = e?.message || String(e);
+      setStatus(msg, 'err');
+      alert(msg);
+    } finally {
+      cancelBtn.disabled = false;
+      cancelBtn.textContent = prevText;
+    }
+    return;
+  }
+
+  const changeBtn = event?.target?.closest?.('.futu-order-change-btn');
+  if (changeBtn) {
+    if (changeBtn.disabled) return;
+    const orderId = String(changeBtn.getAttribute('data-order-id') || '').trim();
+    const currentQty = Number(changeBtn.getAttribute('data-qty'));
+    const currentPrice = Number(changeBtn.getAttribute('data-price'));
+    if (!orderId) return;
+
+    futuOpenOrderEditState = {
+      orderId,
+      qty: Number.isFinite(currentQty) && currentQty > 0 ? String(currentQty) : '1',
+      price: Number.isFinite(currentPrice) && currentPrice > 0 ? String(currentPrice) : '',
+    };
+    renderFutuOpenOrdersTable(latestFutuStatus || {});
+    return;
+  }
+
+  const abortBtn = event?.target?.closest?.('.futu-order-edit-cancel-btn');
+  if (abortBtn) {
+    futuOpenOrderEditState = { orderId: '', qty: '', price: '' };
+    renderFutuOpenOrdersTable(latestFutuStatus || {});
+    return;
+  }
+
+  const saveBtn = event?.target?.closest?.('.futu-order-edit-save-btn');
+  if (!saveBtn) return;
+  if (saveBtn.disabled) return;
+
+  const orderId = String(saveBtn.getAttribute('data-order-id') || '').trim();
+  if (!orderId) return;
+
+  const host = saveBtn.closest('tr');
+  const qtyInputEl = host?.querySelector('.futu-order-edit-qty');
+  const priceInputEl = host?.querySelector('.futu-order-edit-price');
+  const qty = Number(String(qtyInputEl?.value || '').trim());
+  const price = Number(String(priceInputEl?.value || '').trim());
+
+  futuOpenOrderEditState.qty = String(qtyInputEl?.value || '').trim();
+  futuOpenOrderEditState.price = String(priceInputEl?.value || '').trim();
+
+  saveBtn.disabled = true;
+  const prevText = saveBtn.textContent;
+  saveBtn.textContent = 'Saving...';
+  try {
+    await submitFutuModifyOrder({ orderId, modifyOrderOp: 'NORMAL', qty, price });
+    futuOpenOrderEditState = { orderId: '', qty: '', price: '' };
+    setStatus(`FUTU order changed: ${orderId}`, 'ok');
+    await refreshFutu();
+  } catch (e) {
+    const msg = e?.message || String(e);
+    setStatus(msg, 'err');
+    alert(msg);
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.textContent = prevText;
+  }
 });
 
 for (const btn of paperRangeButtons) {
@@ -3731,30 +4073,9 @@ const refreshFutu = async () => {
       futuExecPool.textContent = `${count} symbols`;
     }
 
-    if (futuAccountCash) {
-      const v = Number(st?.account_cash_usd);
-      const formatted = Number.isFinite(v) ? `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--';
-      futuAccountCash.textContent = formatted;
-      if (futuCashCard) {
-        futuCashCard.classList.remove('kpi-positive', 'kpi-neutral');
-        futuCashCard.classList.add(Number.isFinite(v) && v > 0 ? 'kpi-positive' : 'kpi-neutral');
-      }
-    }
-    if (futuBuyingPower) {
-      const v = Number(st?.account_buying_power_usd);
-      futuBuyingPower.textContent = Number.isFinite(v) ? `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--';
-      if (futuBuyingPowerCard) {
-        futuBuyingPowerCard.classList.remove('kpi-positive', 'kpi-neutral');
-        futuBuyingPowerCard.classList.add(Number.isFinite(v) && v > 0 ? 'kpi-positive' : 'kpi-neutral');
-      }
-    }
-    if (futuLastSync) {
-      const ts = st?.latest_snapshot?.timestamp;
-      futuLastSync.textContent = ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--';
-    }
-
     const ctx = buildPaperSeriesContext(st.snapshots || []);
     futuFullContext = ctx.portfolioSeries.length > 0 ? ctx : buildFallbackPaperContext(st.latest_snapshot);
+    renderFutuConnectionKpis(st, futuFullContext);
     renderFutuChartFromCurrentContext();
     renderFutuChartSummaryStrip();
 
@@ -3773,7 +4094,8 @@ const refreshFutu = async () => {
         .replaceAll('>', '&gt;')
         .replaceAll('"', '&quot;')
         .replaceAll("'", '&#39;');
-      futuLogBox.innerHTML = (st.logs || []).slice(-20).map((x) => {
+      const logEntries = (st.logs || []).slice(-20);
+      futuLogBox.innerHTML = logEntries.map((x, i) => {
         const text = String(x || '');
         const lower = text.toLowerCase();
         const cls = lower.includes('error:')
@@ -3781,7 +4103,11 @@ const refreshFutu = async () => {
           : (lower.includes('warning:') || lower.includes('[warning]') || lower.includes('disconnect')
             ? 'log-warn'
             : '');
-        return `<div class="${cls}">${escapeHtml(text)}</div>`;
+        // Try to extract leading timestamp like [2025-02-19 09:04:20] or 2025-02-19T09:04:20
+        const tsMatch = text.match(/^(\[?\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}\]?)\s*/);
+        const tspart = tsMatch ? `<span style='color:var(--muted);font-size:10px;font-family:var(--mono);margin-right:6px;'>${escapeHtml(tsMatch[1])}</span>` : '';
+        const msgpart = tsMatch ? escapeHtml(text.slice(tsMatch[0].length)) : escapeHtml(text);
+        return `<div class="${cls}">${tspart}${msgpart}</div>`;
       }).join('');
     }
   } catch (e) {

@@ -1639,6 +1639,21 @@
       flex-direction: column;
       gap: 12px;
     }
+    .futu-conn-kpi-row {
+      background: rgba(12,18,28,.55);
+      border: 1px solid rgba(59,130,246,.16);
+      border-radius: var(--radius);
+      padding: 10px;
+    }
+    .futu-conn-kpi-row .panel-title {
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    #futuConnKpiGrid .paper-kpi-card {
+      min-height: 74px;
+    }
 
     /* ── Status Banner ── */
     .futu-conn-main-card {
@@ -1893,20 +1908,28 @@
       background: rgba(6,9,15,.62);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      padding: 7px 11px;
+      padding: 8px 12px;
+      max-height: 240px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,.08) transparent;
     }
+    #futuLogBox::-webkit-scrollbar { width: 4px; }
+    #futuLogBox::-webkit-scrollbar-track { background: transparent; }
+    #futuLogBox::-webkit-scrollbar-thumb { background: rgba(255,255,255,.10); border-radius: 4px; }
     #futuLogBox div {
-      padding: 2px 3px;
-      border-radius: 3px;
-      line-height: 1.85;
+      padding: 3px 6px;
+      border-radius: 4px;
+      line-height: 1.8;
       font-size: 11px;
       font-family: var(--mono);
       color: var(--muted);
       transition: background var(--transition);
+      border-left: 2px solid transparent;
     }
-    #futuLogBox div.log-warn  { color:var(--gold); background:rgba(245,158,11,.07); border-left:2px solid rgba(245,158,11,.45); padding-left:8px; }
-    #futuLogBox div.log-error { color:var(--down); background:rgba(255,71,87,.07);  border-left:2px solid rgba(255,71,87,.45);  padding-left:8px; }
-    #futuLogBox div:hover { background:rgba(255,255,255,.025); }
+    #futuLogBox div.log-warn  { color:var(--gold); background:rgba(245,158,11,.06); border-left:2px solid rgba(245,158,11,.40); padding-left:8px; }
+    #futuLogBox div.log-error { color:var(--down); background:rgba(255,71,87,.06);  border-left:2px solid rgba(255,71,87,.40);  padding-left:8px; }
+    #futuLogBox div:hover { background:rgba(255,255,255,.03); }
     .futu-conn-side-stack .paper-kpi-card {
       position: relative;
       overflow: hidden;
@@ -1958,17 +1981,107 @@
       font-size: 12px;
       vertical-align: -5px;
     }
-    #futuHoldingsTable thead tr th {
+    #tab-futu table thead tr th {
       background: linear-gradient(180deg,rgba(21,28,44,.95) 0%,rgba(15,20,32,.75) 100%);
-      letter-spacing: .4px;
+      letter-spacing: .5px;
       border-bottom: 1px solid rgba(0,212,170,.18);
+      padding: 9px 12px;
+      font-size: 10px;
+      white-space: nowrap;
     }
+    #tab-futu table tbody td {
+      padding: 8px 12px;
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+    #tab-futu table tbody tr { transition: background .15s ease; }
+    #tab-futu table tbody tr:hover td { background: rgba(0,212,170,.035); }
     #tab-futu .panel {
       border-top: 1px solid rgba(0,212,170,.045);
     }
     #futuConnSummary {
       font-family: var(--mono);
       font-size: 11px;
+    }
+
+    /* ─── Futu Open Orders table polish ─── */
+    #futuOpenOrdersTable { table-layout: auto; }
+    #futuOpenOrdersTable td:nth-child(4),
+    #futuCancelHistoryTable td:nth-child(4) {
+      font-weight: 700;
+      letter-spacing: .3px;
+    }
+    #futuOpenOrdersTable td:nth-child(10) {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .2px;
+      white-space: nowrap;
+    }
+    #futuOpenOrdersTable td:nth-child(11) {
+      font-size: 10px;
+      color: var(--muted);
+      max-width: 240px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #futuOpenOrdersTable td:nth-child(2),
+    #futuCancelHistoryTable td:nth-child(2) {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    /* ─── Futu Activity Filter strip ─── */
+    #tab-futu .futu-filter-strip {
+      display: flex;
+      align-items: flex-end;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    #tab-futu .futu-filter-strip .field-label {
+      color: var(--text-2);
+    }
+    #tab-futu .futu-filter-strip .small {
+      font-size: 10px;
+      color: var(--muted);
+      padding-bottom: 6px;
+    }
+
+    /* ─── Futu Trade History card polish ─── */
+    #tab-futu .trade-history {
+      max-height: 340px;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,.08) transparent;
+    }
+    #tab-futu .trade-history::-webkit-scrollbar { width: 4px; }
+    #tab-futu .trade-history::-webkit-scrollbar-track { background: transparent; }
+    #tab-futu .trade-history::-webkit-scrollbar-thumb { background: rgba(255,255,255,.10); border-radius: 4px; }
+    #tab-futu .trade-item {
+      grid-template-columns: 150px 80px 1fr auto;
+      padding: 10px 8px;
+      border-radius: 6px;
+    }
+    #tab-futu .trade-item:hover {
+      background: rgba(0,212,170,.04);
+    }
+
+    /* ─── Futu Manual Order form polish ─── */
+    #tab-futu .futu-manual-order-panel {
+      margin-top: 14px;
+      padding: 14px 16px;
+      border: 1px solid rgba(59,130,246,.15);
+      border-radius: var(--radius);
+      background: linear-gradient(180deg, rgba(10,16,24,.65) 0%, rgba(8,12,20,.80) 100%);
+    }
+    #tab-futu .futu-manual-order-panel .row {
+      gap: 12px;
+    }
+    #tab-futu .futu-manual-order-panel input,
+    #tab-futu .futu-manual-order-panel select {
+      font-family: var(--mono);
+      font-variant-numeric: tabular-nums;
     }
 
     /* ─── Paper KPI & Alerts ─── */
@@ -2840,25 +2953,13 @@
               </div>
             </div>
 
-            <!-- KPI cards - horizontal strip -->
-            <div class="futu-conn-side-stack">
-              <div class="paper-kpi-card kpi-neutral" id="futuCashCard">
-                <div class="paper-kpi-label">Cash Available</div>
-                <div class="paper-kpi-value" id="futuAccountCash">--</div>
-                <div class="futu-kpi-sub">USD</div>
+            <!-- KPI cards - second row -->
+            <div class="futu-conn-kpi-row">
+              <div class="panel-header" style="margin-bottom:8px;">
+                <div class="panel-title">📊 Session KPI <span id="futuKpiDurationBadge" class="kpi-duration-badge" style="display:none;"></span></div>
+                <div class="panel-subtitle">Live FUTU simulation performance snapshot</div>
               </div>
-
-              <div class="paper-kpi-card kpi-neutral" id="futuBuyingPowerCard">
-                <div class="paper-kpi-label">Buying Power</div>
-                <div class="paper-kpi-value" id="futuBuyingPower">--</div>
-                <div class="futu-kpi-sub">USD</div>
-              </div>
-
-              <div class="paper-kpi-card kpi-neutral">
-                <div class="paper-kpi-label">Last Sync</div>
-                <div class="paper-kpi-value" id="futuLastSync" style="font-size:14px;">--</div>
-                <div class="futu-kpi-sub" id="futuStartedAt">--</div>
-              </div>
+              <div id="futuConnKpiGrid" class="paper-kpi-grid"></div>
             </div>
 
           </div>
@@ -2909,12 +3010,12 @@
             </thead>
             <tbody></tbody>
           </table>
-          <div class="panel" style="margin-top:12px; padding:10px 12px; border:1px solid var(--border);">
-            <div class="panel-header" style="margin-bottom:8px;">
+          <div class="futu-manual-order-panel">
+            <div class="panel-header" style="margin-bottom:10px;">
               <div class="panel-title"><span class="panel-title-icon">🛠️</span> Manual Rebalance Order (SIM)</div>
               <div class="panel-subtitle" id="futuManualOrderHint">Place manual BUY/SELL limit order for Futu SIM account.</div>
             </div>
-            <div class="row" style="align-items:flex-end; gap:10px; flex-wrap:wrap;">
+            <div class="row" style="align-items:flex-end; gap:12px; flex-wrap:wrap;">
               <div class="field" style="min-width:130px;">
                 <label class="field-label">Symbol</label>
                 <input id="futuManualSymbol" placeholder="AAPL / US.AAPL" style="width:130px;" />
@@ -2935,14 +3036,14 @@
                 <input id="futuManualPrice" type="number" min="0.0001" step="0.0001" placeholder="e.g. 180.25" style="width:120px;" />
               </div>
               <div class="field" style="min-width:120px;">
-                <label class="field-label">Time In Force</label>
+                <label class="field-label">Time In Force <span title="DAY: valid for the current trading day/session only; GTC: remains active across days until filled or canceled (broker max duration may apply)." style="cursor:help;opacity:.85;">ⓘ</span></label>
                 <select id="futuManualTif" style="width:120px;">
                   <option value="DAY" selected>DAY</option>
                   <option value="GTC">GTC</option>
                 </select>
               </div>
               <div class="field" style="min-width:120px;">
-                <label class="field-label">Session</label>
+                <label class="field-label">Session <span title="RTH: Regular Trading Hours; ETH: Extended Trading Hours (pre/after market); ALL: both regular + extended sessions." style="cursor:help;opacity:.85;">ⓘ</span></label>
                 <select id="futuManualSession" style="width:120px;">
                   <option value="">Default</option>
                   <option value="RTH">RTH</option>
@@ -2989,11 +3090,15 @@
           <div id="futuRtMarketGrid" class="rt-market-grid"></div>
         </div>
 
-        <div class="panel" style="padding: 10px 12px;">
-          <div class="row" style="align-items:center; gap:10px;">
-            <div class="field" style="min-width:220px;">
-              <label class="field-label">FUTU Activity Filter</label>
-              <input id="futuActivityFilterInput" placeholder="Filter by symbol, e.g. AAPL or US.AAPL" style="width:320px; max-width:100%;" />
+        <div class="panel" style="padding: 12px 16px;">
+          <div class="panel-header" style="margin-bottom:10px;">
+            <div class="panel-title"><span class="panel-title-icon">🔍</span> Activity Filter</div>
+            <div class="panel-subtitle">Applies to Open Orders · Cancel History · Trade History</div>
+          </div>
+          <div class="futu-filter-strip">
+            <div class="field" style="min-width:220px; flex:1 1 220px; max-width:360px;">
+              <label class="field-label">Symbol</label>
+              <input id="futuActivityFilterInput" placeholder="e.g. AAPL or US.AAPL" style="width:100%;" />
             </div>
             <div class="field" style="min-width:160px;">
               <label class="field-label">Time Range</label>
@@ -3005,7 +3110,6 @@
                 <option value="0">All</option>
               </select>
             </div>
-            <div class="small" style="margin-top:16px;">Applies to Open Orders / Cancel History / FUTU Trade History</div>
           </div>
         </div>
 
@@ -3028,6 +3132,7 @@
                 <th>Type</th>
                 <th>Status</th>
                 <th>Params</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -3068,9 +3173,9 @@
         <div class="panel">
           <div class="panel-header">
             <div class="panel-title"><span class="panel-title-icon">📜</span> Runtime Logs</div>
-            <div class="panel-subtitle">Futu execution + holdings sync</div>
+            <div class="panel-subtitle">Futu execution · holdings sync · latest 20 entries</div>
           </div>
-          <div id="futuLogBox" style="max-height:200px;overflow:auto;"></div>
+          <div id="futuLogBox"></div>
         </div>
       </section>
 
