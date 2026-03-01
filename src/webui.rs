@@ -188,6 +188,7 @@ struct FutuRuntimeState {
     started_at: Option<String>,
     strategy_file: Option<String>,
     runtime_file: Option<String>,
+    preferred_acc_id: Option<String>,
     conn_host: String,
     conn_port: u16,
     conn_market: String,
@@ -201,6 +202,11 @@ struct FutuRuntimeState {
     latest_snapshot: Option<paper_trading::MinutePortfolioSnapshot>,
     snapshots: Vec<paper_trading::MinutePortfolioSnapshot>,
     positions: Vec<FutuPositionState>,
+    open_orders: Vec<serde_json::Value>,
+    cancel_history: Vec<serde_json::Value>,
+    trade_history: Vec<serde_json::Value>,
+    history_orders: Vec<serde_json::Value>,
+    history_order_range_days: u32,
     logs: Vec<String>,
     data_live_source: String,
     data_ws_connected: bool,
@@ -263,9 +269,10 @@ impl Default for FutuRuntimeState {
             started_at: Some(chrono::Local::now().to_rfc3339()),
             strategy_file: None,
             runtime_file: None,
+            preferred_acc_id: Some("9468130".to_string()),
             conn_host: "127.0.0.1".to_string(),
             conn_port: 11111,
-            conn_market: "HK".to_string(),
+            conn_market: "US".to_string(),
             conn_security_firm: "FUTUSECURITIES".to_string(),
             account_cash_usd: 0.0,
             account_buying_power_usd: 0.0,
@@ -276,6 +283,11 @@ impl Default for FutuRuntimeState {
             latest_snapshot: None,
             snapshots: Vec::new(),
             positions: Vec::new(),
+            open_orders: Vec::new(),
+            cancel_history: Vec::new(),
+            trade_history: Vec::new(),
+            history_orders: Vec::new(),
+            history_order_range_days: 30,
             logs: vec![runtime_log_with_ts(
                 "Futu execution initialized (waiting for OpenD / API configuration)",
             )],
@@ -426,6 +438,29 @@ struct FutuLoadRequest {
     strategy_file: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct FutuActivityConfigRequest {
+    history_order_range_days: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FutuManualOrderRequest {
+    symbol: String,
+    side: String,
+    quantity: f64,
+    price: Option<f64>,
+    order_type: Option<String>,
+    time_in_force: Option<String>,
+    fill_outside_rth: Option<bool>,
+    session: Option<String>,
+    remark: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FutuAccountApplyRequest {
+    acc_id: String,
+}
+
 pub async fn run_webui_server(port: u16, backend_default: config::ComputeBackend) -> Result<()> {
     let forecast_state = match load_forecast_state() {
         Ok(state) => state,
@@ -444,7 +479,17 @@ pub async fn run_webui_server(port: u16, backend_default: config::ComputeBackend
         portfolio: Arc::new(Mutex::new(PortfolioRuntimeState::default())),
     };
 
-    tokio::spawn(futu_execution_loop(state.futu.clone()));
+    if std::env::var("FUTU_API_ACC_ID")
+        .ok()
+        .map(|v| v.trim().is_empty())
+        .unwrap_or(true)
+    {
+        unsafe {
+            std::env::set_var("FUTU_API_ACC_ID", "9468130");
+        }
+    }
+
+    tokio::spawn(futu_execution_loop(state.futu.clone(), state.paper.clone()));
 
     let app = Router::new()
         .route("/", get(index))
@@ -466,7 +511,10 @@ pub async fn run_webui_server(port: u16, backend_default: config::ComputeBackend
         .route("/api/paper/resume", post(paper_resume))
         .route("/api/paper/stop", post(paper_stop))
         .route("/api/futu/status", get(futu_status))
+        .route("/api/futu/activity-config", post(futu_activity_config))
+        .route("/api/futu/manual-order", post(futu_manual_order))
         .route("/api/futu/account-list", get(futu_account_list))
+        .route("/api/futu/account-apply", post(futu_account_apply))
         .route("/api/futu/start", post(futu_start))
         .route("/api/futu/load", post(futu_load))
         .route("/api/futu/stop", post(futu_stop))
@@ -831,10 +879,257 @@ async fn futu_status(
     Ok(Json(status))
 }
 
+async fn futu_activity_config(
+    State(state): State<WebState>,
+    Json(req): Json<FutuActivityConfigRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ApiError>)> {
+    let range_days = req.history_order_range_days.unwrap_or(30).clamp(0, 3650);
+
+    let mut fs = state.futu.lock().await;
+    fs.history_order_range_days = range_days;
+    fs.logs.push(runtime_log_with_ts(format!(
+        "Futu activity config updated => history_order_range_days={}d",
+        range_days
+    )));
+    if fs.logs.len() > 200 {
+        let keep_from = fs.logs.len().saturating_sub(200);
+        fs.logs = fs.logs.split_off(keep_from);
+    }
+
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "history_order_range_days": range_days,
+    })))
+}
+
+async fn futu_manual_order(
+    State(state): State<WebState>,
+    Json(req): Json<FutuManualOrderRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ApiError>)> {
+    let symbol_input = req.symbol.trim().to_uppercase();
+    if symbol_input.is_empty() {
+        return Err(api_err(StatusCode::BAD_REQUEST, "symbol is required"));
+    }
+
+    if !req.quantity.is_finite() || req.quantity <= 0.0 {
+        return Err(api_err(StatusCode::BAD_REQUEST, "quantity must be > 0"));
+    }
+
+    let side = req.side.trim().to_uppercase();
+    if side != "BUY" && side != "SELL" {
+        return Err(api_err(StatusCode::BAD_REQUEST, "side must be BUY or SELL"));
+    }
+
+    let order_type = req
+        .order_type
+        .clone()
+        .unwrap_or_else(|| "NORMAL".to_string())
+        .trim()
+        .to_uppercase();
+
+    let market;
+    let acc_id;
+    let trd_env;
+    {
+        let fs = state.futu.lock().await;
+        market = fs
+            .selected_market
+            .clone()
+            .unwrap_or_else(|| fs.conn_market.clone())
+            .to_uppercase();
+        acc_id = fs.selected_acc_id.clone();
+        trd_env = fs
+            .selected_trd_env
+            .clone()
+            .unwrap_or_else(|| "SIMULATE".to_string())
+            .to_uppercase();
+    }
+
+    if trd_env != "SIMULATE" {
+        return Err(api_err(
+            StatusCode::BAD_REQUEST,
+            "manual order is allowed only in SIMULATE mode",
+        ));
+    }
+
+    if order_type == "NORMAL" {
+        let price_ok = req.price.map(|p| p.is_finite() && p > 0.0).unwrap_or(false);
+        if !price_ok {
+            return Err(api_err(
+                StatusCode::BAD_REQUEST,
+                "LIMIT (NORMAL) order requires price > 0",
+            ));
+        }
+    }
+
+    let symbol = normalize_futu_symbol_for_market(&symbol_input, &market);
+
+    let mut client = futu::FutuApiClient::from_env().map_err(internal_err)?;
+    client.set_account_id_override(acc_id.clone());
+
+    let request = futu::FutuPlaceOrderRequest {
+        symbol: symbol.clone(),
+        side: side.clone(),
+        quantity: req.quantity,
+        price: req.price,
+        order_type: Some(order_type.clone()),
+        market: Some(market.clone()),
+        trd_env: Some("SIMULATE".to_string()),
+        acc_id: acc_id.clone(),
+        adjust_limit: Some(0.0),
+        remark: req.remark.clone(),
+        time_in_force: req.time_in_force.clone(),
+        fill_outside_rth: req.fill_outside_rth,
+        session: req.session.clone(),
+        aux_price: None,
+        trail_type: None,
+        trail_value: None,
+        trail_spread: None,
+    };
+
+    let response = client.place_order(&request).await.map_err(internal_err)?;
+    let order_id = response
+        .get("order_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("--")
+        .to_string();
+
+    {
+        let mut fs = state.futu.lock().await;
+        fs.logs.push(runtime_log_with_ts(format!(
+            "Futu SIM manual order {} {} x {:.2} @ {} (type={} tif={} session={} order_id={})",
+            side,
+            symbol,
+            req.quantity,
+            req.price
+                .map(|p| format!("{:.4}", p))
+                .unwrap_or_else(|| "MKT".to_string()),
+            order_type,
+            req.time_in_force.clone().unwrap_or_else(|| "DAY".to_string()),
+            req.session.clone().unwrap_or_else(|| "NONE".to_string()),
+            order_id,
+        )));
+        if fs.logs.len() > 200 {
+            let keep_from = fs.logs.len().saturating_sub(200);
+            fs.logs = fs.logs.split_off(keep_from);
+        }
+    }
+
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "order_id": order_id,
+        "symbol": symbol,
+        "side": side,
+        "quantity": req.quantity,
+        "price": req.price,
+        "order_type": order_type,
+        "time_in_force": req.time_in_force,
+        "session": req.session,
+        "response": response,
+    })))
+}
+
 async fn futu_account_list() -> Result<Json<serde_json::Value>, (StatusCode, Json<ApiError>)> {
     let client = futu::FutuApiClient::from_env().map_err(internal_err)?;
-    let payload = client.get_account_list().await.map_err(internal_err)?;
+    let mut payload = client.get_account_list().await.map_err(internal_err)?;
+    stringify_acc_id_fields(&mut payload);
     Ok(Json(payload))
+}
+
+async fn futu_account_apply(
+    State(state): State<WebState>,
+    Json(req): Json<FutuAccountApplyRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ApiError>)> {
+    let acc_id = req.acc_id.trim().to_string();
+    if acc_id.is_empty() {
+        return Err(api_err(StatusCode::BAD_REQUEST, "acc_id cannot be empty"));
+    }
+
+    {
+        let mut fs = state.futu.lock().await;
+        fs.preferred_acc_id = Some(acc_id.clone());
+        fs.logs.push(runtime_log_with_ts(format!(
+            "Futu preferred account applied => {}",
+            acc_id
+        )));
+        if fs.logs.len() > 200 {
+            let keep_from = fs.logs.len().saturating_sub(200);
+            fs.logs = fs.logs.split_off(keep_from);
+        }
+    }
+
+    unsafe {
+        std::env::set_var("FUTU_API_ACC_ID", &acc_id);
+    }
+
+    let mut refreshed = false;
+    if let Ok(mut client) = futu::FutuApiClient::from_env() {
+        client.set_account_id_override(Some(acc_id.clone()));
+        match client.poll_execution_snapshot().await {
+            Ok(payload) => {
+                let mut fs = state.futu.lock().await;
+                fs.connected = true;
+                fs.account_cash_usd = payload.cash_usd;
+                fs.account_buying_power_usd = payload.buying_power_usd;
+                fs.selected_acc_id = payload.selected_acc_id.clone();
+                fs.selected_trd_env = payload.selected_trd_env.clone();
+                fs.selected_market = payload.selected_market.clone();
+                fs.selected_account = payload.opend_selected_account.clone();
+                fs.positions = payload
+                    .positions
+                    .iter()
+                    .map(|p| FutuPositionState {
+                        symbol: p.symbol.clone(),
+                        quantity: p.quantity,
+                        avg_cost: p.avg_cost,
+                        market_price: p.market_price,
+                        updated_at: p.updated_at.clone(),
+                    })
+                    .collect();
+                fs.logs.push(runtime_log_with_ts(format!(
+                    "Futu account switched immediately => preferred={} active={}",
+                    acc_id,
+                    payload.selected_acc_id.as_deref().unwrap_or("--")
+                )));
+                if fs.logs.len() > 200 {
+                    let keep_from = fs.logs.len().saturating_sub(200);
+                    fs.logs = fs.logs.split_off(keep_from);
+                }
+                refreshed = true;
+            }
+            Err(err) => {
+                warn!("futu account apply immediate refresh failed: {}", err);
+            }
+        }
+    }
+
+    Ok(Json(serde_json::json!({ "ok": true, "acc_id": acc_id, "refreshed": refreshed })))
+}
+
+fn stringify_acc_id_fields(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(acc_id) = map.get_mut("acc_id") {
+                let as_text = match acc_id {
+                    serde_json::Value::Number(n) => Some(n.to_string()),
+                    serde_json::Value::String(s) => Some(s.clone()),
+                    _ => None,
+                };
+                if let Some(text) = as_text {
+                    *acc_id = serde_json::Value::String(text);
+                }
+            }
+            for v in map.values_mut() {
+                stringify_acc_id_fields(v);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                stringify_acc_id_fields(item);
+            }
+        }
+        _ => {}
+    }
 }
 
 async fn futu_start(
@@ -845,7 +1140,14 @@ async fn futu_start(
     if fs.started_at.is_none() {
         fs.started_at = Some(chrono::Local::now().to_rfc3339());
     }
-    fs.logs.push(runtime_log_with_ts("Futu simulation started"));
+    let preferred = fs
+        .preferred_acc_id
+        .clone()
+        .unwrap_or_else(|| "9468130".to_string());
+    fs.logs.push(runtime_log_with_ts(format!(
+        "Futu simulation started (preferred acc_id={})",
+        preferred
+    )));
     if fs.logs.len() > 200 {
         let keep_from = fs.logs.len().saturating_sub(200);
         fs.logs = fs.logs.split_off(keep_from);
@@ -938,6 +1240,9 @@ async fn futu_load(
     fs.latest_snapshot = Some(last.snapshot.clone());
     fs.snapshots = snapshots;
     let loaded_snapshot_count = fs.snapshots.len();
+    if fs.preferred_acc_id.is_none() {
+        fs.preferred_acc_id = Some("9468130".to_string());
+    }
     fs.logs.push(runtime_log_with_ts(format!(
         "Futu history loaded => {} snapshots from {}",
         loaded_snapshot_count,
@@ -969,12 +1274,139 @@ async fn futu_stop(
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
-async fn futu_execution_loop(futu_state: Arc<Mutex<FutuRuntimeState>>) {
+fn normalize_futu_symbol_for_market(symbol: &str, market: &str) -> String {
+    let trimmed = symbol.trim().to_uppercase();
+    if trimmed.is_empty() {
+        return trimmed;
+    }
+    if trimmed.contains('.') {
+        return trimmed;
+    }
+    format!("{}.{}", market.trim().to_uppercase(), trimmed)
+}
+
+fn futu_history_date_range(days: u32) -> (Option<String>, Option<String>) {
+    if days == 0 {
+        return (None, None);
+    }
+
+    let end = chrono::Local::now().date_naive();
+    let start = end - chrono::Duration::days(days as i64);
+    (
+        Some(start.format("%Y-%m-%d").to_string()),
+        Some(end.format("%Y-%m-%d").to_string()),
+    )
+}
+
+fn futu_json_get_string(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
+    for key in keys {
+        if let Some(raw) = value.get(*key) {
+            if let Some(text) = raw.as_str() {
+                let normalized = text.trim();
+                if !normalized.is_empty() {
+                    return Some(normalized.to_string());
+                }
+            } else if let Some(v) = raw.as_i64() {
+                return Some(v.to_string());
+            } else if let Some(v) = raw.as_u64() {
+                return Some(v.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn futu_json_get_bool(value: &serde_json::Value, keys: &[&str]) -> Option<bool> {
+    for key in keys {
+        if let Some(raw) = value.get(*key) {
+            if let Some(v) = raw.as_bool() {
+                return Some(v);
+            }
+            if let Some(v) = raw.as_i64() {
+                return Some(v != 0);
+            }
+            if let Some(v) = raw.as_u64() {
+                return Some(v != 0);
+            }
+            if let Some(text) = raw.as_str() {
+                let normalized = text.trim().to_ascii_lowercase();
+                if normalized == "true" || normalized == "1" || normalized == "yes" || normalized == "y" {
+                    return Some(true);
+                }
+                if normalized == "false" || normalized == "0" || normalized == "no" || normalized == "n" {
+                    return Some(false);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn futu_extract_order_rows(value: &serde_json::Value) -> Vec<serde_json::Value> {
+    if let Some(rows) = value.as_array() {
+        return rows.clone();
+    }
+
+    for key in ["data", "orders", "order_list", "items", "rows"] {
+        if let Some(rows) = value.get(key).and_then(|v| v.as_array()) {
+            return rows.clone();
+        }
+    }
+
+    if let Some(data) = value.get("data") {
+        for key in ["orders", "order_list", "items", "rows"] {
+            if let Some(rows) = data.get(key).and_then(|v| v.as_array()) {
+                return rows.clone();
+            }
+        }
+    }
+
+    Vec::new()
+}
+
+fn futu_order_is_open(row: &serde_json::Value) -> bool {
+    if futu_json_get_bool(row, &["can_cancel", "is_can_cancel", "can_cancelled"]).unwrap_or(false)
+    {
+        return true;
+    }
+
+    let status = futu_json_get_string(row, &["order_status", "status", "orderStatus"])
+        .unwrap_or_default()
+        .to_uppercase();
+
+    if status.is_empty() {
+        return true;
+    }
+
+    let is_terminal = [
+        "FILLED_ALL",
+        "FILLED",
+        "CANCELLED_ALL",
+        "CANCELLED_PART",
+        "CANCELLED",
+        "FAILED",
+        "DELETED",
+        "DISABLED",
+        "WITHDRAWN",
+        "REJECTED",
+        "EXPIRED",
+    ]
+    .iter()
+    .any(|terminal| status.contains(terminal));
+
+    !is_terminal
+}
+
+async fn futu_execution_loop(
+    futu_state: Arc<Mutex<FutuRuntimeState>>,
+    paper_state: Arc<Mutex<PaperRuntimeState>>,
+) {
     let mut prev_prices: HashMap<String, f64> = HashMap::new();
     let mut prev_qty: HashMap<String, f64> = HashMap::new();
     let mut initial_capital: Option<f64> = None;
     let mut last_account_binding: Option<String> = None;
     let mut last_opend_dump: Option<String> = None;
+    let mut last_rebalance_signal: Option<String> = None;
 
     loop {
         let is_running = {
@@ -987,8 +1419,14 @@ async fn futu_execution_loop(futu_state: Arc<Mutex<FutuRuntimeState>>) {
             continue;
         }
 
+        let (preferred_acc_id, history_order_range_days) = {
+            let fs = futu_state.lock().await;
+            (fs.preferred_acc_id.clone(), fs.history_order_range_days)
+        };
+
         let (payload, conn_info, config_err) = match futu::FutuApiClient::from_env() {
-            Ok(client) => {
+            Ok(mut client) => {
+                client.set_account_id_override(preferred_acc_id.clone());
                 let info = client.connection_info();
                 (client.poll_execution_snapshot().await, Some(info), None)
             }
@@ -1040,6 +1478,478 @@ async fn futu_execution_loop(futu_state: Arc<Mutex<FutuRuntimeState>>) {
                     }
                 };
 
+                let (rebalance_signal, target_weights) = {
+                    let ps = paper_state.lock().await;
+                    let signal = ps.last_analysis.as_ref().map(|a| a.timestamp.clone());
+                    let targets = ps
+                        .target_weights
+                        .iter()
+                        .map(|t| (t.symbol.clone(), t.weight))
+                        .collect::<Vec<_>>();
+                    (signal, targets)
+                };
+
+                let mut rebalance_logs: Vec<String> = Vec::new();
+                let mut cancel_events_this_cycle: Vec<serde_json::Value> = Vec::new();
+
+                if let Some(signal_id) = rebalance_signal {
+                    if last_rebalance_signal.as_deref() != Some(signal_id.as_str()) {
+                        let mut consume_rebalance_signal = true;
+                        let selected_env = payload
+                            .selected_trd_env
+                            .as_deref()
+                            .unwrap_or("SIMULATE")
+                            .to_uppercase();
+
+                        if selected_env == "SIMULATE" && !target_weights.is_empty() {
+                            let selected_market = payload
+                                .selected_market
+                                .clone()
+                                .unwrap_or_else(|| "US".to_string())
+                                .to_uppercase();
+
+                            let mut live_price_by_symbol: HashMap<String, f64> = HashMap::new();
+                            let mut current_qty_by_symbol: HashMap<String, f64> = HashMap::new();
+
+                            for position in &payload.positions {
+                                let fallback_prev_price = prev_prices
+                                    .get(&position.symbol)
+                                    .copied()
+                                    .filter(|v| v.is_finite() && *v > 0.0);
+                                let live_price = quote_map
+                                    .get(&position.symbol)
+                                    .map(|q| q.price)
+                                    .filter(|v| v.is_finite() && *v > 0.0)
+                                    .or_else(|| {
+                                        if position.market_price.is_finite() && position.market_price > 0.0 {
+                                            Some(position.market_price)
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .or(fallback_prev_price)
+                                    .unwrap_or(position.avg_cost.max(0.0));
+
+                                if live_price.is_finite() && live_price > 0.0 {
+                                    live_price_by_symbol.insert(position.symbol.clone(), live_price);
+                                }
+                                if position.quantity.abs() > 1e-9 {
+                                    current_qty_by_symbol.insert(position.symbol.clone(), position.quantity);
+                                }
+                            }
+
+                            let mut candidate_symbols = target_weights
+                                .iter()
+                                .filter_map(|(symbol, _)| {
+                                    let normalized =
+                                        normalize_futu_symbol_for_market(symbol, &selected_market);
+                                    if normalized.is_empty() {
+                                        None
+                                    } else {
+                                        Some(normalized)
+                                    }
+                                })
+                                .collect::<Vec<_>>();
+                            candidate_symbols.sort();
+                            candidate_symbols.dedup();
+
+                            if candidate_symbols.is_empty() {
+                                rebalance_logs.push(runtime_log_with_ts(format!(
+                                    "Futu SIM rebalance signal {} ignored: empty candidate pool",
+                                    signal_id
+                                )));
+                            } else {
+                                let mut target_weight_map = HashMap::<String, f64>::new();
+                                for (symbol, weight) in &target_weights {
+                                    if !weight.is_finite() {
+                                        continue;
+                                    }
+                                    let normalized = normalize_futu_symbol_for_market(symbol, &selected_market);
+                                    if normalized.is_empty() {
+                                        continue;
+                                    }
+                                    let entry = target_weight_map.entry(normalized).or_insert(0.0);
+                                    *entry += weight.max(0.0);
+                                }
+
+                                let total_positive_weight = target_weight_map
+                                    .values()
+                                    .copied()
+                                    .filter(|w| w.is_finite() && *w > 0.0)
+                                    .sum::<f64>();
+
+                                let normalized_targets = if total_positive_weight > 0.0 {
+                                    target_weight_map
+                                        .into_iter()
+                                        .filter_map(|(symbol, weight)| {
+                                            if weight > 0.0 {
+                                                Some((symbol, weight / total_positive_weight))
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                        .collect::<HashMap<_, _>>()
+                                } else {
+                                    HashMap::new()
+                                };
+
+                                let needed_symbols = candidate_symbols.clone();
+
+                                let missing_price_symbols = needed_symbols
+                                    .iter()
+                                    .filter(|symbol| !live_price_by_symbol.contains_key(*symbol))
+                                    .cloned()
+                                    .collect::<Vec<_>>();
+
+                                if !missing_price_symbols.is_empty() {
+                                    if let Ok(extra_quotes) =
+                                        data::fetch_latest_prices_with_meta_ws_only(&missing_price_symbols).await
+                                    {
+                                        for (symbol, quote) in extra_quotes {
+                                            if quote.price.is_finite() && quote.price > 0.0 {
+                                                live_price_by_symbol.insert(symbol, quote.price);
+                                            }
+                                        }
+                                    }
+                                }
+
+                                let mut total_holdings_value = 0.0;
+                                for symbol in &candidate_symbols {
+                                    let qty = current_qty_by_symbol.get(symbol).copied().unwrap_or(0.0);
+                                    if qty.abs() < 1e-9 {
+                                        continue;
+                                    }
+                                    if let Some(price) = live_price_by_symbol.get(symbol) {
+                                        total_holdings_value += qty * price;
+                                    }
+                                }
+                                let total_portfolio_value = payload.cash_usd + total_holdings_value;
+
+                                if total_portfolio_value <= 0.0 {
+                                    rebalance_logs.push(runtime_log_with_ts(format!(
+                                        "Futu SIM rebalance signal {} ignored: non-positive portfolio value",
+                                        signal_id
+                                    )));
+                                } else {
+                                    let mut sell_orders: Vec<(String, f64, f64)> = Vec::new();
+                                    let mut buy_orders: Vec<(String, f64, f64)> = Vec::new();
+
+                                    for symbol in &candidate_symbols {
+                                        let Some(price) = live_price_by_symbol.get(symbol).copied() else {
+                                            rebalance_logs.push(runtime_log_with_ts(format!(
+                                                "WARNING: Futu SIM rebalance skipped {} due to missing live price",
+                                                symbol
+                                            )));
+                                            continue;
+                                        };
+
+                                        let current_qty = current_qty_by_symbol.get(symbol).copied().unwrap_or(0.0);
+                                        let target_weight = normalized_targets.get(symbol).copied().unwrap_or(0.0);
+                                        let target_value = total_portfolio_value * target_weight;
+                                        let target_qty = (target_value / price).floor().max(0.0);
+                                        let delta_qty = target_qty - current_qty;
+
+                                        if delta_qty.abs() < 1.0 {
+                                            continue;
+                                        }
+
+                                        if delta_qty > 0.0 {
+                                            buy_orders.push((symbol.clone(), delta_qty.floor(), price));
+                                        } else {
+                                            sell_orders.push((symbol.clone(), (-delta_qty).floor(), price));
+                                        }
+                                    }
+
+                                    if sell_orders.is_empty() && buy_orders.is_empty() {
+                                        rebalance_logs.push(runtime_log_with_ts(format!(
+                                            "Futu SIM rebalance signal {} -> no executable deltas",
+                                            signal_id
+                                        )));
+                                    } else {
+                                        match futu::FutuApiClient::from_env() {
+                                            Ok(mut trade_client) => {
+                                                trade_client.set_account_id_override(payload.selected_acc_id.clone());
+
+                                                let mut available_cash = payload.cash_usd.max(0.0);
+                                                let env_value = payload.selected_trd_env.clone();
+                                                let acc_value = payload.selected_acc_id.clone();
+                                                let market_value = payload.selected_market.clone();
+
+                                                let mut cancel_stage_ok = true;
+                                                match trade_client.get_order_list().await {
+                                                    Ok(order_list_raw) => {
+                                                        let mut pending_open_orders = Vec::<serde_json::Value>::new();
+                                                        let rows = futu_extract_order_rows(&order_list_raw);
+                                                        for row in rows {
+                                                            let order_env = futu_json_get_string(
+                                                                &row,
+                                                                &["trd_env", "trade_env", "env"],
+                                                            )
+                                                            .unwrap_or_default()
+                                                            .to_uppercase();
+                                                            if let Some(env) = env_value.as_ref() {
+                                                                if !order_env.is_empty()
+                                                                    && order_env != env.trim().to_uppercase()
+                                                                {
+                                                                    continue;
+                                                                }
+                                                            }
+
+                                                            let row_acc_id = futu_json_get_string(
+                                                                &row,
+                                                                &["acc_id", "account_id", "account"],
+                                                            )
+                                                            .unwrap_or_default();
+                                                            if let Some(acc_id) = acc_value.as_ref() {
+                                                                if !row_acc_id.is_empty()
+                                                                    && row_acc_id.trim() != acc_id.trim()
+                                                                {
+                                                                    continue;
+                                                                }
+                                                            }
+
+                                                            if !futu_order_is_open(&row) {
+                                                                continue;
+                                                            }
+
+                                                            if let Some(order_id) = futu_json_get_string(
+                                                                &row,
+                                                                &["order_id", "id"],
+                                                            ) {
+                                                                pending_open_orders.push(serde_json::json!({
+                                                                    "order_id": order_id,
+                                                                    "symbol": futu_json_get_string(&row, &["code", "symbol", "ticker"]),
+                                                                    "trd_side": futu_json_get_string(&row, &["trd_side", "side"]),
+                                                                    "qty": row.get("qty").cloned().or_else(|| row.get("quantity").cloned()),
+                                                                    "price": row.get("price").cloned(),
+                                                                    "order_status": futu_json_get_string(&row, &["order_status", "status"]),
+                                                                    "order_type": futu_json_get_string(&row, &["order_type"]),
+                                                                }));
+                                                            }
+                                                        }
+
+                                                        pending_open_orders.sort_by(|a, b| {
+                                                            let a_id = futu_json_get_string(a, &["order_id"]).unwrap_or_default();
+                                                            let b_id = futu_json_get_string(b, &["order_id"]).unwrap_or_default();
+                                                            a_id.cmp(&b_id)
+                                                        });
+                                                        pending_open_orders.dedup_by(|a, b| {
+                                                            futu_json_get_string(a, &["order_id"]).unwrap_or_default()
+                                                                == futu_json_get_string(b, &["order_id"]).unwrap_or_default()
+                                                        });
+
+                                                        if pending_open_orders.len() > 20 {
+                                                            consume_rebalance_signal = false;
+                                                            rebalance_logs.push(runtime_log_with_ts(format!(
+                                                                "WARNING: Futu SIM found {} open orders; canceling first 20 due to API limit, then will retry remaining orders",
+                                                                pending_open_orders.len()
+                                                            )));
+                                                        }
+
+                                                        let cancel_targets = pending_open_orders
+                                                            .into_iter()
+                                                            .take(20)
+                                                            .collect::<Vec<_>>();
+
+                                                        if !cancel_targets.is_empty() {
+                                                            rebalance_logs.push(runtime_log_with_ts(format!(
+                                                                "Futu SIM rebalance found {} open orders; canceling before new orders",
+                                                                cancel_targets.len()
+                                                            )));
+
+                                                            for cancel_item in cancel_targets {
+                                                                let order_id = futu_json_get_string(&cancel_item, &["order_id"])
+                                                                    .unwrap_or_default();
+                                                                if order_id.is_empty() {
+                                                                    continue;
+                                                                }
+                                                                let cancel_req = futu::FutuModifyOrderRequest {
+                                                                    order_id: order_id.clone(),
+                                                                    action: "CANCEL".to_string(),
+                                                                    quantity: None,
+                                                                    price: None,
+                                                                    trd_env: env_value.clone(),
+                                                                    acc_id: acc_value.clone(),
+                                                                };
+                                                                match trade_client
+                                                                    .modify_or_cancel_order(&cancel_req)
+                                                                    .await
+                                                                {
+                                                                    Ok(_) => {
+                                                                        let cancel_time = chrono::Local::now().to_rfc3339();
+                                                                        rebalance_logs.push(runtime_log_with_ts(format!(
+                                                                            "Futu SIM canceled open order {}",
+                                                                            order_id
+                                                                        )));
+                                                                        cancel_events_this_cycle.push(serde_json::json!({
+                                                                            "timestamp": cancel_time,
+                                                                            "order_id": order_id,
+                                                                            "symbol": futu_json_get_string(&cancel_item, &["symbol"]),
+                                                                            "trd_side": futu_json_get_string(&cancel_item, &["trd_side"]),
+                                                                            "qty": cancel_item.get("qty").cloned(),
+                                                                            "price": cancel_item.get("price").cloned(),
+                                                                            "order_status": futu_json_get_string(&cancel_item, &["order_status"]),
+                                                                            "order_type": futu_json_get_string(&cancel_item, &["order_type"]),
+                                                                            "reason": "Rebalance pre-cancel pending order",
+                                                                            "signal_id": signal_id,
+                                                                        }));
+                                                                    }
+                                                                    Err(err) => {
+                                                                        cancel_stage_ok = false;
+                                                                        consume_rebalance_signal = false;
+                                                                        rebalance_logs.push(runtime_log_with_ts(format!(
+                                                                            "WARNING: Futu SIM failed to cancel order {}: {}",
+                                                                            order_id, err
+                                                                        )));
+                                                                    }
+                                                                }
+
+                                                                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                                                            }
+                                                        }
+                                                    }
+                                                    Err(err) => {
+                                                        cancel_stage_ok = false;
+                                                        consume_rebalance_signal = false;
+                                                        rebalance_logs.push(runtime_log_with_ts(format!(
+                                                            "WARNING: Futu SIM rebalance skipped due to order-list query failure: {}",
+                                                            err
+                                                        )));
+                                                    }
+                                                }
+
+                                                if !cancel_stage_ok {
+                                                    rebalance_logs.push(runtime_log_with_ts(
+                                                        "Futu SIM rebalance aborted before new orders because cancel stage failed",
+                                                    ));
+                                                    consume_rebalance_signal = false;
+                                                } else {
+
+                                                for (symbol, qty, price) in sell_orders {
+                                                    if qty < 1.0 {
+                                                        continue;
+                                                    }
+                                                    let request = futu::FutuPlaceOrderRequest {
+                                                        symbol: symbol.clone(),
+                                                        side: "SELL".to_string(),
+                                                        quantity: qty,
+                                                        price: Some(price),
+                                                        order_type: Some("MARKET".to_string()),
+                                                        market: market_value.clone(),
+                                                        trd_env: env_value.clone(),
+                                                        acc_id: acc_value.clone(),
+                                                        adjust_limit: None,
+                                                        remark: None,
+                                                        time_in_force: None,
+                                                        fill_outside_rth: None,
+                                                        session: None,
+                                                        aux_price: None,
+                                                        trail_type: None,
+                                                        trail_value: None,
+                                                        trail_spread: None,
+                                                    };
+                                                    match trade_client.place_order(&request).await {
+                                                        Ok(res) => {
+                                                            available_cash += qty * price;
+                                                            let order_id = res
+                                                                .get("order_id")
+                                                                .and_then(|v| v.as_str())
+                                                                .unwrap_or("--");
+                                                            rebalance_logs.push(runtime_log_with_ts(format!(
+                                                                "Futu SIM rebalance SELL {} x {:.0} @ {:.4} (order_id={})",
+                                                                symbol, qty, price, order_id
+                                                            )));
+                                                        }
+                                                        Err(err) => {
+                                                            rebalance_logs.push(runtime_log_with_ts(format!(
+                                                                "WARNING: Futu SIM SELL failed {} x {:.0}: {}",
+                                                                symbol, qty, err
+                                                            )));
+                                                        }
+                                                    }
+                                                }
+
+                                                for (symbol, qty, price) in buy_orders {
+                                                    if qty < 1.0 {
+                                                        continue;
+                                                    }
+                                                    let affordable_qty = (available_cash / price).floor().max(0.0);
+                                                    let execute_qty = qty.min(affordable_qty);
+                                                    if execute_qty < 1.0 {
+                                                        rebalance_logs.push(runtime_log_with_ts(format!(
+                                                            "WARNING: Futu SIM BUY skipped {} due to insufficient cash (need {:.2}, have {:.2})",
+                                                            symbol,
+                                                            qty * price,
+                                                            available_cash
+                                                        )));
+                                                        continue;
+                                                    }
+
+                                                    let request = futu::FutuPlaceOrderRequest {
+                                                        symbol: symbol.clone(),
+                                                        side: "BUY".to_string(),
+                                                        quantity: execute_qty,
+                                                        price: Some(price),
+                                                        order_type: Some("MARKET".to_string()),
+                                                        market: market_value.clone(),
+                                                        trd_env: env_value.clone(),
+                                                        acc_id: acc_value.clone(),
+                                                        adjust_limit: None,
+                                                        remark: None,
+                                                        time_in_force: None,
+                                                        fill_outside_rth: None,
+                                                        session: None,
+                                                        aux_price: None,
+                                                        trail_type: None,
+                                                        trail_value: None,
+                                                        trail_spread: None,
+                                                    };
+                                                    match trade_client.place_order(&request).await {
+                                                        Ok(res) => {
+                                                            available_cash -= execute_qty * price;
+                                                            let order_id = res
+                                                                .get("order_id")
+                                                                .and_then(|v| v.as_str())
+                                                                .unwrap_or("--");
+                                                            rebalance_logs.push(runtime_log_with_ts(format!(
+                                                                "Futu SIM rebalance BUY {} x {:.0} @ {:.4} (order_id={})",
+                                                                symbol, execute_qty, price, order_id
+                                                            )));
+                                                        }
+                                                        Err(err) => {
+                                                            rebalance_logs.push(runtime_log_with_ts(format!(
+                                                                "WARNING: Futu SIM BUY failed {} x {:.0}: {}",
+                                                                symbol, execute_qty, err
+                                                            )));
+                                                        }
+                                                    }
+                                                }
+                                                }
+                                            }
+                                            Err(err) => {
+                                                consume_rebalance_signal = false;
+                                                rebalance_logs.push(runtime_log_with_ts(format!(
+                                                    "WARNING: Futu SIM rebalance skipped: failed to init trading client: {}",
+                                                    err
+                                                )));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else if selected_env == "REAL" {
+                            rebalance_logs.push(runtime_log_with_ts(format!(
+                                "Futu rebalance signal {} detected but skipped in REAL mode",
+                                signal_id
+                            )));
+                        }
+
+                        if consume_rebalance_signal {
+                            last_rebalance_signal = Some(signal_id);
+                        }
+                    }
+                }
+
                 let timestamp = chrono::Local::now().to_rfc3339();
                 let mut minute_symbols = Vec::new();
                 let mut minute_holdings = Vec::new();
@@ -1047,6 +1957,11 @@ async fn futu_execution_loop(futu_state: Arc<Mutex<FutuRuntimeState>>) {
                 let mut total_holdings_value = 0.0;
 
                 for position in &payload.positions {
+                    let fallback_prev_price = prev_prices
+                        .get(&position.symbol)
+                        .copied()
+                        .filter(|v| v.is_finite() && *v > 0.0);
+
                     let live_price = quote_map
                         .get(&position.symbol)
                         .map(|q| q.price)
@@ -1058,6 +1973,7 @@ async fn futu_execution_loop(futu_state: Arc<Mutex<FutuRuntimeState>>) {
                                 None
                             }
                         })
+                        .or(fallback_prev_price)
                         .unwrap_or(position.avg_cost.max(0.0));
 
                     let prev = prev_prices.get(&position.symbol).copied().unwrap_or(live_price);
@@ -1132,11 +2048,34 @@ async fn futu_execution_loop(futu_state: Arc<Mutex<FutuRuntimeState>>) {
                 }
                 prev_qty = new_qty_map;
 
+                let mut open_orders_snapshot: Vec<serde_json::Value> = Vec::new();
+                let mut trade_history_snapshot: Vec<serde_json::Value> = Vec::new();
+                let mut history_orders_snapshot: Vec<serde_json::Value> = Vec::new();
+                if let Ok(mut query_client) = futu::FutuApiClient::from_env() {
+                    query_client.set_account_id_override(payload.selected_acc_id.clone());
+                    if let Ok(order_list_raw) = query_client.get_order_list().await {
+                        open_orders_snapshot = futu_extract_order_rows(&order_list_raw);
+                    }
+                    if let Ok(trade_list_raw) = query_client.get_today_executed_trades().await {
+                        trade_history_snapshot = futu_extract_order_rows(&trade_list_raw);
+                    }
+                    let (history_start, history_end) = futu_history_date_range(history_order_range_days);
+                    if let Ok(history_order_list_raw) = query_client
+                        .get_historical_order_list_in_range(history_start, history_end)
+                        .await
+                    {
+                        history_orders_snapshot = futu_extract_order_rows(&history_order_list_raw);
+                    }
+                }
+
                 let mut fs = futu_state.lock().await;
                 let was_connected = fs.connected;
                 fs.connected = true;
                 fs.account_cash_usd = payload.cash_usd;
                 fs.account_buying_power_usd = payload.buying_power_usd;
+                if fs.preferred_acc_id.is_none() {
+                    fs.preferred_acc_id = Some("9468130".to_string());
+                }
                 fs.selected_acc_id = payload.selected_acc_id.clone();
                 fs.selected_trd_env = payload.selected_trd_env.clone();
                 fs.selected_market = payload.selected_market.clone();
@@ -1152,6 +2091,16 @@ async fn futu_execution_loop(futu_state: Arc<Mutex<FutuRuntimeState>>) {
                         updated_at: position.updated_at.clone(),
                     })
                     .collect();
+                fs.open_orders = open_orders_snapshot;
+                fs.trade_history = trade_history_snapshot;
+                fs.history_orders = history_orders_snapshot;
+                if !cancel_events_this_cycle.is_empty() {
+                    fs.cancel_history.extend(cancel_events_this_cycle);
+                    if fs.cancel_history.len() > 500 {
+                        let keep_from = fs.cancel_history.len().saturating_sub(500);
+                        fs.cancel_history = fs.cancel_history.split_off(keep_from);
+                    }
+                }
                 fs.latest_snapshot = Some(snapshot.clone());
                 fs.snapshots.push(snapshot);
                 if fs.snapshots.len() > 6000 {
@@ -1240,6 +2189,9 @@ async fn futu_execution_loop(futu_state: Arc<Mutex<FutuRuntimeState>>) {
                         "Futu execution synced holdings ({} symbols)",
                         holdings_count
                     )));
+                }
+                if !rebalance_logs.is_empty() {
+                    fs.logs.extend(rebalance_logs);
                 }
                 if fs.logs.len() > 200 {
                     let keep_from = fs.logs.len().saturating_sub(200);

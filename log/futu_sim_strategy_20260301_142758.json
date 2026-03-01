@@ -1,0 +1,176 @@
+{
+  "created_at": "2026-03-01T14:29:17.631768700+08:00",
+  "started_at": "2026-03-01T14:27:57.200491700+08:00",
+  "conn_host": "127.0.0.1",
+  "conn_port": 11111,
+  "conn_market": "US",
+  "conn_security_firm": "FUTUSECURITIES",
+  "selected_acc_id": "281756481086958815",
+  "selected_trd_env": "REAL",
+  "selected_market": "US",
+  "runtime_file": "D:\\Users\\mrleo\\Documents\\GitHub\\diffstock-tui\\log\\futu_sim_runtime_20260301_142758.jsonl",
+  "latest_snapshot": {
+    "timestamp": "2026-03-01T14:29:17.631608800+08:00",
+    "total_value": 129615.334,
+    "cash_usd": 67209.18,
+    "pnl_usd": -870382.281,
+    "pnl_pct": -87.03843568666912,
+    "benchmark_return_pct": 0.0,
+    "symbols": [
+      {
+        "symbol": "US.COPX",
+        "price": 76.926,
+        "change_1m": 0.0,
+        "change_1m_pct": 0.0
+      },
+      {
+        "symbol": "US.ETN",
+        "price": 321.883,
+        "change_1m": 0.0,
+        "change_1m_pct": 0.0
+      },
+      {
+        "symbol": "US.IAU",
+        "price": 52.686,
+        "change_1m": 0.0,
+        "change_1m_pct": 0.0
+      },
+      {
+        "symbol": "US.MSFT",
+        "price": 430.999,
+        "change_1m": 0.0,
+        "change_1m_pct": 0.0
+      },
+      {
+        "symbol": "US.TLT",
+        "price": 87.191,
+        "change_1m": 0.0,
+        "change_1m_pct": 0.0
+      },
+      {
+        "symbol": "US.URA",
+        "price": 44.0,
+        "change_1m": 0.0,
+        "change_1m_pct": 0.0
+      }
+    ],
+    "holdings": [
+      {
+        "symbol": "US.COPX",
+        "quantity": 130.0,
+        "price": 76.926,
+        "asset_value": 10000.380000000001,
+        "avg_cost": 76.926
+      },
+      {
+        "symbol": "US.ETN",
+        "quantity": 27.0,
+        "price": 321.883,
+        "asset_value": 8690.841,
+        "avg_cost": 321.883
+      },
+      {
+        "symbol": "US.IAU",
+        "quantity": 120.0,
+        "price": 52.686,
+        "asset_value": 6322.32,
+        "avg_cost": 52.686
+      },
+      {
+        "symbol": "US.MSFT",
+        "quantity": 60.0,
+        "price": 430.999,
+        "asset_value": 25859.940000000002,
+        "avg_cost": 430.999
+      },
+      {
+        "symbol": "US.TLT",
+        "quantity": 103.0,
+        "price": 87.191,
+        "asset_value": 8980.673,
+        "avg_cost": 87.191
+      },
+      {
+        "symbol": "US.URA",
+        "quantity": 58.0,
+        "price": 44.0,
+        "asset_value": 2552.0,
+        "avg_cost": 44.0
+      }
+    ],
+    "holdings_symbols": [
+      "US.COPX",
+      "US.ETN",
+      "US.IAU",
+      "US.MSFT",
+      "US.TLT",
+      "US.URA"
+    ]
+  },
+  "latest_positions": [
+    {
+      "symbol": "US.COPX",
+      "quantity": 130.0,
+      "avg_cost": 76.926,
+      "market_price": 0.0,
+      "updated_at": null
+    },
+    {
+      "symbol": "US.ETN",
+      "quantity": 27.0,
+      "avg_cost": 321.883,
+      "market_price": 0.0,
+      "updated_at": null
+    },
+    {
+      "symbol": "US.IAU",
+      "quantity": 120.0,
+      "avg_cost": 52.686,
+      "market_price": 0.0,
+      "updated_at": null
+    },
+    {
+      "symbol": "US.MSFT",
+      "quantity": 60.0,
+      "avg_cost": 430.999,
+      "market_price": 0.0,
+      "updated_at": null
+    },
+    {
+      "symbol": "US.TLT",
+      "quantity": 103.0,
+      "avg_cost": 87.191,
+      "market_price": 0.0,
+      "updated_at": null
+    },
+    {
+      "symbol": "US.URA",
+      "quantity": 58.0,
+      "avg_cost": 44.0,
+      "market_price": 0.0,
+      "updated_at": null
+    }
+  ],
+  "latest_logs": [
+    "[14:27:57] Futu execution initialized (waiting for OpenD / API configuration)",
+    "[14:27:58] Futu runtime file created => D:\\Users\\mrleo\\Documents\\GitHub\\diffstock-tui\\log\\futu_sim_runtime_20260301_142758.jsonl",
+    "[14:27:58] Futu strategy file created => D:\\Users\\mrleo\\Documents\\GitHub\\diffstock-tui\\log\\futu_sim_strategy_20260301_142758.json",
+    "[14:27:58] Futu execution connected",
+    "[14:27:58] Futu account binding => acc_id=9468130 env=SIMULATE market=US",
+    "[14:27:58] Futu OpenD selected account row => {\"acc_id\":9468130,\"acc_role\":\"N/A\",\"acc_status\":\"ACTIVE\",\"acc_type\":\"MARGIN\",\"card_num\":\"N/A\",\"security_firm\":\"N/A\",\"sim_acc_type\":\"STOCK\",\"trd_env\":\"SIMULATE\",\"trdmarket_auth\":[\"US\"],\"uni_card_num\":\"N/A\"}",
+    "[14:27:58] Futu OpenD full payload => {\"account_info_raw\":[{\"au_avl_withdrawal_cash\":\"N/A\",\"au_cash\":\"N/A\",\"aud_assets\":\"N/A\",\"aud_net_cash_power\":\"N/A\",\"available_funds\":\"N/A\",\"avl_withdrawal_cash\":0.0,\"beginning_dtbp\":\"N/A\",\"bond_assets\":\"N/A\",\"cash\":981442.615,\"cn_avl_withdrawal_cash\":\"N/A\",\"cn_cash\":\"N/A\",\"cnh_assets\":\"N/A\",\"cnh_net_cash_power\":\"N/A\",\"currency\":\"N/A\",\"dt_call_amount\":\"N/A\",\"dt_status\":\"N/A\",\"frozen_cash\":0.0,\"fund_assets\":\"N/A\",\"hk_avl_withdrawal_cash\":\"N/A\",\"hk_cash\":\"N/A\",\"hkd_assets\":\"N/A\",\"hkd_net_cash_power\":\"N/A\",\"initial_margin\":\"N/A\",\"interest_charged_amount\":0.0,\"is_pdt\":\"N/A\",\"jp_avl_withdrawal_cash\":\"N/A\",\"jp_cash\":\"N/A\",\"jpy_assets\":\"N/A\",\"jpy_net_cash_power\":\"N/A\",\"long_mv\":48375.0,\"maintenance_margin\":0.0,\"margin_call_margin\":\"N/A\",\"market_val\":48375.0,\"max_power_short\":\"N/A\",\"max_withdrawal\":\"N/A\",\"net_cash_power\":\"N/A\",\"pdt_seq\":\"N/A\",\"pending_asset\":\"N/A\",\"power\":0.0,\"realized_pl\":\"N/A\",\"remaining_dtbp\":\"N/A\",\"risk_level\":\"N/A\",\"risk_status\":\"N/A\",\"securities_assets\":1029817.615,\"sg_avl_withdrawal_cash\":\"N/A\",\"sg_cash\":\"N/A\",\"sgd_assets\":\"N/A\",\"sgd_net_cash_power\":\"N/A\",\"short_mv\":0.0,\"total_assets\":1029817.615,\"unrealized_pl\":\"N/A\",\"us_avl_withdrawal_cash\":\"N/A\",\"us_cash\":\"N/A\",\"usd_assets\":\"N/A\",\"usd_net_cash_power\":\"N/A\"}],\"account_list\":[{\"acc_id\":281756481086958815,\"acc_role\":\"NORMAL\",\"acc_status\":\"ACTIVE\",\"acc_type\":\"MARGIN\",\"card_num\":\"1001389919081526\",\"security_firm\":\"FUTUSECURITIES\",\"sim_acc_type\":\"N/A\",\"trd_env\":\"REAL\",\"trdmarket_auth\":[\"US\",\"HKFUND\",\"USFUND\"],\"uni_card_num\":\"1001237158566795\"},{\"acc_id\":9468130,\"acc_role\":\"N/A\",\"acc_status\":\"ACTIVE\",\"acc_type\":\"MARGIN\",\"card_num\":\"N/A\",\"security_firm\":\"N/A\",\"sim_acc_type\":\"STOCK\",\"trd_env\":\"SIMULATE\",\"trdmarket_auth\":[\"US\"],\"uni_card_num\":\"N/A\"},{\"acc_id\":11849223,\"acc_role\":\"N/A\",\"acc_status\":\"ACTIVE\",\"acc_type\":\"MARGIN\",\"card_num\":\"N/A\",\"security_firm\":\"N/A\",\"sim_acc_type\":\"OPTION\",\"trd_env\":\"SIMULATE\",\"trdmarket_auth\":[\"US\"],\"uni_card_num\":\"N/A\"},{\"acc_id\":281756461710456342,\"acc_role\":\"NORMAL\",\"acc_status\":\"DISABLED\",\"acc_type\":\"MARGIN\",\"card_num\":\"1001100522935961\",\"security_firm\":\"FUTUSECURITIES\",\"sim_acc_type\":\"N/A\",\"trd_env\":\"REAL\",\"trdmarket_auth\":[\"US\"],\"uni_card_num\":\"N/A\"}],\"buying_power_usd\":0.0,\"cash_usd\":981442.615,\"positions_raw\":[{\"average_cost\":\"N/A\",\"can_sell_qty\":100.0,\"code\":\"US.GLD\",\"cost_price\":185.55,\"cost_price_valid\":true,\"currency\":\"USD\",\"diluted_cost\":185.55,\"market_val\":48375.0,\"nominal_price\":483.75,\"pl_ratio\":160.71139854486665,\"pl_ratio_avg_cost\":\"N/A\",\"pl_ratio_valid\":true,\"pl_val\":29820.0,\"pl_val_valid\":true,\"position_market\":\"US\",\"position_side\":\"LONG\",\"qty\":100.0,\"realized_pl\":\"N/A\",\"stock_name\":\"�ƽ�ETF-SPDR\",\"today_buy_qty\":\"N/A\",\"today_buy_val\":\"N/A\",\"today_pl_val\":\"N/A\",\"today_sell_qty\":\"N/A\",\"today_sell_val\":\"N/A\",\"today_trd_val\":\"N/A\",\"unrealized_pl\":\"N/A\"}],\"selected_acc_id\":\"9468130\",\"selected_account\":{\"acc_id\":9468130,\"acc_role\":\"N/A\",\"acc_status\":\"ACTIVE\",\"acc_type\":\"MARGIN\",\"card_num\":\"N/A\",\"security_firm\":\"N/A\",\"sim_acc_type\":\"STOCK\",\"trd_env\":\"SIMULATE\",\"trdmarket_auth\":[\"US\"],\"uni_card_num\":\"N/A\"},\"selected_market\":\"US\",\"selected_trd_env\":\"SIMULATE\"}",
+    "[14:27:58] Futu execution synced holdings (1 symbols)",
+    "[14:28:12] Futu preferred account applied => 9468130",
+    "[14:28:12] Futu account switched immediately => preferred=9468130 active=9468130",
+    "[14:28:14] Futu OpenD selected account row => {\"acc_id\":9468130,\"acc_role\":\"N/A\",\"acc_status\":\"ACTIVE\",\"acc_type\":\"MARGIN\",\"card_num\":\"N/A\",\"security_firm\":\"N/A\",\"sim_acc_type\":\"STOCK\",\"trd_env\":\"SIMULATE\",\"trdmarket_auth\":[\"US\"],\"uni_card_num\":\"N/A\"}",
+    "[14:28:21] Futu preferred account applied => 281756481086958815",
+    "[14:28:21] Futu account switched immediately => preferred=281756481086958815 active=281756481086958815",
+    "[14:28:30] Futu account binding => acc_id=281756481086958815 env=REAL market=US",
+    "[14:28:30] Futu OpenD selected account row => {\"acc_id\":281756481086958815,\"acc_role\":\"NORMAL\",\"acc_status\":\"ACTIVE\",\"acc_type\":\"MARGIN\",\"card_num\":\"1001389919081526\",\"security_firm\":\"FUTUSECURITIES\",\"sim_acc_type\":\"N/A\",\"trd_env\":\"REAL\",\"trdmarket_auth\":[\"US\",\"HKFUND\",\"USFUND\"],\"uni_card_num\":\"1001237158566795\"}",
+    "[14:28:30] Futu OpenD full payload => {\"account_info_raw\":[{\"au_avl_withdrawal_cash\":\"N/A\",\"au_cash\":\"N/A\",\"aud_assets\":0.0,\"aud_net_cash_power\":\"N/A\",\"available_funds\":\"N/A\",\"avl_withdrawal_cash\":55458.46,\"beginning_dtbp\":\"N/A\",\"bond_assets\":0.0,\"cash\":67209.18,\"cn_avl_withdrawal_cash\":0.0,\"cn_cash\":0.0,\"cnh_assets\":0.0,\"cnh_net_cash_power\":0.0,\"currency\":\"HKD\",\"dt_call_amount\":\"N/A\",\"dt_status\":\"N/A\",\"frozen_cash\":11750.68672,\"fund_assets\":27406.56,\"hk_avl_withdrawal_cash\":0.0,\"hk_cash\":0.0,\"hkd_assets\":0.0,\"hkd_net_cash_power\":0.0,\"initial_margin\":243638.99165364893,\"interest_charged_amount\":0.0,\"is_pdt\":\"N/A\",\"jp_avl_withdrawal_cash\":0.0,\"jp_cash\":0.0,\"jpy_assets\":0.0,\"jpy_net_cash_power\":0.0,\"long_mv\":551936.6398,\"maintenance_margin\":181995.4163386368,\"margin_call_margin\":209401.96305258,\"market_val\":551936.6398,\"max_power_short\":798778.78177908,\"max_withdrawal\":0.0,\"net_cash_power\":0.0,\"pdt_seq\":\"N/A\",\"pending_asset\":0.0,\"power\":798778.78177908,\"realized_pl\":\"N/A\",\"remaining_dtbp\":\"N/A\",\"risk_level\":\"N/A\",\"risk_status\":\"LEVEL3\",\"securities_assets\":619145.83,\"sg_avl_withdrawal_cash\":0.0,\"sg_cash\":0.0,\"sgd_assets\":0.0,\"sgd_net_cash_power\":0.0,\"short_mv\":0.0,\"total_assets\":646552.3869,\"unrealized_pl\":\"N/A\",\"us_avl_withdrawal_cash\":7088.83,\"us_cash\":8590.83,\"usd_assets\":79140.65,\"usd_net_cash_power\":10416.84388044}],\"account_list\":[{\"acc_id\":281756481086958815,\"acc_role\":\"NORMAL\",\"acc_status\":\"ACTIVE\",\"acc_type\":\"MARGIN\",\"card_num\":\"1001389919081526\",\"security_firm\":\"FUTUSECURITIES\",\"sim_acc_type\":\"N/A\",\"trd_env\":\"REAL\",\"trdmarket_auth\":[\"US\",\"HKFUND\",\"USFUND\"],\"uni_card_num\":\"1001237158566795\"},{\"acc_id\":9468130,\"acc_role\":\"N/A\",\"acc_status\":\"ACTIVE\",\"acc_type\":\"MARGIN\",\"card_num\":\"N/A\",\"security_firm\":\"N/A\",\"sim_acc_type\":\"STOCK\",\"trd_env\":\"SIMULATE\",\"trdmarket_auth\":[\"US\"],\"uni_card_num\":\"N/A\"},{\"acc_id\":11849223,\"acc_role\":\"N/A\",\"acc_status\":\"ACTIVE\",\"acc_type\":\"MARGIN\",\"card_num\":\"N/A\",\"security_firm\":\"N/A\",\"sim_acc_type\":\"OPTION\",\"trd_env\":\"SIMULATE\",\"trdmarket_auth\":[\"US\"],\"uni_card_num\":\"N/A\"},{\"acc_id\":281756461710456342,\"acc_role\":\"NORMAL\",\"acc_status\":\"DISABLED\",\"acc_type\":\"MARGIN\",\"card_num\":\"1001100522935961\",\"security_firm\":\"FUTUSECURITIES\",\"sim_acc_type\":\"N/A\",\"trd_env\":\"REAL\",\"trdmarket_auth\":[\"US\"],\"uni_card_num\":\"N/A\"}],\"buying_power_usd\":798778.78177908,\"cash_usd\":67209.18,\"positions_raw\":[{\"average_cost\":44.0,\"can_sell_qty\":58.0,\"code\":\"US.URA\",\"cost_price\":44.0,\"cost_price_valid\":true,\"currency\":\"USD\",\"diluted_cost\":44.0,\"market_val\":3151.72,\"nominal_price\":54.34,\"pl_ratio\":23.5,\"pl_ratio_avg_cost\":23.5,\"pl_ratio_valid\":true,\"pl_val\":599.72,\"pl_val_valid\":true,\"position_market\":\"US\",\"position_side\":\"LONG\",\"qty\":58.0,\"realized_pl\":0.0,\"stock_name\":\"�˼�ETF-Global X\",\"today_buy_qty\":0.0,\"today_buy_val\":0.0,\"today_pl_val\":0.0,\"today_sell_qty\":0.0,\"today_sell_val\":0.0,\"today_trd_val\":0.0,\"unrealized_pl\":599.72},{\"average_cost\":87.191,\"can_sell_qty\":103.0,\"code\":\"US.TLT\",\"cost_price\":86.859,\"cost_price_valid\":true,\"currency\":\"USD\",\"diluted_cost\":86.859,\"market_val\":9354.46,\"nominal_price\":90.82,\"pl_ratio\":4.5600000000000005,\"pl_ratio_avg_cost\":4.16,\"pl_ratio_valid\":true,\"pl_val\":407.98,\"pl_val_valid\":true,\"position_market\":\"US\",\"position_side\":\"LONG\",\"qty\":103.0,\"realized_pl\":34.18,\"stock_name\":\"20+������������ծETF-iShares\",\"today_buy_qty\":0.0,\"today_buy_val\":0.0,\"today_pl_val\":0.0,\"today_sell_qty\":0.0,\"today_sell_val\":0.0,\"today_trd_val\":0.0,\"unrealized_pl\":373.8},{\"average_cost\":430.999,\"can_sell_qty\":60.0,\"code\":\"US.MSFT\",\"cost_price\":430.999,\"cost_price_valid\":true,\"currency\":\"USD\",\"diluted_cost\":430.999,\"market_val\":23564.4,\"nominal_price\":392.74,\"pl_ratio\":-8.88,\"pl_ratio_avg_cost\":-8.88,\"pl_ratio_valid\":true,\"pl_val\":-2295.56,\"pl_val_valid\":true,\"position_market\":\"US\",\"position_side\":\"LONG\",\"qty\":60.0,\"realized_pl\":0.0,\"stock_name\":\"΢��\",\"today_buy_qty\":0.0,\"today_buy_val\":0.0,\"today_pl_val\":0.0,\"today_sell_qty\":0.0,\"today_sell_val\":0.0,\"today_trd_val\":0.0,\"unrealized_pl\":-2295.56},{\"average_cost\":52.686,\"can_sell_qty\":120.0,\"code\":\"US.IAU\",\"cost_price\":52.878,\"cost_price_valid\":true,\"currency\":\"USD\",\"diluted_cost\":52.878,\"market_val\":11888.4,\"nominal_price\":99.07,\"pl_ratio\":87.36,\"pl_ratio_avg_cost\":88.03999999999999,\"pl_ratio_valid\":true,\"pl_val\":5543.0,\"pl_val_valid\":true,\"position_market\":\"US\",\"position_side\":\"LONG\",\"qty\":120.0,\"realized_pl\":-23.1,\"stock_name\":\"�ƽ�����ETF-iShares\",\"today_buy_qty\":0.0,\"today_buy_val\":0.0,\"today_pl_val\":0.0,\"today_sell_qty\":0.0,\"today_sell_val\":0.0,\"today_trd_val\":0.0,\"unrealized_pl\":5566.1},{\"average_cost\":321.883,\"can_sell_qty\":27.0,\"code\":\"US.ETN\",\"cost_price\":321.883,\"cost_price_valid\":true,\"currency\":\"USD\",\"diluted_cost\":321.883,\"market_val\":10149.84,\"nominal_price\":375.92,\"pl_ratio\":16.79,\"pl_ratio_avg_cost\":16.79,\"pl_ratio_valid\":true,\"pl_val\":1458.99,\"pl_val_valid\":true,\"position_market\":\"US\",\"position_side\":\"LONG\",\"qty\":27.0,\"realized_pl\":0.0,\"stock_name\":\"����\",\"today_buy_qty\":0.0,\"today_buy_val\":0.0,\"today_pl_val\":0.0,\"today_sell_qty\":0.0,\"today_sell_val\":0.0,\"today_trd_val\":0.0,\"unrealized_pl\":1458.99},{\"average_cost\":76.926,\"can_sell_qty\":130.0,\"code\":\"US.COPX\",\"cost_price\":75.254,\"cost_price_valid\":true,\"currency\":\"USD\",\"diluted_cost\":75.254,\"market_val\":12441.0,\"nominal_price\":95.7,\"pl_ratio\":27.17,\"pl_ratio_avg_cost\":24.41,\"pl_ratio_valid\":true,\"pl_val\":2657.99,\"pl_val_valid\":true,\"position_market\":\"US\",\"position_side\":\"LONG\",\"qty\":130.0,\"realized_pl\":217.42,\"stock_name\":\"ͭ��ETF-Global X\",\"today_buy_qty\":0.0,\"today_buy_val\":0.0,\"today_pl_val\":0.0,\"today_sell_qty\":0.0,\"today_sell_val\":0.0,\"today_trd_val\":0.0,\"unrealized_pl\":2440.57}],\"selected_acc_id\":\"281756481086958815\",\"selected_account\":{\"acc_id\":281756481086958815,\"acc_role\":\"NORMAL\",\"acc_status\":\"ACTIVE\",\"acc_type\":\"MARGIN\",\"card_num\":\"1001389919081526\",\"security_firm\":\"FUTUSECURITIES\",\"sim_acc_type\":\"N/A\",\"trd_env\":\"REAL\",\"trdmarket_auth\":[\"US\",\"HKFUND\",\"USFUND\"],\"uni_card_num\":\"1001237158566795\"},\"selected_market\":\"US\",\"selected_trd_env\":\"REAL\"}",
+    "[14:28:30] Futu execution synced holdings (6 symbols)",
+    "[14:28:45] Futu OpenD selected account row => {\"acc_id\":281756481086958815,\"acc_role\":\"NORMAL\",\"acc_status\":\"ACTIVE\",\"acc_type\":\"MARGIN\",\"card_num\":\"1001389919081526\",\"security_firm\":\"FUTUSECURITIES\",\"sim_acc_type\":\"N/A\",\"trd_env\":\"REAL\",\"trdmarket_auth\":[\"US\",\"HKFUND\",\"USFUND\"],\"uni_card_num\":\"1001237158566795\"}",
+    "[14:29:01] Futu OpenD selected account row => {\"acc_id\":281756481086958815,\"acc_role\":\"NORMAL\",\"acc_status\":\"ACTIVE\",\"acc_type\":\"MARGIN\",\"card_num\":\"1001389919081526\",\"security_firm\":\"FUTUSECURITIES\",\"sim_acc_type\":\"N/A\",\"trd_env\":\"REAL\",\"trdmarket_auth\":[\"US\",\"HKFUND\",\"USFUND\"],\"uni_card_num\":\"1001237158566795\"}",
+    "[14:29:17] Futu OpenD selected account row => {\"acc_id\":281756481086958815,\"acc_role\":\"NORMAL\",\"acc_status\":\"ACTIVE\",\"acc_type\":\"MARGIN\",\"card_num\":\"1001389919081526\",\"security_firm\":\"FUTUSECURITIES\",\"sim_acc_type\":\"N/A\",\"trd_env\":\"REAL\",\"trdmarket_auth\":[\"US\",\"HKFUND\",\"USFUND\"],\"uni_card_num\":\"1001237158566795\"}"
+  ]
+}

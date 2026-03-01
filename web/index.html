@@ -338,7 +338,30 @@
     @media (max-width: 980px) {
       .grid-3 { grid-template-columns: 1fr; }
     }
-    .exec-engine-grid .panel { margin-bottom: 0; }
+    .exec-engine-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+    .exec-engine-grid .panel {
+      margin-bottom: 0;
+      border: 1px solid var(--border-2);
+    }
+    .exec-segment-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin: 10px 14px 0;
+      padding: 3px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.04);
+      color: var(--text-2);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .3px;
+      text-transform: uppercase;
+    }
 
     /* ─── Form Elements ─── */
     .row { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
@@ -1347,6 +1370,18 @@
       font-family: var(--mono);
       padding: 4px 2px;
     }
+    .futu-account-apply-row {
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+      flex-wrap: wrap;
+    }
+    .futu-account-apply-hint {
+      min-height: 18px;
+      color: var(--muted);
+      font-size: 11px;
+      margin-top: 4px;
+    }
 
     /* ─── Weekday pill toggles ─── */
     .weekday-group {
@@ -1599,87 +1634,179 @@
     }
 
     /* ─── Futu Connection & Account Panel ─── */
-    .futu-conn-kpi-grid {
-      display: grid;
-      grid-template-columns: 1.7fr repeat(4, 1fr);
-      gap: 10px;
-      align-items: stretch;
-    }
-    @media (max-width: 960px) {
-      .futu-conn-kpi-grid { grid-template-columns: 1fr 1fr 1fr; }
-    }
-    .futu-conn-main-card {
-      background: rgba(21,28,44,.55);
-      backdrop-filter: blur(14px);
-      -webkit-backdrop-filter: blur(14px);
-      border: 1px solid var(--border);
-      border-left: 3px solid var(--border-2);
-      border-radius: var(--radius);
-      padding: 12px 14px;
+    .futu-conn-main-wrap {
       display: flex;
       flex-direction: column;
-      gap: 5px;
-      transition: background var(--transition), border-color var(--transition);
+      gap: 12px;
+    }
+
+    /* ── Status Banner ── */
+    .futu-conn-main-card {
+      background: linear-gradient(135deg, rgba(10,16,24,.92) 0%, rgba(12,18,28,.88) 100%);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(59,130,246,.15);
+      border-radius: var(--radius);
+      padding: 14px 18px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      transition: background var(--transition), border-color var(--transition), box-shadow var(--transition);
     }
     .futu-conn-main-card.kpi-positive {
-      background: rgba(0,212,170,.07);
-      border-left-color: var(--up);
-      box-shadow: inset 0 0 24px rgba(0,212,170,.04);
+      background: linear-gradient(135deg, rgba(0,212,170,.06) 0%, rgba(10,16,24,.90) 100%);
+      border-color: rgba(0,212,170,.25);
+      box-shadow: 0 0 20px rgba(0,212,170,.04);
     }
     .futu-conn-main-card.kpi-warn {
-      background: rgba(245,158,11,.06);
-      border-left-color: var(--gold);
-      box-shadow: inset 0 0 24px rgba(245,158,11,.03);
+      background: linear-gradient(135deg, rgba(245,158,11,.06) 0%, rgba(10,16,24,.90) 100%);
+      border-color: rgba(245,158,11,.25);
+      box-shadow: 0 0 20px rgba(245,158,11,.04);
+    }
+
+    /* Row 1: status + account */
+    .futu-conn-status-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid rgba(255,255,255,.06);
+    }
+    .futu-conn-status-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
     }
     .futu-conn-card-top {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
     }
     .futu-conn-card-label {
       font-size: 10px;
       text-transform: uppercase;
-      letter-spacing: .5px;
-      color: var(--muted);
+      letter-spacing: 1px;
+      color: #6b8bb5;
       font-weight: 600;
+      font-family: var(--mono);
     }
     .futu-conn-card-status {
       font-family: var(--mono);
-      font-size: 20px;
+      font-size: 18px;
       font-weight: 700;
-      letter-spacing: -.3px;
-      line-height: 1.2;
+      letter-spacing: .4px;
+      line-height: 1;
       color: var(--text);
+      text-transform: uppercase;
     }
-    .futu-conn-card-detail {
-      font-size: 11px;
-      color: var(--muted);
-      font-family: var(--mono);
+    .futu-conn-status-row { display: contents; }
+    .futu-conn-account-row {
       display: flex;
-      gap: 5px;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--mono);
+      white-space: nowrap;
+      background: rgba(255,255,255,.04);
+      border: 1px solid rgba(255,255,255,.07);
+      border-radius: 6px;
+      padding: 5px 12px;
+    }
+    .futu-conn-account-label {
+      font-size: 10px;
+      color: #6b8bb5;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      font-weight: 600;
+    }
+    .futu-conn-account-id {
+      font-size: 16px;
+      font-weight: 700;
+      color: #e9f2ff;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: .3px;
+    }
+
+    /* Row 2: detail tags */
+    .futu-conn-detail-strip {
+      display: flex;
       align-items: center;
       flex-wrap: wrap;
-      margin-top: 2px;
+      gap: 6px;
+      padding-top: 10px;
     }
-    .futu-conn-sep { color: var(--border-2); }
+    .futu-conn-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 500;
+      color: #a0b8d8;
+      background: rgba(255,255,255,.04);
+      border: 1px solid rgba(255,255,255,.07);
+      border-radius: 5px;
+      padding: 3px 10px;
+      white-space: nowrap;
+    }
+    .futu-conn-tag-icon {
+      font-size: 11px;
+      opacity: .55;
+    }
+    .futu-conn-tag-val {
+      color: #d0dff0;
+      font-weight: 600;
+    }
+    .futu-conn-card-detail { display: contents; }
+    .futu-conn-sep { display: none; }
+
+    /* Meta row (extras) */
+    .futu-conn-meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding-top: 8px;
+    }
+    .futu-conn-meta-row > span {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: #7a95b8;
+      background: rgba(255,255,255,.03);
+      border: 1px solid rgba(255,255,255,.05);
+      border-radius: 4px;
+      padding: 2px 8px;
+    }
+    .futu-conn-meta-extra { display: none; }
+
     .futu-conn-acc-pill {
       display: inline-flex;
       align-items: center;
       gap: 4px;
-      background: rgba(59,130,246,.12);
-      border: 1px solid rgba(59,130,246,.2);
+      background: rgba(0,212,170,.10);
+      border: 1px solid rgba(0,212,170,.30);
       border-radius: 20px;
       font-size: 10px;
       font-weight: 600;
-      letter-spacing: .3px;
-      color: var(--accent-2);
-      padding: 2px 7px;
+      letter-spacing: .5px;
+      color: #9cf5df;
+      padding: 3px 10px;
       margin-top: 4px;
       font-family: var(--mono);
       max-width: 100%;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+
+    /* ── KPI Strip ── */
+    .futu-conn-side-stack {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+    @media (max-width: 700px) {
+      .futu-conn-side-stack { grid-template-columns: 1fr; }
     }
     .futu-kpi-sub {
       font-size: 10px;
@@ -1718,6 +1845,9 @@
       background-clip: text;
       -webkit-text-fill-color: transparent;
     }
+    #futuConnCard.kpi-positive .futu-conn-tag-val {
+      color: #b8f0e0;
+    }
     .futu-conn-card-detail span:not(.futu-conn-sep) {
       color: var(--text-2);
       font-weight: 500;
@@ -1726,6 +1856,20 @@
     .futu-badge-schedule { background:rgba(59,130,246,.12)!important;  border-color:rgba(59,130,246,.30)!important;  color:var(--accent-2)!important; }
     .futu-badge-wait     { background:rgba(245,158,11,.11)!important;   border-color:rgba(245,158,11,.30)!important;   color:var(--gold)!important; }
     .futu-badge-pool     { background:rgba(139,92,246,.11)!important;   border-color:rgba(139,92,246,.30)!important;   color:#a78bfa!important; }
+    .futu-badge-real {
+      background: rgba(255,71,87,.14)!important;
+      border-color: rgba(255,71,87,.45)!important;
+      color: #ff8f98!important;
+      letter-spacing: .4px;
+      font-weight: 700;
+    }
+    .futu-badge-real-safe {
+      background: rgba(245,158,11,.14)!important;
+      border-color: rgba(245,158,11,.45)!important;
+      color: #ffd28a!important;
+      letter-spacing: .3px;
+      font-weight: 700;
+    }
     .futu-kpi-sub-sep {
       height: 1px;
       background: var(--border);
@@ -1763,18 +1907,42 @@
     #futuLogBox div.log-warn  { color:var(--gold); background:rgba(245,158,11,.07); border-left:2px solid rgba(245,158,11,.45); padding-left:8px; }
     #futuLogBox div.log-error { color:var(--down); background:rgba(255,71,87,.07);  border-left:2px solid rgba(255,71,87,.45);  padding-left:8px; }
     #futuLogBox div:hover { background:rgba(255,255,255,.025); }
-    .futu-conn-kpi-grid .paper-kpi-card {
+    .futu-conn-side-stack .paper-kpi-card {
       position: relative;
       overflow: hidden;
     }
-    .futu-conn-kpi-grid .paper-kpi-card::before {
+    .futu-conn-side-stack .paper-kpi-card {
+      min-height: 74px;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding: 8px 10px;
+      gap: 3px;
+      background: linear-gradient(180deg, rgba(10,16,24,.84) 0%, rgba(8,12,19,.90) 100%);
+      border-color: rgba(59,130,246,.16);
+    }
+    .futu-conn-side-stack .paper-kpi-card .paper-kpi-label {
+      min-height: 14px;
+    }
+    .futu-conn-side-stack .paper-kpi-card .paper-kpi-value {
+      min-height: 22px;
+      display: flex;
+      align-items: flex-end;
+      line-height: 1.2;
+    }
+    .futu-conn-side-stack .paper-kpi-card .futu-kpi-sub {
+      margin-top: auto;
+      width: 100%;
+      padding-top: 4px;
+      border-top: 1px solid rgba(255,255,255,.06);
+    }
+    .futu-conn-side-stack .paper-kpi-card::before {
       content: '';
       position: absolute;
       top: 0; left: 0; right: 0;
       height: 1px;
       background: linear-gradient(90deg,transparent,rgba(59,130,246,.25),transparent);
     }
-    .futu-conn-kpi-grid .paper-kpi-card.kpi-positive::before {
+    .futu-conn-side-stack .paper-kpi-card.kpi-positive::before {
       background: linear-gradient(90deg,transparent,rgba(0,212,170,.4),transparent);
     }
     #tab-futu .panel-title-icon {
@@ -2113,6 +2281,7 @@
         <button class="tab-btn" data-tab="futu">
           <span class="tab-icon-wrap"><span class="tab-icon">🛰️</span></span>
           <span class="tab-label">Futu Simulation</span>
+          <span class="tab-badge" id="futuTabBadge"></span>
         </button>
         <div class="sidebar-section">System</div>
         <button class="tab-btn" data-tab="train">
@@ -2276,8 +2445,9 @@
             <strong>Paper Trading Executor</strong> 与 <strong>Futu Simulation Executor</strong> 分别在各自页面运行与监控。
           </div>
         </div>
-        <div id="strategyEngineMount" class="grid-3 exec-engine-grid">
+        <div id="strategyEngineMount" class="exec-engine-grid">
           <div class="panel paper-ctrl-panel">
+            <div class="exec-segment-tag">Step 1 · Shared Auto-Optimize Config</div>
             <div class="paper-ctrl-header" id="paperCtrlHeader">
               <div class="paper-ctrl-summary" id="paperCtrlSummary">
                 <span class="paper-ctrl-status">
@@ -2346,6 +2516,7 @@
           </div>
 
           <div class="panel paper-ctrl-panel">
+            <div class="exec-segment-tag">Step 2 · Paper Executor</div>
             <div class="paper-ctrl-header">
               <div class="paper-ctrl-summary">
                 <span class="paper-ctrl-status">
@@ -2380,6 +2551,7 @@
           </div>
 
           <div class="panel paper-ctrl-panel">
+            <div class="exec-segment-tag">Step 3 · FUTU Simulation Executor</div>
             <div class="paper-ctrl-header" id="futuCtrlHeader">
               <div class="paper-ctrl-summary" id="futuCtrlSummary">
                 <span class="paper-ctrl-status">
@@ -2399,6 +2571,19 @@
               <button class="paper-ctrl-chevron" id="futuCtrlToggle" title="Expand / Collapse config" aria-label="Expand / Collapse config"></button>
             </div>
             <div class="paper-ctrl-body" id="futuCtrlBody">
+              <div class="futu-account-apply-row" style="margin-top:4px;">
+                <div class="field" style="min-width:220px; flex:1;">
+                  <label class="field-label">FUTU Account</label>
+                  <select id="futuAccountSelect" style="width:100%;">
+                    <option value="9468130">9468130</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label class="field-label">&nbsp;</label>
+                  <button id="futuAccountApply" class="primary">🪪 Account Apply</button>
+                </div>
+              </div>
+              <div id="futuAccountApplyHint" class="futu-account-apply-hint">Default account: #9468130</div>
               <div class="row" style="align-items:flex-start;">
                 <div class="field" style="flex:1; min-width:220px;">
                   <label class="field-label">FUTU Runtime JSONL Path</label>
@@ -2571,6 +2756,8 @@
                 <span id="futuExecStatus">DISCONNECTED</span>
               </span>
               <span class="paper-ctrl-badge futu-badge-capital">💰&nbsp;$<span id="futuExecCapital">--</span></span>
+              <span class="paper-ctrl-badge futu-badge-real" id="futuRealModeBadge" style="display:none;">REAL MODE</span>
+              <span class="paper-ctrl-badge futu-badge-real-safe" id="futuRealSafetyHint" style="display:none;">REAL ORDER DISABLED · PLACEHOLDER ONLY</span>
               <span class="paper-ctrl-badge futu-badge-schedule">🕐&nbsp;<span id="futuExecSchedule">Signal-driven</span></span>
               <span class="paper-ctrl-badge futu-badge-wait">⏳&nbsp;<span id="futuExecNextOpt">Awaiting signal</span></span>
               <span class="paper-ctrl-badge futu-badge-pool">🎯&nbsp;<span id="futuExecPool">--</span></span>
@@ -2585,62 +2772,93 @@
             <div class="panel-title"><span class="panel-title-icon">🔌</span> Connection &amp; Account</div>
             <div class="panel-subtitle" id="futuConnSummary">Waiting for Futu API...</div>
           </div>
-          <div class="futu-conn-kpi-grid">
+          <div class="futu-conn-main-wrap">
 
             <!-- Connection status card -->
             <div class="futu-conn-main-card kpi-warn" id="futuConnCard">
-              <div class="futu-conn-card-top">
-                <span class="chip-dot" id="futuConnDot"></span>
-                <span class="futu-conn-card-label">OpenD Gateway</span>
+              <!-- Banner row: status + account pill -->
+              <div class="futu-conn-status-banner">
+                <div class="futu-conn-status-left">
+                  <div class="futu-conn-card-top">
+                    <span class="chip-dot" id="futuConnDot"></span>
+                    <span class="futu-conn-card-label">OpenD Gateway</span>
+                  </div>
+                  <div class="futu-conn-status-row">
+                    <div class="futu-conn-card-status" id="futuConnStatus">DISCONNECTED</div>
+                  </div>
+                </div>
+                <div class="futu-conn-account-row">
+                  <span class="futu-conn-account-label">Account</span>
+                  <span class="futu-conn-account-id" id="futuAccountId">--</span>
+                </div>
               </div>
-              <div class="futu-conn-card-status" id="futuConnStatus">DISCONNECTED</div>
-              <div class="futu-conn-card-detail">
-                <span id="futuConnHost">127.0.0.1:11111</span>
-                <span class="futu-conn-sep">·</span>
-                <span id="futuConnMarket">HK</span>
-                <span class="futu-conn-sep">·</span>
-                <span id="futuConnFirm">FutuSecurities</span>
+
+              <!-- Detail tags strip -->
+              <div class="futu-conn-detail-strip">
+                <div class="futu-conn-card-detail">
+                  <span class="futu-conn-tag">
+                    <span class="futu-conn-tag-icon">🌐</span>
+                    <span class="futu-conn-tag-val" id="futuConnHost">127.0.0.1:11111</span>
+                  </span>
+                  <span class="futu-conn-sep">·</span>
+                  <span class="futu-conn-tag">
+                    <span class="futu-conn-tag-icon">📊</span>
+                    <span class="futu-conn-tag-val" id="futuConnMarket">US</span>
+                  </span>
+                  <span class="futu-conn-sep">·</span>
+                  <span class="futu-conn-tag">
+                    <span class="futu-conn-tag-icon">🏢</span>
+                    <span class="futu-conn-tag-val" id="futuConnFirm">FutuSecurities</span>
+                  </span>
+                  <span class="futu-conn-tag">
+                    <span class="futu-conn-tag-icon">👤</span>
+                    <span class="futu-conn-tag-val" id="futuAccType">-- type</span>
+                  </span>
+                  <span class="futu-conn-tag">
+                    <span class="futu-conn-tag-icon">⚙️</span>
+                    <span class="futu-conn-tag-val" id="futuAccEnvVal">Env: --</span>
+                  </span>
+                  <span class="futu-conn-tag">
+                    <span class="futu-conn-tag-icon">✅</span>
+                    <span class="futu-conn-tag-val" id="futuAccStatusVal">Status: --</span>
+                  </span>
+                </div>
               </div>
+
+              <!-- Hidden meta extras -->
+              <div class="futu-conn-meta-row">
+                <span class="futu-conn-meta-extra" id="futuAccRoleVal">Role: --</span>
+                <span class="futu-conn-meta-extra" id="futuAccSimTypeVal">Sim Type: --</span>
+                <span class="futu-conn-meta-extra" id="futuAccMarketAuthVal">Market Auth: --</span>
+                <span class="futu-conn-meta-extra" id="futuAccFirmVal">Firm: --</span>
+                <span class="futu-conn-meta-extra" id="futuAccCardVal">Card: --</span>
+                <span class="futu-conn-meta-extra" id="futuAccUniCardVal">Uni Card: --</span>
+              </div>
+
               <div class="futu-conn-acc-pill" id="futuAccPill" style="display:none;">
                 <span id="futuAccIdBadge">--</span>
               </div>
             </div>
 
-            <!-- Account ID -->
-            <div class="paper-kpi-card kpi-neutral">
-              <div class="paper-kpi-label">Account ID</div>
-              <div class="paper-kpi-value" id="futuAccountId" style="font-size:15px;font-variant-numeric:tabular-nums;letter-spacing:-.3px;">--</div>
-              <div class="futu-kpi-sub" id="futuAccType">-- type</div>
-              <div class="futu-kpi-sub-sep"></div>
-              <div class="futu-kpi-sub" id="futuAccEnvVal">Env: --</div>
-              <div class="futu-kpi-sub" id="futuAccStatusVal">Status: --</div>
-              <div class="futu-kpi-sub" id="futuAccRoleVal">Role: --</div>
-              <div class="futu-kpi-sub" id="futuAccSimTypeVal">Sim Type: --</div>
-              <div class="futu-kpi-sub" id="futuAccMarketAuthVal">Market Auth: --</div>
-              <div class="futu-kpi-sub" id="futuAccFirmVal">Firm: --</div>
-              <div class="futu-kpi-sub" id="futuAccCardVal">Card: --</div>
-              <div class="futu-kpi-sub" id="futuAccUniCardVal">Uni Card: --</div>
-            </div>
+            <!-- KPI cards - horizontal strip -->
+            <div class="futu-conn-side-stack">
+              <div class="paper-kpi-card kpi-neutral" id="futuCashCard">
+                <div class="paper-kpi-label">Cash Available</div>
+                <div class="paper-kpi-value" id="futuAccountCash">--</div>
+                <div class="futu-kpi-sub">USD</div>
+              </div>
 
-            <!-- Cash -->
-            <div class="paper-kpi-card kpi-neutral" id="futuCashCard">
-              <div class="paper-kpi-label">Cash Available</div>
-              <div class="paper-kpi-value" id="futuAccountCash">--</div>
-              <div class="futu-kpi-sub">USD</div>
-            </div>
+              <div class="paper-kpi-card kpi-neutral" id="futuBuyingPowerCard">
+                <div class="paper-kpi-label">Buying Power</div>
+                <div class="paper-kpi-value" id="futuBuyingPower">--</div>
+                <div class="futu-kpi-sub">USD</div>
+              </div>
 
-            <!-- Buying Power -->
-            <div class="paper-kpi-card kpi-neutral" id="futuBuyingPowerCard">
-              <div class="paper-kpi-label">Buying Power</div>
-              <div class="paper-kpi-value" id="futuBuyingPower">--</div>
-              <div class="futu-kpi-sub">USD</div>
-            </div>
-
-            <!-- Last Sync -->
-            <div class="paper-kpi-card kpi-neutral">
-              <div class="paper-kpi-label">Last Sync</div>
-              <div class="paper-kpi-value" id="futuLastSync" style="font-size:14px;">--</div>
-              <div class="futu-kpi-sub" id="futuStartedAt">--</div>
+              <div class="paper-kpi-card kpi-neutral">
+                <div class="paper-kpi-label">Last Sync</div>
+                <div class="paper-kpi-value" id="futuLastSync" style="font-size:14px;">--</div>
+                <div class="futu-kpi-sub" id="futuStartedAt">--</div>
+              </div>
             </div>
 
           </div>
@@ -2686,10 +2904,62 @@
                 <th class="num">Asset Value</th>
                 <th class="num">Target Weight</th>
                 <th class="num">Floating PnL</th>
+                <th>Manual Rebalance</th>
               </tr>
             </thead>
             <tbody></tbody>
           </table>
+          <div class="panel" style="margin-top:12px; padding:10px 12px; border:1px solid var(--border);">
+            <div class="panel-header" style="margin-bottom:8px;">
+              <div class="panel-title"><span class="panel-title-icon">🛠️</span> Manual Rebalance Order (SIM)</div>
+              <div class="panel-subtitle" id="futuManualOrderHint">Place manual BUY/SELL limit order for Futu SIM account.</div>
+            </div>
+            <div class="row" style="align-items:flex-end; gap:10px; flex-wrap:wrap;">
+              <div class="field" style="min-width:130px;">
+                <label class="field-label">Symbol</label>
+                <input id="futuManualSymbol" placeholder="AAPL / US.AAPL" style="width:130px;" />
+              </div>
+              <div class="field" style="min-width:92px;">
+                <label class="field-label">Side</label>
+                <select id="futuManualSide" style="width:92px;">
+                  <option value="BUY">BUY</option>
+                  <option value="SELL">SELL</option>
+                </select>
+              </div>
+              <div class="field" style="min-width:120px;">
+                <label class="field-label">Quantity</label>
+                <input id="futuManualQty" type="number" min="0.01" step="0.01" value="1" style="width:120px;" />
+              </div>
+              <div class="field" style="min-width:120px;">
+                <label class="field-label">Limit Price</label>
+                <input id="futuManualPrice" type="number" min="0.0001" step="0.0001" placeholder="e.g. 180.25" style="width:120px;" />
+              </div>
+              <div class="field" style="min-width:120px;">
+                <label class="field-label">Time In Force</label>
+                <select id="futuManualTif" style="width:120px;">
+                  <option value="DAY" selected>DAY</option>
+                  <option value="GTC">GTC</option>
+                </select>
+              </div>
+              <div class="field" style="min-width:120px;">
+                <label class="field-label">Session</label>
+                <select id="futuManualSession" style="width:120px;">
+                  <option value="">Default</option>
+                  <option value="RTH">RTH</option>
+                  <option value="ETH">ETH</option>
+                  <option value="ALL">ALL</option>
+                </select>
+              </div>
+              <div class="field" style="min-width:200px; flex:1 1 200px;">
+                <label class="field-label">Remark</label>
+                <input id="futuManualRemark" placeholder="optional note" style="width:100%;" />
+              </div>
+              <div class="field" style="min-width:140px;">
+                <label class="field-label">&nbsp;</label>
+                <button class="primary" id="futuManualSubmit">Submit Manual Order</button>
+              </div>
+            </div>
+          </div>
           <div class="panel-header" style="margin-top: 12px;">
             <div class="panel-title"><span class="panel-title-icon">💵</span> Futu Capital Summary</div>
             <div class="panel-subtitle" id="futuRuntimeMeta">Runtime file: --</div>
@@ -2717,6 +2987,82 @@
             <div class="panel-subtitle">Shared quote engine with Paper Trading</div>
           </div>
           <div id="futuRtMarketGrid" class="rt-market-grid"></div>
+        </div>
+
+        <div class="panel" style="padding: 10px 12px;">
+          <div class="row" style="align-items:center; gap:10px;">
+            <div class="field" style="min-width:220px;">
+              <label class="field-label">FUTU Activity Filter</label>
+              <input id="futuActivityFilterInput" placeholder="Filter by symbol, e.g. AAPL or US.AAPL" style="width:320px; max-width:100%;" />
+            </div>
+            <div class="field" style="min-width:160px;">
+              <label class="field-label">Time Range</label>
+              <select id="futuActivityRangeSelect" style="width:160px;">
+                <option value="1">Last 1 Day</option>
+                <option value="7">Last 7 Days</option>
+                <option value="30" selected>Last 30 Days</option>
+                <option value="90">Last 90 Days</option>
+                <option value="0">All</option>
+              </select>
+            </div>
+            <div class="small" style="margin-top:16px;">Applies to Open Orders / Cancel History / FUTU Trade History</div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title"><span class="panel-title-icon">🧾</span> Open Orders (Unfilled / Pending)</div>
+            <div class="panel-subtitle">Latest uncompleted FUTU orders with full parameters</div>
+          </div>
+          <table id="futuOpenOrdersTable">
+            <thead>
+              <tr>
+                <th>Created</th>
+                <th>Order ID</th>
+                <th>Symbol</th>
+                <th>Side</th>
+                <th class="num">Qty</th>
+                <th class="num">Price</th>
+                <th class="num">Dealt Qty</th>
+                <th class="num">Dealt Avg</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Params</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title"><span class="panel-title-icon">🚫</span> Cancel History</div>
+            <div class="panel-subtitle">Canceled orders generated by FUTU rebalance flow</div>
+          </div>
+          <table id="futuCancelHistoryTable">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Order ID</th>
+                <th>Symbol</th>
+                <th>Side</th>
+                <th class="num">Qty</th>
+                <th class="num">Price</th>
+                <th>Status</th>
+                <th>Reason</th>
+                <th>Signal</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title"><span class="panel-title-icon">📒</span> FUTU Trade History</div>
+            <div class="panel-subtitle">Executed trades from FUTU API (similar to Paper Trading trade history)</div>
+          </div>
+          <div id="futuTradeHistory" class="trade-history"></div>
         </div>
 
         <div class="panel">
