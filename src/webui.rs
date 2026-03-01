@@ -7,6 +7,9 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tracing::{info, warn};
@@ -169,7 +172,7 @@ struct PaperRuntimeState {
     cmd_tx: Option<mpsc::Sender<paper_trading::PaperCommand>>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct FutuPositionState {
     symbol: String,
     quantity: f64,
@@ -180,10 +183,21 @@ struct FutuPositionState {
 
 #[derive(Clone, Debug, Serialize)]
 struct FutuRuntimeState {
+    running: bool,
     connected: bool,
     started_at: Option<String>,
+    strategy_file: Option<String>,
+    runtime_file: Option<String>,
+    conn_host: String,
+    conn_port: u16,
+    conn_market: String,
+    conn_security_firm: String,
     account_cash_usd: f64,
     account_buying_power_usd: f64,
+    selected_acc_id: Option<String>,
+    selected_trd_env: Option<String>,
+    selected_market: Option<String>,
+    selected_account: Option<serde_json::Value>,
     latest_snapshot: Option<paper_trading::MinutePortfolioSnapshot>,
     snapshots: Vec<paper_trading::MinutePortfolioSnapshot>,
     positions: Vec<FutuPositionState>,
@@ -194,18 +208,76 @@ struct FutuRuntimeState {
     data_live_fetch_diagnostics: data::LiveFetchDiagnostics,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct FutuSimStrategyLog {
+    created_at: String,
+    started_at: String,
+    conn_host: String,
+    conn_port: u16,
+    conn_market: String,
+    conn_security_firm: String,
+    selected_acc_id: Option<String>,
+    selected_trd_env: Option<String>,
+    selected_market: Option<String>,
+    runtime_file: String,
+    #[serde(default)]
+    latest_snapshot: Option<paper_trading::MinutePortfolioSnapshot>,
+    #[serde(default)]
+    latest_positions: Vec<FutuPositionState>,
+    #[serde(default)]
+    latest_logs: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct FutuSimRuntimeLine {
+    timestamp: String,
+    conn_host: String,
+    conn_port: u16,
+    conn_market: String,
+    conn_security_firm: String,
+    selected_acc_id: Option<String>,
+    selected_trd_env: Option<String>,
+    selected_market: Option<String>,
+    account_cash_usd: f64,
+    account_buying_power_usd: f64,
+    total_value_usd: f64,
+    pnl_usd: f64,
+    pnl_pct: f64,
+    positions: Vec<FutuPositionState>,
+    snapshot: paper_trading::MinutePortfolioSnapshot,
+    #[serde(default)]
+    opend_account_list: Option<serde_json::Value>,
+    #[serde(default)]
+    opend_selected_account: Option<serde_json::Value>,
+    #[serde(default)]
+    opend_account_info_raw: Option<serde_json::Value>,
+    #[serde(default)]
+    opend_positions_raw: Option<serde_json::Value>,
+}
+
 impl Default for FutuRuntimeState {
     fn default() -> Self {
         Self {
+            running: true,
             connected: false,
             started_at: Some(chrono::Local::now().to_rfc3339()),
+            strategy_file: None,
+            runtime_file: None,
+            conn_host: "127.0.0.1".to_string(),
+            conn_port: 11111,
+            conn_market: "HK".to_string(),
+            conn_security_firm: "FUTUSECURITIES".to_string(),
             account_cash_usd: 0.0,
             account_buying_power_usd: 0.0,
+            selected_acc_id: None,
+            selected_trd_env: None,
+            selected_market: None,
+            selected_account: None,
             latest_snapshot: None,
             snapshots: Vec::new(),
             positions: Vec::new(),
             logs: vec![runtime_log_with_ts(
-                "Futu execution initialized (waiting for FUTU_API_BASE_URL)",
+                "Futu execution initialized (waiting for OpenD / API configuration)",
             )],
             data_live_source: "Unknown".to_string(),
             data_ws_connected: false,
@@ -348,6 +420,12 @@ struct PaperOptimizationUpdateRequest {
     optimization_weekdays: Option<Vec<u32>>,
 }
 
+#[derive(Debug, Deserialize)]
+struct FutuLoadRequest {
+    runtime_file: Option<String>,
+    strategy_file: Option<String>,
+}
+
 pub async fn run_webui_server(port: u16, backend_default: config::ComputeBackend) -> Result<()> {
     let forecast_state = match load_forecast_state() {
         Ok(state) => state,
@@ -389,6 +467,9 @@ pub async fn run_webui_server(port: u16, backend_default: config::ComputeBackend
         .route("/api/paper/stop", post(paper_stop))
         .route("/api/futu/status", get(futu_status))
         .route("/api/futu/account-list", get(futu_account_list))
+        .route("/api/futu/start", post(futu_start))
+        .route("/api/futu/load", post(futu_load))
+        .route("/api/futu/stop", post(futu_stop))
         .with_state(state);
 
     let addr = format!("0.0.0.0:{}", port);
@@ -756,16 +837,179 @@ async fn futu_account_list() -> Result<Json<serde_json::Value>, (StatusCode, Jso
     Ok(Json(payload))
 }
 
+async fn futu_start(
+    State(state): State<WebState>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ApiError>)> {
+    let mut fs = state.futu.lock().await;
+    fs.running = true;
+    if fs.started_at.is_none() {
+        fs.started_at = Some(chrono::Local::now().to_rfc3339());
+    }
+    fs.logs.push(runtime_log_with_ts("Futu simulation started"));
+    if fs.logs.len() > 200 {
+        let keep_from = fs.logs.len().saturating_sub(200);
+        fs.logs = fs.logs.split_off(keep_from);
+    }
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn futu_load(
+    State(state): State<WebState>,
+    Json(req): Json<FutuLoadRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ApiError>)> {
+    let strategy_input = req
+        .strategy_file
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_string();
+    let runtime_input = req
+        .runtime_file
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_string();
+
+    let mut resolved_strategy_path: Option<PathBuf> = None;
+    let mut resolved_runtime_path: Option<PathBuf> = None;
+
+    if !strategy_input.is_empty() {
+        let strategy_path = resolve_input_path(&strategy_input);
+        let strategy_log = load_futu_strategy_log(&strategy_path)
+            .map_err(|e| api_err(StatusCode::BAD_REQUEST, &format!("invalid strategy_file: {}", e)))?;
+        resolved_runtime_path = Some(resolve_input_path(&strategy_log.runtime_file));
+        resolved_strategy_path = Some(strategy_path);
+    }
+
+    if resolved_runtime_path.is_none() {
+        if !runtime_input.is_empty() {
+            resolved_runtime_path = Some(resolve_input_path(&runtime_input));
+        } else {
+            resolved_runtime_path = find_latest_log_file("futu_sim_runtime_", ".jsonl");
+        }
+    }
+
+    if resolved_strategy_path.is_none() {
+        if !strategy_input.is_empty() {
+            resolved_strategy_path = Some(resolve_input_path(&strategy_input));
+        } else {
+            resolved_strategy_path = find_latest_log_file("futu_sim_strategy_", ".json");
+        }
+    }
+
+    let runtime_path = resolved_runtime_path
+        .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "runtime_file is required or no futu_sim_runtime_*.jsonl found"))?;
+
+    let runtime_lines = load_futu_runtime_lines(&runtime_path).map_err(internal_err)?;
+    if runtime_lines.is_empty() {
+        return Err(api_err(
+            StatusCode::BAD_REQUEST,
+            "runtime file has no valid snapshots",
+        ));
+    }
+
+    let snapshots = runtime_lines
+        .iter()
+        .map(|line| line.snapshot.clone())
+        .collect::<Vec<_>>();
+    let last = runtime_lines
+        .last()
+        .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "runtime file has no valid snapshots"))?;
+
+    let mut fs = state.futu.lock().await;
+    fs.running = true;
+    fs.connected = false;
+    fs.started_at = Some(chrono::Local::now().to_rfc3339());
+    fs.strategy_file = resolved_strategy_path
+        .as_ref()
+        .map(|p| p.display().to_string());
+    fs.runtime_file = Some(runtime_path.display().to_string());
+    fs.conn_host = last.conn_host.clone();
+    fs.conn_port = last.conn_port;
+    fs.conn_market = last.conn_market.clone();
+    fs.conn_security_firm = last.conn_security_firm.clone();
+    fs.account_cash_usd = last.account_cash_usd;
+    fs.account_buying_power_usd = last.account_buying_power_usd;
+    fs.selected_acc_id = last.selected_acc_id.clone();
+    fs.selected_trd_env = last.selected_trd_env.clone();
+    fs.selected_market = last.selected_market.clone();
+    fs.selected_account = last.opend_selected_account.clone();
+    fs.positions = last.positions.clone();
+    fs.latest_snapshot = Some(last.snapshot.clone());
+    fs.snapshots = snapshots;
+    let loaded_snapshot_count = fs.snapshots.len();
+    fs.logs.push(runtime_log_with_ts(format!(
+        "Futu history loaded => {} snapshots from {}",
+        loaded_snapshot_count,
+        runtime_path.display()
+    )));
+    if fs.logs.len() > 200 {
+        let keep_from = fs.logs.len().saturating_sub(200);
+        fs.logs = fs.logs.split_off(keep_from);
+    }
+
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "runtime_file": runtime_path.display().to_string(),
+        "snapshots": runtime_lines.len(),
+    })))
+}
+
+async fn futu_stop(
+    State(state): State<WebState>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ApiError>)> {
+    let mut fs = state.futu.lock().await;
+    fs.running = false;
+    fs.connected = false;
+    fs.logs.push(runtime_log_with_ts("Futu simulation stopped"));
+    if fs.logs.len() > 200 {
+        let keep_from = fs.logs.len().saturating_sub(200);
+        fs.logs = fs.logs.split_off(keep_from);
+    }
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
 async fn futu_execution_loop(futu_state: Arc<Mutex<FutuRuntimeState>>) {
     let mut prev_prices: HashMap<String, f64> = HashMap::new();
     let mut prev_qty: HashMap<String, f64> = HashMap::new();
     let mut initial_capital: Option<f64> = None;
+    let mut last_account_binding: Option<String> = None;
+    let mut last_opend_dump: Option<String> = None;
 
     loop {
-        let payload = match futu::FutuApiClient::from_env() {
-            Ok(client) => client.poll_execution_snapshot().await,
-            Err(err) => Err(err),
+        let is_running = {
+            let fs = futu_state.lock().await;
+            fs.running
         };
+
+        if !is_running {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            continue;
+        }
+
+        let (payload, conn_info, config_err) = match futu::FutuApiClient::from_env() {
+            Ok(client) => {
+                let info = client.connection_info();
+                (client.poll_execution_snapshot().await, Some(info), None)
+            }
+            Err(err) => (Err(anyhow::anyhow!(err.to_string())), None, Some(err.to_string())),
+        };
+
+        if let Some((host, port, market, firm)) = conn_info {
+            let mut fs = futu_state.lock().await;
+            fs.conn_host = host;
+            fs.conn_port = port;
+            fs.conn_market = market;
+            fs.conn_security_firm = firm;
+        } else if let Some(err_text) = config_err {
+            let mut fs = futu_state.lock().await;
+            if fs.logs.last().map(|x| x.contains("Futu config error")).unwrap_or(false) {
+                // keep log volume stable
+            } else {
+                fs.logs
+                    .push(runtime_log_with_ts(format!("WARNING: Futu config error: {}", err_text)));
+            }
+        }
 
         match payload {
             Ok(payload) => {
@@ -893,6 +1137,10 @@ async fn futu_execution_loop(futu_state: Arc<Mutex<FutuRuntimeState>>) {
                 fs.connected = true;
                 fs.account_cash_usd = payload.cash_usd;
                 fs.account_buying_power_usd = payload.buying_power_usd;
+                fs.selected_acc_id = payload.selected_acc_id.clone();
+                fs.selected_trd_env = payload.selected_trd_env.clone();
+                fs.selected_market = payload.selected_market.clone();
+                fs.selected_account = payload.opend_selected_account.clone();
                 fs.positions = payload
                     .positions
                     .iter()
@@ -911,9 +1159,77 @@ async fn futu_execution_loop(futu_state: Arc<Mutex<FutuRuntimeState>>) {
                     fs.snapshots = fs.snapshots.split_off(keep_from);
                 }
 
+                if fs.runtime_file.is_none() {
+                    if let Ok((strategy_path, runtime_path)) = create_futu_output_paths() {
+                        fs.strategy_file = Some(strategy_path.display().to_string());
+                        fs.runtime_file = Some(runtime_path.display().to_string());
+                        fs.logs.push(runtime_log_with_ts(format!(
+                            "Futu runtime file created => {}",
+                            runtime_path.display()
+                        )));
+                        fs.logs.push(runtime_log_with_ts(format!(
+                            "Futu strategy file created => {}",
+                            strategy_path.display()
+                        )));
+                    }
+                }
+
                 if !was_connected {
                     fs.logs.push(runtime_log_with_ts("Futu execution connected"));
                 }
+
+                let binding_key = format!(
+                    "acc_id={} env={} market={}",
+                    payload
+                        .selected_acc_id
+                        .as_deref()
+                        .unwrap_or("--"),
+                    payload
+                        .selected_trd_env
+                        .as_deref()
+                        .unwrap_or("--"),
+                    payload
+                        .selected_market
+                        .as_deref()
+                        .unwrap_or("--")
+                );
+
+                if last_account_binding.as_deref() != Some(binding_key.as_str()) {
+                    fs.logs.push(runtime_log_with_ts(format!(
+                        "Futu account binding => {}",
+                        binding_key
+                    )));
+                    last_account_binding = Some(binding_key);
+                }
+
+                if let Some(selected_account) = payload.opend_selected_account.as_ref() {
+                    fs.logs.push(runtime_log_with_ts(format!(
+                        "Futu OpenD selected account row => {}",
+                        selected_account
+                    )));
+                }
+
+                let opend_dump = serde_json::json!({
+                    "selected_acc_id": payload.selected_acc_id,
+                    "selected_trd_env": payload.selected_trd_env,
+                    "selected_market": payload.selected_market,
+                    "account_list": payload.opend_account_list,
+                    "selected_account": payload.opend_selected_account,
+                    "account_info_raw": payload.opend_account_info_raw,
+                    "positions_raw": payload.opend_positions_raw,
+                    "cash_usd": payload.cash_usd,
+                    "buying_power_usd": payload.buying_power_usd,
+                })
+                .to_string();
+
+                if last_opend_dump.as_deref() != Some(opend_dump.as_str()) {
+                    fs.logs.push(runtime_log_with_ts(format!(
+                        "Futu OpenD full payload => {}",
+                        opend_dump
+                    )));
+                    last_opend_dump = Some(opend_dump);
+                }
+
                 if qty_changed {
                     let holdings_count = fs
                         .latest_snapshot
@@ -928,6 +1244,77 @@ async fn futu_execution_loop(futu_state: Arc<Mutex<FutuRuntimeState>>) {
                 if fs.logs.len() > 200 {
                     let keep_from = fs.logs.len().saturating_sub(200);
                     fs.logs = fs.logs.split_off(keep_from);
+                }
+
+                let runtime_path = fs.runtime_file.clone();
+                let strategy_path = fs.strategy_file.clone();
+                let line = FutuSimRuntimeLine {
+                    timestamp: timestamp.clone(),
+                    conn_host: fs.conn_host.clone(),
+                    conn_port: fs.conn_port,
+                    conn_market: fs.conn_market.clone(),
+                    conn_security_firm: fs.conn_security_firm.clone(),
+                    selected_acc_id: fs.selected_acc_id.clone(),
+                    selected_trd_env: fs.selected_trd_env.clone(),
+                    selected_market: fs.selected_market.clone(),
+                    account_cash_usd: fs.account_cash_usd,
+                    account_buying_power_usd: fs.account_buying_power_usd,
+                    total_value_usd: fs.latest_snapshot.as_ref().map(|x| x.total_value).unwrap_or(0.0),
+                    pnl_usd: fs.latest_snapshot.as_ref().map(|x| x.pnl_usd).unwrap_or(0.0),
+                    pnl_pct: fs.latest_snapshot.as_ref().map(|x| x.pnl_pct).unwrap_or(0.0),
+                    positions: fs.positions.clone(),
+                    snapshot: fs.latest_snapshot.clone().unwrap_or(paper_trading::MinutePortfolioSnapshot {
+                        timestamp: timestamp.clone(),
+                        total_value: 0.0,
+                        cash_usd: 0.0,
+                        pnl_usd: 0.0,
+                        pnl_pct: 0.0,
+                        benchmark_return_pct: 0.0,
+                        symbols: Vec::new(),
+                        holdings: Vec::new(),
+                        holdings_symbols: Vec::new(),
+                    }),
+                    opend_account_list: payload.opend_account_list.clone(),
+                    opend_selected_account: payload.opend_selected_account.clone(),
+                    opend_account_info_raw: payload.opend_account_info_raw.clone(),
+                    opend_positions_raw: payload.opend_positions_raw.clone(),
+                };
+
+                let strategy_log = FutuSimStrategyLog {
+                    created_at: chrono::Local::now().to_rfc3339(),
+                    started_at: fs.started_at.clone().unwrap_or_else(|| chrono::Local::now().to_rfc3339()),
+                    conn_host: fs.conn_host.clone(),
+                    conn_port: fs.conn_port,
+                    conn_market: fs.conn_market.clone(),
+                    conn_security_firm: fs.conn_security_firm.clone(),
+                    selected_acc_id: fs.selected_acc_id.clone(),
+                    selected_trd_env: fs.selected_trd_env.clone(),
+                    selected_market: fs.selected_market.clone(),
+                    runtime_file: runtime_path.clone().unwrap_or_default(),
+                    latest_snapshot: fs.latest_snapshot.clone(),
+                    latest_positions: fs.positions.clone(),
+                    latest_logs: fs.logs.iter().rev().take(80).cloned().collect::<Vec<_>>().into_iter().rev().collect(),
+                };
+                drop(fs);
+
+                if let Some(path) = runtime_path {
+                    if let Err(err) = append_jsonl_line(Path::new(&path), &line) {
+                        let mut fs = futu_state.lock().await;
+                        fs.logs.push(runtime_log_with_ts(format!(
+                            "WARNING: failed writing futu runtime log: {}",
+                            err
+                        )));
+                    }
+                }
+
+                if let Some(path) = strategy_path {
+                    if let Err(err) = write_json_pretty(Path::new(&path), &strategy_log) {
+                        let mut fs = futu_state.lock().await;
+                        fs.logs.push(runtime_log_with_ts(format!(
+                            "WARNING: failed writing futu strategy log: {}",
+                            err
+                        )));
+                    }
                 }
             }
             Err(err) => {
@@ -1681,6 +2068,116 @@ fn load_strategy_summary(strategy_file: &str) -> Option<StrategySummary> {
         optimization_time_local,
         optimization_weekdays,
     })
+}
+
+fn create_futu_output_paths() -> Result<(PathBuf, PathBuf)> {
+    let log_dir = config::project_root_path().join("log");
+    if !log_dir.exists() {
+        std::fs::create_dir_all(&log_dir)?;
+    }
+
+    let suffix = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
+    let strategy_path = log_dir.join(format!("futu_sim_strategy_{}.json", suffix));
+    let runtime_path = log_dir.join(format!("futu_sim_runtime_{}.jsonl", suffix));
+    Ok((strategy_path, runtime_path))
+}
+
+fn append_jsonl_line<T: Serialize>(path: &Path, value: &T) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let line = serde_json::to_string(value)?;
+    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+    writeln!(file, "{}", line)?;
+    Ok(())
+}
+
+fn write_json_pretty<T: Serialize>(path: &Path, value: &T) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let raw = serde_json::to_string_pretty(value)?;
+    std::fs::write(path, raw)?;
+    Ok(())
+}
+
+fn resolve_input_path(raw: &str) -> PathBuf {
+    let input = PathBuf::from(raw);
+    if input.is_absolute() {
+        return input;
+    }
+    if input.exists() {
+        return input;
+    }
+    config::project_root_path().join(input)
+}
+
+fn find_latest_log_file(prefix: &str, suffix: &str) -> Option<PathBuf> {
+    let log_dir = config::project_root_path().join("log");
+    let entries = std::fs::read_dir(&log_dir).ok()?;
+    let mut files = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| name.starts_with(prefix) && name.ends_with(suffix))
+                .unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
+    files.sort();
+    files.pop()
+}
+
+fn load_futu_strategy_log(path: &Path) -> Result<FutuSimStrategyLog> {
+    let raw = std::fs::read_to_string(path)?;
+    let parsed = serde_json::from_str::<FutuSimStrategyLog>(&raw)?;
+    Ok(parsed)
+}
+
+fn load_futu_runtime_lines(path: &Path) -> Result<Vec<FutuSimRuntimeLine>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let raw = std::fs::read_to_string(path)?;
+    let mut out = Vec::new();
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if let Ok(parsed) = serde_json::from_str::<FutuSimRuntimeLine>(trimmed) {
+            out.push(parsed);
+            continue;
+        }
+
+        if let Ok(snapshot) = serde_json::from_str::<paper_trading::MinutePortfolioSnapshot>(trimmed) {
+            out.push(FutuSimRuntimeLine {
+                timestamp: snapshot.timestamp.clone(),
+                conn_host: "127.0.0.1".to_string(),
+                conn_port: 11111,
+                conn_market: "US".to_string(),
+                conn_security_firm: "FUTUSECURITIES".to_string(),
+                selected_acc_id: None,
+                selected_trd_env: None,
+                selected_market: None,
+                account_cash_usd: snapshot.cash_usd,
+                account_buying_power_usd: snapshot.cash_usd,
+                total_value_usd: snapshot.total_value,
+                pnl_usd: snapshot.pnl_usd,
+                pnl_pct: snapshot.pnl_pct,
+                positions: Vec::new(),
+                snapshot,
+                opend_account_list: None,
+                opend_selected_account: None,
+                opend_account_info_raw: None,
+                opend_positions_raw: None,
+            });
+        }
+    }
+    Ok(out)
 }
 
 fn api_err(status: StatusCode, message: &str) -> (StatusCode, Json<ApiError>) {

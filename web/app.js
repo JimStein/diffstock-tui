@@ -58,6 +58,12 @@ const paperOptWeekdayChecks = Array.from(document.querySelectorAll('[data-paper-
 const paperTargetChips = document.getElementById('paperTargetChips');
 const paperTargetCount = document.getElementById('paperTargetCount');
 const paperTargetDirtyBadge = document.getElementById('paperTargetDirtyBadge');
+const futuStartBtn = document.getElementById('futuStart');
+const futuLoadBtn = document.getElementById('futuLoad');
+const futuStopBtn = document.getElementById('futuStop');
+const futuLoadPathInput = document.getElementById('futuLoadPath');
+const futuFilePicker = document.getElementById('futuFilePicker');
+const futuRecentLoadsBox = document.getElementById('futuRecentLoads');
 const strategyPayloadPreview = document.getElementById('strategyPayloadPreview');
 const strategyCopyPayloadBtn = document.getElementById('strategyCopyPayload');
 const strategyPayloadHint = document.getElementById('strategyPayloadHint');
@@ -86,6 +92,7 @@ let paperCostBasis = new Map();
 let selectedTradeFilter = 'all';
 let tradeSearchText = '';
 let selectedPaperRangeDays = 0.5;
+let selectedFutuRangeDays = 0.5;
 let paperSessionStartMs = null;
 let manualPaperTargets = [];
 let paperTargetsDirty = false;
@@ -106,6 +113,9 @@ let wsLastTimeoutError = '--';
 let wsNoTimeoutStreak = 0;
 const FORECAST_BATCH_CACHE_KEY = 'diffstock:forecast-batch:v2';
 const FORECAST_META_CACHE_KEY = 'diffstock:forecast-meta:v1';
+const FUTU_RECENT_LOADS_KEY = 'diffstock:futu-recent-loads:v1';
+const FUTU_RECENT_LOADS_MAX = 8;
+let futuRecentLoads = [];
 let paperFullContext = {
   portfolioSeries: [],
   benchmarkSeries: [],
@@ -118,9 +128,16 @@ let futuFullContext = {
   metricsByTime: new Map(),
   latest: null,
 };
+let futuRenderContext = {
+  portfolioSeries: [],
+  benchmarkSeries: [],
+  metricsByTime: new Map(),
+  latest: null,
+};
 let latestPaperStatus = null;
 let latestFutuStatus = null;
 const paperRangeButtons = Array.from(document.querySelectorAll('[data-paper-range-days]'));
+const futuRangeButtons = Array.from(document.querySelectorAll('[data-futu-range-days]'));
 
 const futuLegend = document.getElementById('futuLegend');
 const futuLegendPortfolio = document.getElementById('futuLegendPortfolio');
@@ -1804,6 +1821,102 @@ const setPaperStartOptimizing = (optimizing) => {
   syncPaperButtons(null);
 };
 
+const syncFutuButtons = (status) => {
+  if (!futuStartBtn || !futuLoadBtn || !futuStopBtn) return;
+  const running = !!status?.running;
+
+  if (running) {
+    futuStartBtn.textContent = 'Running';
+    futuStartBtn.disabled = true;
+    futuLoadBtn.disabled = false;
+    futuStopBtn.disabled = false;
+    return;
+  }
+
+  futuStartBtn.textContent = '▶ Start FUTU';
+  futuStartBtn.disabled = false;
+  futuLoadBtn.disabled = false;
+  futuStopBtn.disabled = true;
+};
+
+const loadFutuRecentLoads = () => {
+  try {
+    const raw = localStorage.getItem(FUTU_RECENT_LOADS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item) => ({
+        runtime_file: String(item?.runtime_file || '').trim(),
+        loaded_at: String(item?.loaded_at || '').trim(),
+        snapshots: Number(item?.snapshots || 0),
+      }))
+      .filter((item) => item.runtime_file);
+  } catch {
+    return [];
+  }
+};
+
+const saveFutuRecentLoads = () => {
+  try {
+    localStorage.setItem(FUTU_RECENT_LOADS_KEY, JSON.stringify(futuRecentLoads.slice(0, FUTU_RECENT_LOADS_MAX)));
+  } catch {
+    // ignore storage errors
+  }
+};
+
+const renderFutuRecentLoads = () => {
+  if (!futuRecentLoadsBox) return;
+  if (!Array.isArray(futuRecentLoads) || futuRecentLoads.length === 0) {
+    futuRecentLoadsBox.innerHTML = `<div class='futu-recent-load-empty'>No load history yet.</div>`;
+    return;
+  }
+
+  futuRecentLoadsBox.innerHTML = futuRecentLoads
+    .slice(0, FUTU_RECENT_LOADS_MAX)
+    .map((item, idx) => {
+      const file = String(item.runtime_file || '');
+      const base = file.split(/[\\/]/).pop() || file;
+      const ts = item.loaded_at ? new Date(item.loaded_at) : null;
+      const label = ts && Number.isFinite(ts.getTime()) ? ts.toLocaleString() : '--';
+      const snap = Number.isFinite(item.snapshots) && item.snapshots > 0 ? `${item.snapshots} snapshots` : 'snapshots: --';
+      return `
+        <button class='futu-recent-load-item' data-futu-recent-idx='${idx}' title='${file}'>
+          <div class='futu-recent-load-main'>${base}</div>
+          <div class='futu-recent-load-sub'>${label} · ${snap}</div>
+        </button>
+      `;
+    })
+    .join('');
+
+  futuRecentLoadsBox.querySelectorAll('[data-futu-recent-idx]').forEach((el) => {
+    el.addEventListener('click', async () => {
+      const idx = Number(el.getAttribute('data-futu-recent-idx'));
+      if (!Number.isFinite(idx) || idx < 0 || idx >= futuRecentLoads.length) return;
+      const selected = futuRecentLoads[idx];
+      if (!selected?.runtime_file) return;
+      if (futuLoadPathInput) futuLoadPathInput.value = selected.runtime_file;
+      await futuControl('/api/futu/load', { runtime_file: selected.runtime_file });
+    });
+  });
+};
+
+const rememberFutuLoad = (runtimeFile, snapshots, preserveTimestamp = false) => {
+  const runtime_file = String(runtimeFile || '').trim();
+  if (!runtime_file) return;
+
+  const existing = futuRecentLoads.find((x) => String(x?.runtime_file || '').trim() === runtime_file);
+  const nowIso = new Date().toISOString();
+  const snapshotCount = Number.isFinite(Number(snapshots)) ? Number(snapshots) : 0;
+  const loadedAt = preserveTimestamp && existing?.loaded_at ? existing.loaded_at : nowIso;
+  futuRecentLoads = [
+    { runtime_file, loaded_at: loadedAt, snapshots: snapshotCount || Number(existing?.snapshots || 0) },
+    ...futuRecentLoads.filter((x) => String(x?.runtime_file || '').trim() !== runtime_file),
+  ].slice(0, FUTU_RECENT_LOADS_MAX);
+
+  saveFutuRecentLoads();
+  renderFutuRecentLoads();
+};
+
 const syncPaperApplyButtonState = () => {
   const busy = !!(paperApplyManualOptimizing || paperApplyAutoOptimizing);
   if (!paperTargetApplyBtn) return;
@@ -2358,6 +2471,80 @@ const fillCapitalSummaryTable = (paperStatus) => {
   tb.appendChild(totalTr);
 };
 
+const fillFutuCapitalSummaryTable = (futuStatus) => {
+  const tb = document.querySelector('#futuCapitalSummaryTable tbody');
+  if (!tb) return;
+
+  tb.innerHTML = '';
+  const snapshot = futuStatus?.latest_snapshot;
+  if (!snapshot) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td colspan='8'><div class='empty-state'><div class='empty-state-icon'>💰</div>No FUTU capital snapshot yet.<br>Start or load futu simulation first.</div></td>`;
+    tb.appendChild(tr);
+    return;
+  }
+
+  const totalAssets = Number(snapshot?.total_value);
+  const cashUsd = Number(snapshot?.cash_usd);
+  const totalPnlUsd = Number(snapshot?.pnl_usd);
+  const totalPnlPct = Number(snapshot?.pnl_pct);
+  const hasHoldings = (snapshot?.holdings_symbols?.length || 0) > 0;
+
+  const safeTotal = Number.isFinite(totalAssets) && totalAssets > 0 ? totalAssets : 0;
+  const safeCash = Number.isFinite(cashUsd) ? cashUsd : 0;
+  const investedValue = safeTotal - safeCash;
+  const cashWeightPct = safeTotal > 0 ? (safeCash / safeTotal) * 100 : 0;
+  const investedWeightPct = safeTotal > 0 ? (investedValue / safeTotal) * 100 : 0;
+
+  const cashTr = document.createElement('tr');
+  cashTr.innerHTML = `
+    <td><strong>CASH</strong></td>
+    <td>Balance</td>
+    <td class='num'>${safeTotal > 0 ? `${cashWeightPct.toFixed(2)}%` : '--'}</td>
+    <td class='num'>${Number.isFinite(cashUsd) ? '$' + cashUsd.toFixed(2) : '--'}</td>
+    <td class='num'>${safeTotal > 0 ? `$${investedValue.toFixed(2)} (${investedWeightPct.toFixed(2)}%)` : '--'}</td>
+    <td class='num'>${Number.isFinite(totalAssets) ? '$' + totalAssets.toFixed(2) : '--'}</td>
+    <td class='num'>--</td>
+    <td class='num'>--</td>
+  `;
+  tb.appendChild(cashTr);
+
+  const totalPnlClass = Number.isFinite(totalPnlUsd)
+    ? (totalPnlUsd >= 0 ? 'up' : 'down')
+    : '';
+  const returnBgClass = Number.isFinite(totalPnlUsd)
+    ? (totalPnlUsd >= 0 ? 'pnl-bg-up' : 'pnl-bg-down')
+    : '';
+  const returnText = Number.isFinite(totalPnlPct)
+    ? `${totalPnlPct >= 0 ? '+' : ''}${totalPnlPct.toFixed(2)}%`
+    : '--';
+  const pnlText = Number.isFinite(totalPnlUsd) && Number.isFinite(totalPnlPct)
+    ? (!hasHoldings
+      ? returnText
+      : `${formatSignedMoney(totalPnlUsd)} (${returnText})`)
+    : '--';
+
+  const totalTr = document.createElement('tr');
+  totalTr.innerHTML = `
+    <td><strong>TOTAL ASSETS</strong></td>
+    <td>Portfolio</td>
+    <td class='num'>${safeTotal > 0 ? `${cashWeightPct.toFixed(2)}% cash` : '--'}</td>
+    <td class='num'>${Number.isFinite(cashUsd) ? '$' + cashUsd.toFixed(2) : '--'}</td>
+    <td class='num'>${safeTotal > 0 ? `$${investedValue.toFixed(2)} (${investedWeightPct.toFixed(2)}%)` : '--'}</td>
+    <td class='num'>${Number.isFinite(totalAssets) ? '$' + totalAssets.toFixed(2) : '--'}</td>
+    <td class='num ${totalPnlClass} ${returnBgClass}'>${returnText}</td>
+    <td class='num ${totalPnlClass} ${returnBgClass}'>${pnlText}</td>
+  `;
+  tb.appendChild(totalTr);
+
+  const metaEl = document.getElementById('futuRuntimeMeta');
+  if (metaEl) {
+    const runtimeFile = futuStatus?.runtime_file ? String(futuStatus.runtime_file) : '--';
+    const snapCount = Array.isArray(futuStatus?.snapshots) ? futuStatus.snapshots.length : 0;
+    metaEl.textContent = `Runtime file: ${runtimeFile} · Snapshots: ${snapCount}`;
+  }
+};
+
 const collectTrackedSymbols = () => {
   const typedSymbols = (document.getElementById('pSymbols')?.value || '')
     .split(',')
@@ -2447,8 +2634,8 @@ const renderFutuChartSummaryStrip = () => {
   const strip = document.getElementById('futuChartSummaryStrip');
   if (!strip) return;
 
-  const latest = futuFullContext?.latest;
-  const series = futuFullContext?.portfolioSeries || [];
+  const latest = futuRenderContext?.latest;
+  const series = futuRenderContext?.portfolioSeries || [];
   if (!latest || series.length === 0) {
     strip.style.display = 'none';
     return;
@@ -2492,16 +2679,32 @@ const renderFutuChartSummaryStrip = () => {
 };
 
 const renderFutuChartFromCurrentContext = () => {
-  futuMetricsByTime = futuFullContext?.metricsByTime || new Map();
-  if (futuFullContext?.portfolioSeries?.length > 0) {
-    futuPortfolioLine.setData(ensureVisibleSeries(futuFullContext.portfolioSeries));
-    futuBenchmarkLine.setData(futuFullContext.benchmarkSeries?.length > 0 ? ensureVisibleSeries(futuFullContext.benchmarkSeries) : []);
-    futuChart.fit();
-    setFutuLegendText(futuFullContext.latest || null);
+  const filtered = filterPaperContextByRangeDays(futuFullContext, selectedFutuRangeDays);
+  futuRenderContext = filtered;
+  futuMetricsByTime = filtered.metricsByTime;
+  if (filtered.portfolioSeries?.length > 0) {
+    futuPortfolioLine.setData(ensureVisibleSeries(filtered.portfolioSeries));
+    futuBenchmarkLine.setData(filtered.benchmarkSeries?.length > 0 ? ensureVisibleSeries(filtered.benchmarkSeries) : []);
+
+    const timeScale = futuChart?.chart?.timeScale?.();
+    const latestTime = filtered.portfolioSeries[filtered.portfolioSeries.length - 1].time;
+    const selectedDays = Number(selectedFutuRangeDays);
+    if (timeScale && Number.isFinite(selectedDays) && selectedDays > 0 && typeof timeScale.setVisibleRange === 'function') {
+      const from = latestTime - Math.floor(selectedDays * 86400);
+      timeScale.setVisibleRange({ from, to: latestTime });
+    } else {
+      futuChart.fit();
+    }
+    setFutuLegendText(filtered.latest || null);
   } else {
     futuPortfolioLine.setData([]);
     futuBenchmarkLine.setData([]);
     setFutuLegendText(null);
+  }
+
+  for (const btn of futuRangeButtons) {
+    const days = Number(btn.dataset.futuRangeDays);
+    btn.classList.toggle('active', days === selectedFutuRangeDays);
   }
 };
 
@@ -2670,6 +2873,16 @@ for (const btn of paperRangeButtons) {
         setStatus(`Selected ${days}d range; available history is ${spanDays.toFixed(1)}d`, '');
       }
     }
+  });
+}
+
+for (const btn of futuRangeButtons) {
+  btn.addEventListener('click', () => {
+    const days = Number(btn.dataset.futuRangeDays);
+    if (!Number.isFinite(days) || days <= 0) return;
+    selectedFutuRangeDays = days;
+    renderFutuChartFromCurrentContext();
+    renderFutuChartSummaryStrip();
   });
 }
 
@@ -2938,6 +3151,9 @@ const refreshFutu = async () => {
     const futuExecPool = document.getElementById('futuExecPool');
     const futuConnStatus = document.getElementById('futuConnStatus');
     const futuConnSummary = document.getElementById('futuConnSummary');
+    const futuConnMarket = document.getElementById('futuConnMarket');
+    const futuConnFirm = document.getElementById('futuConnFirm');
+    const futuConnHost = document.getElementById('futuConnHost');
     const futuAccountCash = document.getElementById('futuAccountCash');
     const futuBuyingPower = document.getElementById('futuBuyingPower');
     const futuLastSync = document.getElementById('futuLastSync');
@@ -2949,7 +3165,22 @@ const refreshFutu = async () => {
     const futuAccIdBadge = document.getElementById('futuAccIdBadge');
     const futuAccountId = document.getElementById('futuAccountId');
     const futuAccType = document.getElementById('futuAccType');
+    const futuAccEnvVal = document.getElementById('futuAccEnvVal');
+    const futuAccStatusVal = document.getElementById('futuAccStatusVal');
+    const futuAccRoleVal = document.getElementById('futuAccRoleVal');
+    const futuAccSimTypeVal = document.getElementById('futuAccSimTypeVal');
+    const futuAccMarketAuthVal = document.getElementById('futuAccMarketAuthVal');
+    const futuAccFirmVal = document.getElementById('futuAccFirmVal');
+    const futuAccCardVal = document.getElementById('futuAccCardVal');
+    const futuAccUniCardVal = document.getElementById('futuAccUniCardVal');
     const futuStartedAt = document.getElementById('futuStartedAt');
+    const futuCtrlDot = document.getElementById('futuCtrlDot');
+    const futuCtrlStatus = document.getElementById('futuCtrlStatus');
+    const futuCtrlCapital = document.getElementById('futuCtrlCapital');
+    const futuCtrlAccount = document.getElementById('futuCtrlAccount');
+    const futuCtrlRuntime = document.getElementById('futuCtrlRuntime');
+
+    syncFutuButtons(st);
 
     if (st.connected) {
       futuExecStatus.textContent = 'RUNNING';
@@ -2969,16 +3200,46 @@ const refreshFutu = async () => {
       if (futuConnCard) { futuConnCard.classList.remove('kpi-positive'); futuConnCard.classList.add('kpi-warn'); }
     }
 
-    // Account pill / ID
-    if (st.accounts && st.accounts.length > 0) {
-      const acc = st.accounts[0];
-      const accId = acc.acc_id ?? '--';
-      const accTypeRaw = acc.trd_env ?? '';
-      const accTypeFmt = accTypeRaw === 'SIMULATE' ? 'Simulate' : accTypeRaw === 'REAL' ? 'Real' : accTypeRaw || '--';
-      if (futuAccountId) futuAccountId.textContent = String(accId);
-      if (futuAccType) futuAccType.textContent = `${accTypeFmt} · ${acc.acc_type ?? '--'}`;
-      if (futuAccPill) { futuAccPill.style.display = ''; }
-      if (futuAccIdBadge) futuAccIdBadge.textContent = `#${accId}`;
+    if (futuCtrlStatus) futuCtrlStatus.textContent = st.running ? (st.connected ? 'RUNNING' : 'STARTED') : 'STOPPED';
+    if (futuCtrlDot) {
+      futuCtrlDot.classList.toggle('active', !!st.running);
+      futuCtrlDot.classList.toggle('paused', !st.running);
+    }
+
+    const selectedAcc = (st?.selected_account && typeof st.selected_account === 'object') ? st.selected_account : null;
+    const selectedAccId = st?.selected_acc_id ?? selectedAcc?.acc_id ?? '--';
+    const selectedEnv = st?.selected_trd_env ?? selectedAcc?.trd_env ?? '--';
+    const selectedMarket = st?.selected_market ?? st?.conn_market ?? '--';
+    const connHost = String(st?.conn_host || '127.0.0.1');
+    const connPort = Number(st?.conn_port);
+    const connHostPort = Number.isFinite(connPort) && connPort > 0 ? `${connHost}:${connPort}` : connHost;
+    const marketAuth = Array.isArray(selectedAcc?.trdmarket_auth)
+      ? selectedAcc.trdmarket_auth.join(', ')
+      : (selectedAcc?.trdmarket_auth ? String(selectedAcc.trdmarket_auth) : '--');
+    if (futuAccountId) futuAccountId.textContent = String(selectedAccId);
+    if (futuAccType) futuAccType.textContent = `${selectedEnv} · ${selectedAcc?.acc_type ?? '--'}`;
+    if (futuAccEnvVal) futuAccEnvVal.textContent = `Env: ${selectedEnv}`;
+    if (futuAccStatusVal) futuAccStatusVal.textContent = `Status: ${selectedAcc?.acc_status ?? '--'}`;
+    if (futuAccRoleVal) futuAccRoleVal.textContent = `Role: ${selectedAcc?.acc_role ?? '--'}`;
+    if (futuAccSimTypeVal) futuAccSimTypeVal.textContent = `Sim Type: ${selectedAcc?.sim_acc_type ?? '--'}`;
+    if (futuAccMarketAuthVal) futuAccMarketAuthVal.textContent = `Market Auth: ${marketAuth}`;
+    if (futuAccFirmVal) futuAccFirmVal.textContent = `Firm: ${selectedAcc?.security_firm ?? '--'}`;
+    if (futuAccCardVal) futuAccCardVal.textContent = `Card: ${selectedAcc?.card_num ?? '--'}`;
+    if (futuAccUniCardVal) futuAccUniCardVal.textContent = `Uni Card: ${selectedAcc?.uni_card_num ?? '--'}`;
+    if (futuConnHost) futuConnHost.textContent = connHostPort;
+    if (futuConnMarket) futuConnMarket.textContent = selectedMarket;
+    if (futuConnFirm) futuConnFirm.textContent = String(st?.conn_security_firm || selectedAcc?.security_firm || 'FutuSecurities');
+    if (futuAccPill) { futuAccPill.style.display = selectedAccId && selectedAccId !== '--' ? '' : 'none'; }
+    if (futuAccIdBadge) futuAccIdBadge.textContent = `#${selectedAccId}`;
+    if (futuCtrlAccount) futuCtrlAccount.textContent = `${selectedEnv}/${selectedMarket} · #${selectedAccId}`;
+    if (futuCtrlRuntime) futuCtrlRuntime.textContent = st.runtime_file ? String(st.runtime_file).split(/[\\/]/).pop() : '--';
+    if (futuCtrlCapital) {
+      const t = Number(st?.latest_snapshot?.total_value);
+      futuCtrlCapital.textContent = Number.isFinite(t) ? t.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '--';
+    }
+    if (futuLoadPathInput && st.runtime_file) {
+      futuLoadPathInput.value = String(st.runtime_file);
+      rememberFutuLoad(String(st.runtime_file), Array.isArray(st.snapshots) ? st.snapshots.length : 0, true);
     }
 
     // Started-at sub
@@ -3026,6 +3287,7 @@ const refreshFutu = async () => {
     renderFutuChartSummaryStrip();
 
     fillFutuHoldingsTable(st);
+    fillFutuCapitalSummaryTable(st);
     renderRealtimeMarketGrid('futuRtMarketGrid', st.latest_snapshot);
 
     const futuLogBox = document.getElementById('futuLogBox');
@@ -3068,6 +3330,24 @@ const paperControl = async (path, body = {}, options = {}) => {
     if (options.syncTargetsOnce) {
       await forceSyncPaperTargetsFromStatus();
     }
+  } catch (e) {
+    setStatus(e.message || String(e), 'err');
+    alert(e.message);
+  }
+};
+
+const futuControl = async (path, body = {}) => {
+  try {
+    const response = await api(path, { method: 'POST', body: JSON.stringify(body) });
+    const successText = path === '/api/futu/load'
+      ? 'FUTU history loaded · restored snapshots and resume polling'
+      : `Action success: ${path}`;
+    if (path === '/api/futu/load') {
+      const runtimeFile = response?.runtime_file || body?.runtime_file || futuLoadPathInput?.value;
+      rememberFutuLoad(runtimeFile, response?.snapshots);
+    }
+    setStatus(successText, 'ok');
+    await refreshFutu();
   } catch (e) {
     setStatus(e.message || String(e), 'err');
     alert(e.message);
@@ -3315,6 +3595,52 @@ document.getElementById('paperPause').addEventListener('click', () => paperContr
 document.getElementById('paperResume').addEventListener('click', () => paperControl('/api/paper/resume'));
 document.getElementById('paperStop').addEventListener('click', () => paperControl('/api/paper/stop'));
 
+document.getElementById('futuStart')?.addEventListener('click', () => futuControl('/api/futu/start'));
+document.getElementById('futuStop')?.addEventListener('click', () => futuControl('/api/futu/stop'));
+document.getElementById('futuLoad')?.addEventListener('click', async () => {
+  if (!futuFilePicker) {
+    const runtimeFile = (futuLoadPathInput?.value || '').trim();
+    await futuControl('/api/futu/load', {
+      runtime_file: runtimeFile || null,
+    });
+    return;
+  }
+
+  futuFilePicker.value = '';
+  futuFilePicker.click();
+});
+
+if (futuFilePicker) {
+  futuFilePicker.addEventListener('change', async (event) => {
+    const file = event?.target?.files?.[0];
+    if (!file) return;
+    const selectedName = String(file.name || '').trim();
+    if (!selectedName) return;
+
+    const suggestedPath = selectedName.toLowerCase().endsWith('.jsonl')
+      ? `log/${selectedName}`
+      : `log/${selectedName}.jsonl`;
+
+    if (futuLoadPathInput) futuLoadPathInput.value = suggestedPath;
+
+    if (futuLoadBtn) {
+      futuLoadBtn.disabled = true;
+      futuLoadBtn.textContent = 'Loading...';
+    }
+
+    try {
+      await futuControl('/api/futu/load', {
+        runtime_file: suggestedPath,
+      });
+    } finally {
+      if (futuLoadBtn) {
+        futuLoadBtn.disabled = false;
+        futuLoadBtn.textContent = '📂 Load FUTU';
+      }
+    }
+  });
+}
+
 const refreshTrain = async () => {
   try {
     const st = await api('/api/train/status');
@@ -3527,11 +3853,17 @@ const restoreState = async () => {
 
     if (state.futu) {
       latestFutuStatus = state.futu;
+      syncFutuButtons(state.futu);
+      if (futuLoadPathInput && state.futu.runtime_file) {
+        futuLoadPathInput.value = state.futu.runtime_file;
+        rememberFutuLoad(state.futu.runtime_file, Array.isArray(state.futu.snapshots) ? state.futu.snapshots.length : 0, true);
+      }
       const ctx = buildPaperSeriesContext(state.futu.snapshots || []);
       futuFullContext = ctx.portfolioSeries.length > 0 ? ctx : buildFallbackPaperContext(state.futu.latest_snapshot);
       renderFutuChartFromCurrentContext();
       renderFutuChartSummaryStrip();
       fillFutuHoldingsTable(state.futu);
+      fillFutuCapitalSummaryTable(state.futu);
       renderRealtimeMarketGrid('futuRtMarketGrid', state.futu.latest_snapshot);
     }
 
@@ -3654,3 +3986,15 @@ const togglePaperCtrl = () => {
 };
 document.getElementById('paperCtrlSummary')?.addEventListener('click', togglePaperCtrl);
 paperCtrlChevron?.addEventListener('click', togglePaperCtrl);
+
+const futuCtrlBodyEl = document.getElementById('futuCtrlBody');
+const futuCtrlChevron = document.getElementById('futuCtrlToggle');
+const toggleFutuCtrl = () => {
+  futuCtrlBodyEl?.classList.toggle('open');
+  futuCtrlChevron?.classList.toggle('open');
+};
+document.getElementById('futuCtrlSummary')?.addEventListener('click', toggleFutuCtrl);
+futuCtrlChevron?.addEventListener('click', toggleFutuCtrl);
+
+futuRecentLoads = loadFutuRecentLoads();
+renderFutuRecentLoads();

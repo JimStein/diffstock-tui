@@ -1,0 +1,5 @@
+[2m2026-02-28T14:20:36.523715Z[0m [32m INFO[0m [2mdiffstock_tui::config[0m[2m:[0m Compute backend=directml requested for webui-default
+[2m2026-02-28T14:20:36.526776Z[0m [32m INFO[0m [2mdiffstock_tui::webui[0m[2m:[0m WebUI listening on http://0.0.0.0:8099
+[2m2026-02-28T14:20:50.066489Z[0m [32m INFO[0m [2mdiffstock_tui::data[0m[2m:[0m Polygon WebSocket connected
+[2m2026-02-28T14:20:50.068372Z[0m [32m INFO[0m [2mdiffstock_tui::data[0m[2m:[0m Polygon WS initial subscribe: A.TLT,AM.TLT,A.NVDA,AM.NVDA,A.COPX,AM.COPX,A.URA,AM.URA,A.MSFT,AM.MSFT,A.IAU,AM.IAU,A.ETN,AM.ETN
+[2m2026-02-28T14:20:50.070008Z[0m [32m INFO[0m [2mdiffstock_tui::data[0m[2m:[0m Polygon WS incremental subscribe: A.COPX,AM.COPX,A.ETN,AM.ETN,A.IAU,AM.IAU,A.MSFT,AM.MSFT,A.NVDA,AM.NVDA,A.TLT,AM.TLT,A.URA,AM.URA

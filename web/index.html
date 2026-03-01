@@ -331,6 +331,14 @@
     }
 
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    @media (max-width: 1400px) {
+      .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 980px) {
+      .grid-3 { grid-template-columns: 1fr; }
+    }
+    .exec-engine-grid .panel { margin-bottom: 0; }
 
     /* ─── Form Elements ─── */
     .row { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
@@ -1302,6 +1310,43 @@
       opacity: 1;
       padding: 0 14px 14px;
     }
+    .futu-recent-loads {
+      margin-top: 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: rgba(255,255,255,.02);
+      max-height: 160px;
+      overflow: auto;
+      padding: 8px;
+      display: grid;
+      gap: 6px;
+    }
+    .futu-recent-load-item {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: rgba(255,255,255,.02);
+      color: var(--text-2);
+      text-align: left;
+      padding: 6px 8px;
+      cursor: pointer;
+      transition: border-color var(--transition), background var(--transition);
+      font-family: var(--mono);
+      font-size: 11px;
+      line-height: 1.5;
+    }
+    .futu-recent-load-item:hover {
+      border-color: rgba(59,130,246,.35);
+      background: rgba(59,130,246,.08);
+    }
+    .futu-recent-load-main { color: var(--text); font-weight: 600; }
+    .futu-recent-load-sub { color: var(--muted); }
+    .futu-recent-load-empty {
+      color: var(--muted);
+      font-size: 11px;
+      font-family: var(--mono);
+      padding: 4px 2px;
+    }
 
     /* ─── Weekday pill toggles ─── */
     .weekday-group {
@@ -1641,6 +1686,121 @@
       color: var(--muted);
       margin-top: 2px;
       font-family: var(--mono);
+    }
+
+    /* ─── Futu Page Polish ─── */
+    @keyframes futu-live-pulse {
+      0%,100% { box-shadow:0 0 0 0 rgba(0,212,170,.55); }
+      50%      { box-shadow:0 0 0 6px rgba(0,212,170,0);  }
+    }
+    .futu-conn-main-card {
+      position: relative;
+      overflow: hidden;
+    }
+    .futu-conn-main-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      border-radius: 2px 2px 0 0;
+      background: linear-gradient(90deg,transparent,rgba(245,158,11,.55),transparent);
+      transition: background .45s ease;
+    }
+    .futu-conn-main-card.kpi-positive::before {
+      background: linear-gradient(90deg,transparent,rgba(0,212,170,.75) 30%,rgba(59,130,246,.55) 70%,transparent);
+    }
+    .futu-conn-main-card .chip-dot.active {
+      animation: futu-live-pulse 2s ease-in-out infinite;
+    }
+    #futuConnCard.kpi-positive .futu-conn-card-status {
+      background: linear-gradient(135deg,#00d4aa 0%,#00b0f0 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .futu-conn-card-detail span:not(.futu-conn-sep) {
+      color: var(--text-2);
+      font-weight: 500;
+    }
+    .futu-badge-capital  { background:rgba(0,212,170,.12)!important;  border-color:rgba(0,212,170,.30)!important;  color:#00d4aa!important; }
+    .futu-badge-schedule { background:rgba(59,130,246,.12)!important;  border-color:rgba(59,130,246,.30)!important;  color:var(--accent-2)!important; }
+    .futu-badge-wait     { background:rgba(245,158,11,.11)!important;   border-color:rgba(245,158,11,.30)!important;   color:var(--gold)!important; }
+    .futu-badge-pool     { background:rgba(139,92,246,.11)!important;   border-color:rgba(139,92,246,.30)!important;   color:#a78bfa!important; }
+    .futu-kpi-sub-sep {
+      height: 1px;
+      background: var(--border);
+      margin: 6px 0 4px;
+    }
+    .paper-kpi-card .futu-kpi-sub {
+      border-bottom: 1px solid rgba(255,255,255,.04);
+      padding: 2px 0;
+      margin-top: 1px;
+    }
+    .paper-kpi-card .futu-kpi-sub:last-child { border-bottom: none; }
+    #futuAccType      { color:var(--text-2); font-size:11px; font-weight:600; }
+    #futuAccEnvVal    { color:var(--accent-2); }
+    #futuAccStatusVal { color:var(--up); }
+    #futuAccSimTypeVal    { color:var(--gold); }
+    #futuAccMarketAuthVal { color:var(--accent-2); }
+    #futuChart {
+      box-shadow: 0 8px 36px rgba(0,0,0,.38), 0 0 0 1px rgba(255,255,255,.04);
+    }
+    #futuLogBox {
+      background: rgba(6,9,15,.62);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 7px 11px;
+    }
+    #futuLogBox div {
+      padding: 2px 3px;
+      border-radius: 3px;
+      line-height: 1.85;
+      font-size: 11px;
+      font-family: var(--mono);
+      color: var(--muted);
+      transition: background var(--transition);
+    }
+    #futuLogBox div.log-warn  { color:var(--gold); background:rgba(245,158,11,.07); border-left:2px solid rgba(245,158,11,.45); padding-left:8px; }
+    #futuLogBox div.log-error { color:var(--down); background:rgba(255,71,87,.07);  border-left:2px solid rgba(255,71,87,.45);  padding-left:8px; }
+    #futuLogBox div:hover { background:rgba(255,255,255,.025); }
+    .futu-conn-kpi-grid .paper-kpi-card {
+      position: relative;
+      overflow: hidden;
+    }
+    .futu-conn-kpi-grid .paper-kpi-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 1px;
+      background: linear-gradient(90deg,transparent,rgba(59,130,246,.25),transparent);
+    }
+    .futu-conn-kpi-grid .paper-kpi-card.kpi-positive::before {
+      background: linear-gradient(90deg,transparent,rgba(0,212,170,.4),transparent);
+    }
+    #tab-futu .panel-title-icon {
+      opacity: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      background: rgba(0,212,170,.12);
+      border: 1px solid rgba(0,212,170,.22);
+      border-radius: 6px;
+      font-size: 12px;
+      vertical-align: -5px;
+    }
+    #futuHoldingsTable thead tr th {
+      background: linear-gradient(180deg,rgba(21,28,44,.95) 0%,rgba(15,20,32,.75) 100%);
+      letter-spacing: .4px;
+      border-bottom: 1px solid rgba(0,212,170,.18);
+    }
+    #tab-futu .panel {
+      border-top: 1px solid rgba(0,212,170,.045);
+    }
+    #futuConnSummary {
+      font-family: var(--mono);
+      font-size: 11px;
     }
 
     /* ─── Paper KPI & Alerts ─── */
@@ -2116,36 +2276,25 @@
             <strong>Paper Trading Executor</strong> 与 <strong>Futu Simulation Executor</strong> 分别在各自页面运行与监控。
           </div>
         </div>
-        <div id="strategyEngineMount">
+        <div id="strategyEngineMount" class="grid-3 exec-engine-grid">
           <div class="panel paper-ctrl-panel">
             <div class="paper-ctrl-header" id="paperCtrlHeader">
               <div class="paper-ctrl-summary" id="paperCtrlSummary">
                 <span class="paper-ctrl-status">
-                  <span class="chip-dot" id="paperCtrlDot"></span>
-                  <span id="paperCtrlStatus">IDLE</span>
+                  <span class="chip-dot active"></span>
+                  <span>AUTO-OPT SETTINGS</span>
                 </span>
-                <span class="paper-ctrl-badge">&#128176;&nbsp;$<span id="paperCtrlCapital">80,000</span></span>
                 <span class="paper-ctrl-badge">&#128336;&nbsp;<span id="paperCtrlSchedule">23:30 / 02:30</span></span>
                 <span class="paper-ctrl-badge">&#9203;&nbsp;<span id="paperCtrlNextOpt">--</span></span>
                 <span class="paper-ctrl-badge">&#127919;&nbsp;<span id="paperCtrlPool">0 symbols</span></span>
               </div>
               <div class="paper-ctrl-quick">
-                <button class="primary" id="paperStart">&#9654; Start</button>
-                <button id="paperLoad">&#128194; Load</button>
-                <span class="btn-sep"></span>
-                <button class="warn" id="paperPause">&#9208; Pause</button>
-                <button class="success" id="paperResume">&#9654; Resume</button>
-                <button class="danger" id="paperStop">&#9209; Stop</button>
-                <input id="paperFilePicker" type="file" accept=".json,application/json" class="hidden" />
+                <span class="small">Shared by Paper + FUTU</span>
               </div>
               <button class="paper-ctrl-chevron" id="paperCtrlToggle" title="Expand / Collapse config" aria-label="Expand / Collapse config"></button>
             </div>
             <div class="paper-ctrl-body" id="paperCtrlBody">
               <div class="row" style="margin-top:4px;">
-                <div class="field">
-                  <label class="field-label">Capital ($)</label>
-                  <input id="paperCapital" type="number" value="80000" style="width:110px" />
-                </div>
                 <div class="field">
                   <label class="field-label">Schedule 1</label>
                   <input id="paperTime1" type="time" value="23:30" step="60" style="width:108px" />
@@ -2155,7 +2304,7 @@
                   <input id="paperTime2" type="time" value="02:30" step="60" style="width:108px" />
                 </div>
                 <div class="field">
-                  <label class="field-label">Optimize Time</label>
+                  <label class="field-label">Auto Optimize Time</label>
                   <input id="paperOptTime" type="time" value="22:00" step="60" style="width:108px" />
                 </div>
               </div>
@@ -2171,10 +2320,6 @@
                     <label class="weekday-label"><input type="checkbox" data-paper-opt-weekday="6" /><span class="weekday-pill">Sat</span></label>
                     <label class="weekday-label"><input type="checkbox" data-paper-opt-weekday="7" /><span class="weekday-pill">Sun</span></label>
                   </div>
-                </div>
-                <div class="field" style="flex:1; min-width:200px;">
-                  <label class="field-label">History JSON Path</label>
-                  <input id="paperLoadPath" placeholder="e.g. log/paper_strategy_20260219_101500.json" style="width:100%" />
                 </div>
               </div>
               <div class="paper-target-editor">
@@ -2197,6 +2342,80 @@
                 </div>
               </div>
               <div class="small" style="margin-top:8px;">这是持久候选股票池（universe），不会因某次优化权重为 0 而丢失；算法可选择暂时不持有其中部分标的。Apply 时会先对候选池做一次最新组合优化，再按勾选决定是否立即再平衡。定时优化会按上面的时间+周几自动刷新权重。</div>
+            </div>
+          </div>
+
+          <div class="panel paper-ctrl-panel">
+            <div class="paper-ctrl-header">
+              <div class="paper-ctrl-summary">
+                <span class="paper-ctrl-status">
+                  <span class="chip-dot" id="paperCtrlDot"></span>
+                  <span id="paperCtrlStatus">IDLE</span>
+                </span>
+                <span class="paper-ctrl-badge">&#128176;&nbsp;$<span id="paperCtrlCapital">80,000</span></span>
+                <span class="paper-ctrl-badge">Paper Executor</span>
+              </div>
+              <div class="paper-ctrl-quick">
+                <button class="primary" id="paperStart">&#9654; Start</button>
+                <button id="paperLoad">&#128194; Load</button>
+                <span class="btn-sep"></span>
+                <button class="warn" id="paperPause">&#9208; Pause</button>
+                <button class="success" id="paperResume">&#9654; Resume</button>
+                <button class="danger" id="paperStop">&#9209; Stop</button>
+                <input id="paperFilePicker" type="file" accept=".json,application/json" class="hidden" />
+              </div>
+            </div>
+            <div class="paper-ctrl-body open">
+              <div class="row" style="margin-top:4px; align-items:flex-start;">
+                <div class="field">
+                  <label class="field-label">Paper Capital ($)</label>
+                  <input id="paperCapital" type="number" value="80000" style="width:120px" />
+                </div>
+                <div class="field" style="flex:1; min-width:220px;">
+                  <label class="field-label">Paper History JSON Path</label>
+                  <input id="paperLoadPath" placeholder="e.g. log/paper_strategy_20260219_101500.json" style="width:100%" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel paper-ctrl-panel">
+            <div class="paper-ctrl-header" id="futuCtrlHeader">
+              <div class="paper-ctrl-summary" id="futuCtrlSummary">
+                <span class="paper-ctrl-status">
+                  <span class="chip-dot" id="futuCtrlDot"></span>
+                  <span id="futuCtrlStatus">IDLE</span>
+                </span>
+                <span class="paper-ctrl-badge futu-badge-capital">💰&nbsp;$<span id="futuCtrlCapital">--</span></span>
+                <span class="paper-ctrl-badge futu-badge-schedule">🪪&nbsp;<span id="futuCtrlAccount">--</span></span>
+                <span class="paper-ctrl-badge futu-badge-pool">📁&nbsp;<span id="futuCtrlRuntime">--</span></span>
+              </div>
+              <div class="paper-ctrl-quick">
+                <button class="primary" id="futuStart">▶ Start FUTU</button>
+                <button id="futuLoad">📂 Load FUTU</button>
+                <button class="danger" id="futuStop">⏹ Stop FUTU</button>
+                <input id="futuFilePicker" type="file" accept=".jsonl,application/jsonl" class="hidden" />
+              </div>
+              <button class="paper-ctrl-chevron" id="futuCtrlToggle" title="Expand / Collapse config" aria-label="Expand / Collapse config"></button>
+            </div>
+            <div class="paper-ctrl-body" id="futuCtrlBody">
+              <div class="row" style="align-items:flex-start;">
+                <div class="field" style="flex:1; min-width:220px;">
+                  <label class="field-label">FUTU Runtime JSONL Path</label>
+                  <input id="futuLoadPath" placeholder="e.g. log/futu_sim_runtime_20260301_111500.jsonl" style="width:100%" />
+                </div>
+                <div class="small" style="max-width:520px; margin-top:20px;">
+                  支持从历史 `futu_sim_runtime_*.jsonl` 断点恢复图表/资金/PnL/持仓历史，并继续实时同步 OpenD 当前账户。
+                </div>
+              </div>
+              <div class="row" style="margin-top:10px; align-items:flex-start;">
+                <div class="field" style="width:100%;">
+                  <label class="field-label">Recent Loads (latest 8)</label>
+                  <div id="futuRecentLoads" class="futu-recent-loads">
+                    <div class="futu-recent-load-empty">No load history yet.</div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -2351,10 +2570,10 @@
                 <span class="chip-dot" id="futuExecDot"></span>
                 <span id="futuExecStatus">DISCONNECTED</span>
               </span>
-              <span class="paper-ctrl-badge">💰&nbsp;$<span id="futuExecCapital">--</span></span>
-              <span class="paper-ctrl-badge">🕐&nbsp;<span id="futuExecSchedule">Signal-driven</span></span>
-              <span class="paper-ctrl-badge">⏳&nbsp;<span id="futuExecNextOpt">Awaiting signal</span></span>
-              <span class="paper-ctrl-badge">🎯&nbsp;<span id="futuExecPool">--</span></span>
+              <span class="paper-ctrl-badge futu-badge-capital">💰&nbsp;$<span id="futuExecCapital">--</span></span>
+              <span class="paper-ctrl-badge futu-badge-schedule">🕐&nbsp;<span id="futuExecSchedule">Signal-driven</span></span>
+              <span class="paper-ctrl-badge futu-badge-wait">⏳&nbsp;<span id="futuExecNextOpt">Awaiting signal</span></span>
+              <span class="paper-ctrl-badge futu-badge-pool">🎯&nbsp;<span id="futuExecPool">--</span></span>
             </div>
             <div class="paper-ctrl-quick">
               <button id="futuJumpStrategy">⚙ Strategy Engine</button>
@@ -2390,8 +2609,17 @@
             <!-- Account ID -->
             <div class="paper-kpi-card kpi-neutral">
               <div class="paper-kpi-label">Account ID</div>
-              <div class="paper-kpi-value" id="futuAccountId" style="font-size:15px;font-variant-numeric:tabular-nums;">--</div>
+              <div class="paper-kpi-value" id="futuAccountId" style="font-size:15px;font-variant-numeric:tabular-nums;letter-spacing:-.3px;">--</div>
               <div class="futu-kpi-sub" id="futuAccType">-- type</div>
+              <div class="futu-kpi-sub-sep"></div>
+              <div class="futu-kpi-sub" id="futuAccEnvVal">Env: --</div>
+              <div class="futu-kpi-sub" id="futuAccStatusVal">Status: --</div>
+              <div class="futu-kpi-sub" id="futuAccRoleVal">Role: --</div>
+              <div class="futu-kpi-sub" id="futuAccSimTypeVal">Sim Type: --</div>
+              <div class="futu-kpi-sub" id="futuAccMarketAuthVal">Market Auth: --</div>
+              <div class="futu-kpi-sub" id="futuAccFirmVal">Firm: --</div>
+              <div class="futu-kpi-sub" id="futuAccCardVal">Card: --</div>
+              <div class="futu-kpi-sub" id="futuAccUniCardVal">Uni Card: --</div>
             </div>
 
             <!-- Cash -->
@@ -2420,6 +2648,14 @@
 
         <div class="panel" style="padding:12px;">
           <div class="chart-summary-strip" id="futuChartSummaryStrip" style="display:none;"></div>
+          <div class="range-group" id="futuRangeGroup">
+            <button class="range-btn" data-futu-range-days="0.25">6h</button>
+            <button class="range-btn active" data-futu-range-days="0.5">12h</button>
+            <button class="range-btn" data-futu-range-days="1">1d</button>
+            <button class="range-btn" data-futu-range-days="7">7d</button>
+            <button class="range-btn" data-futu-range-days="30">30d</button>
+            <button class="range-btn" data-futu-range-days="60">60d</button>
+          </div>
           <div class="chart-wrap">
             <div id="futuChart"></div>
             <div class="chart-legend" id="futuLegend">
@@ -2454,6 +2690,25 @@
             </thead>
             <tbody></tbody>
           </table>
+          <div class="panel-header" style="margin-top: 12px;">
+            <div class="panel-title"><span class="panel-title-icon">💵</span> Futu Capital Summary</div>
+            <div class="panel-subtitle" id="futuRuntimeMeta">Runtime file: --</div>
+          </div>
+          <table id="futuCapitalSummaryTable">
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Status</th>
+                <th class="num">Cash Weight</th>
+                <th class="num">Cash Balance</th>
+                <th class="num">Invested Value</th>
+                <th class="num">Total Assets</th>
+                <th class="num">Return</th>
+                <th class="num">PnL</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
         </div>
 
         <div class="panel">
@@ -2469,7 +2724,7 @@
             <div class="panel-title"><span class="panel-title-icon">📜</span> Runtime Logs</div>
             <div class="panel-subtitle">Futu execution + holdings sync</div>
           </div>
-          <div id="futuLogBox" style="max-height:200px;overflow:auto;font-size:11px;font-family:var(--mono);line-height:1.7;color:var(--muted);padding:4px 0;"></div>
+          <div id="futuLogBox" style="max-height:200px;overflow:auto;"></div>
         </div>
       </section>
 

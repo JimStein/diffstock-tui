@@ -143,6 +143,13 @@ pub struct FutuExecutionSnapshot {
     pub cash_usd: f64,
     pub buying_power_usd: f64,
     pub positions: Vec<FutuPosition>,
+    pub selected_acc_id: Option<String>,
+    pub selected_trd_env: Option<String>,
+    pub selected_market: Option<String>,
+    pub opend_account_list: Option<serde_json::Value>,
+    pub opend_selected_account: Option<serde_json::Value>,
+    pub opend_account_info_raw: Option<serde_json::Value>,
+    pub opend_positions_raw: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -174,6 +181,15 @@ impl FutuApiClient {
             client: Client::new(),
             config,
         })
+    }
+
+    pub fn connection_info(&self) -> (String, u16, String, String) {
+        (
+            self.config.py_host.clone(),
+            self.config.py_port,
+            self.config.py_filter_trdmarket.clone(),
+            self.config.py_security_firm.clone(),
+        )
     }
 
     async fn get_json(&self, path: &str) -> Result<serde_json::Value> {
@@ -291,6 +307,10 @@ impl FutuApiClient {
     }
 
     pub async fn poll_execution_snapshot(&self) -> Result<FutuExecutionSnapshot> {
+        if matches!(self.config.mode, FutuApiMode::Python) {
+            return self.poll_execution_snapshot_via_python();
+        }
+
         let account_json = self.get_account_financial_information().await?;
         let positions_json = self.get_positions_list().await?;
 
@@ -326,6 +346,13 @@ impl FutuApiClient {
             cash_usd,
             buying_power_usd,
             positions,
+            selected_acc_id: None,
+            selected_trd_env: None,
+            selected_market: None,
+            opend_account_list: None,
+            opend_selected_account: None,
+            opend_account_info_raw: None,
+            opend_positions_raw: None,
         })
     }
 }
@@ -335,6 +362,18 @@ impl FutuApiClient {
         let script = r#"
 import json
 from futu import *
+
+def _to_builtin(value):
+    if hasattr(value, 'item'):
+        try:
+            return value.item()
+        except Exception:
+            return str(value)
+    if isinstance(value, dict):
+        return {k: _to_builtin(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_to_builtin(v) for v in value]
+    return value
 
 host = __HOST__
 port = __PORT__
@@ -349,13 +388,23 @@ ctx = OpenSecTradeContext(
 )
 try:
     ret, data = ctx.get_acc_list()
+    has_acc_id = hasattr(data, 'columns') and ('acc_id' in list(data.columns))
+    records = data.to_dict(orient='records') if hasattr(data, 'to_dict') else data
+    acc_id_first = None
+    acc_id_list = []
+    if has_acc_id:
+        acc_ids = data['acc_id'].values.tolist()
+        acc_id_list = [_to_builtin(v) for v in acc_ids]
+        if len(acc_id_list) > 0:
+            acc_id_first = acc_id_list[0]
+
     if ret == RET_OK:
         payload = {
             'ok': True,
             'ret': ret,
-            'data': data.to_dict(orient='records') if hasattr(data, 'to_dict') else data,
-            'acc_id_first': (data['acc_id'][0] if hasattr(data, '__getitem__') and 'acc_id' in data and len(data['acc_id']) > 0 else None),
-            'acc_id_list': (data['acc_id'].values.tolist() if hasattr(data, '__getitem__') and 'acc_id' in data else []),
+            'data': _to_builtin(records),
+            'acc_id_first': _to_builtin(acc_id_first),
+            'acc_id_list': _to_builtin(acc_id_list),
         }
     else:
         payload = {
@@ -363,7 +412,7 @@ try:
             'ret': ret,
             'error': str(data),
         }
-    print(json.dumps(payload, ensure_ascii=False))
+    print(json.dumps(_to_builtin(payload), ensure_ascii=False))
 finally:
     ctx.close()
 "#;
@@ -390,11 +439,244 @@ finally:
             return Err(anyhow!("python futu account script returned empty output"));
         }
 
-        let v = serde_json::from_str::<serde_json::Value>(&stdout)
+        let v = parse_json_from_stdout(&stdout)
             .map_err(|e| anyhow!("failed to parse python futu account output: {}", e))?;
 
         Ok(v)
     }
+
+    fn poll_execution_snapshot_via_python(&self) -> Result<FutuExecutionSnapshot> {
+        let script = r#"
+import json
+from futu import *
+
+def _to_builtin(value):
+    if hasattr(value, 'item'):
+        try:
+            return value.item()
+        except Exception:
+            return str(value)
+    if isinstance(value, dict):
+        return {k: _to_builtin(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_to_builtin(v) for v in value]
+    return value
+
+host = __HOST__
+port = __PORT__
+filter_market = TrdMarket.__MARKET__
+security_firm = SecurityFirm.__SEC_FIRM__
+desired_acc_id = __ACC_ID__
+desired_env = __TRD_ENV__.strip().upper()
+desired_market = __MARKET_STR__.strip().upper()
+
+def _auth_contains_market(auth, market_text):
+    if auth is None:
+        return False
+    if isinstance(auth, (list, tuple)):
+        vals = [str(v).upper() for v in auth]
+        return market_text in vals
+    text = str(auth).upper()
+    return market_text in text
+
+def _is_margin_like(row):
+    acc_type = str(row.get('acc_type', '')).upper()
+    sim_type = str(row.get('sim_acc_type', '')).upper()
+    return ('MARGIN' in acc_type) or ('MARGIN' in sim_type)
+
+ctx = OpenSecTradeContext(
+    filter_trdmarket=filter_market,
+    host=host,
+    port=port,
+    security_firm=security_firm,
+)
+try:
+    ret, acc_df = ctx.get_acc_list()
+    if ret != RET_OK:
+        print(json.dumps({'ok': False, 'ret': ret, 'error': str(acc_df)}, ensure_ascii=False))
+    else:
+        acc_rows = acc_df.to_dict(orient='records') if hasattr(acc_df, 'to_dict') else []
+
+        selected = None
+        if desired_acc_id:
+            for row in acc_rows:
+                if str(row.get('acc_id', '')) == str(desired_acc_id):
+                    selected = row
+                    break
+
+        if selected is None:
+            target_env = desired_env if desired_env else 'SIMULATE'
+            # Preferred: US margin-like simulated account
+            for row in acc_rows:
+                env_text = str(row.get('trd_env', '')).upper()
+                auth = row.get('trdmarket_auth')
+                if env_text == target_env and _auth_contains_market(auth, desired_market) and _is_margin_like(row):
+                    selected = row
+                    break
+
+        if selected is None:
+            target_env = desired_env if desired_env else 'SIMULATE'
+            # Fallback 1: market-matched simulated account
+            for row in acc_rows:
+                env_text = str(row.get('trd_env', '')).upper()
+                auth = row.get('trdmarket_auth')
+                if env_text == target_env and _auth_contains_market(auth, desired_market):
+                    selected = row
+                    break
+
+        if selected is None:
+            target_env = desired_env if desired_env else 'SIMULATE'
+            # Fallback 2: any simulated account
+            for row in acc_rows:
+                env_text = str(row.get('trd_env', '')).upper()
+                if env_text == target_env:
+                    selected = row
+                    break
+
+        if selected is None and len(acc_rows) > 0:
+            selected = acc_rows[0]
+
+        if selected is None:
+            print(json.dumps({'ok': False, 'ret': -1, 'error': 'No FUTU account available'}, ensure_ascii=False))
+        else:
+            selected_acc_id = selected.get('acc_id')
+            selected_env_text = str(selected.get('trd_env', 'SIMULATE')).upper()
+            trd_env = TrdEnv.SIMULATE if selected_env_text == 'SIMULATE' else TrdEnv.REAL
+
+            ret_acc, acc_info = ctx.accinfo_query(trd_env=trd_env, acc_id=selected_acc_id)
+            if ret_acc != RET_OK:
+                print(json.dumps({'ok': False, 'ret': ret_acc, 'error': str(acc_info)}, ensure_ascii=False))
+            else:
+                ret_pos, pos_info = ctx.position_list_query(trd_env=trd_env, acc_id=selected_acc_id)
+                if ret_pos != RET_OK:
+                    print(json.dumps({'ok': False, 'ret': ret_pos, 'error': str(pos_info)}, ensure_ascii=False))
+                else:
+                    acc_rows_info = acc_info.to_dict(orient='records') if hasattr(acc_info, 'to_dict') else []
+                    pos_rows = pos_info.to_dict(orient='records') if hasattr(pos_info, 'to_dict') else []
+                    acc0 = acc_rows_info[0] if len(acc_rows_info) > 0 else {}
+                    payload = {
+                        'ok': True,
+                        'ret': RET_OK,
+                        'selected_acc_id': selected_acc_id,
+                        'selected_trd_env': selected_env_text,
+                        'selected_market': desired_market,
+                        'selected_account': selected,
+                        'account_list': acc_rows,
+                        'account_info_raw': acc_rows_info,
+                        'positions_raw': pos_rows,
+                        'cash': acc0.get('cash', 0),
+                        'available_funds': acc0.get('avl_withdrawal_cash', acc0.get('cash', 0)),
+                        'buying_power': acc0.get('power', acc0.get('max_power', acc0.get('cash', 0))),
+                        'positions': pos_rows,
+                    }
+                    print(json.dumps(_to_builtin(payload), ensure_ascii=False))
+finally:
+    ctx.close()
+"#;
+
+        let desired_acc_id = self.config.account_id.clone().unwrap_or_default();
+        let desired_env = self
+            .config
+            .trd_env
+            .clone()
+            .unwrap_or_else(|| "SIMULATE".to_string());
+
+        let script = script
+            .replace("__HOST__", &format!("{:?}", self.config.py_host))
+            .replace("__PORT__", &self.config.py_port.to_string())
+            .replace("__MARKET__", &self.config.py_filter_trdmarket)
+            .replace("__SEC_FIRM__", &self.config.py_security_firm)
+            .replace("__ACC_ID__", &format!("{:?}", desired_acc_id))
+            .replace("__TRD_ENV__", &format!("{:?}", desired_env))
+            .replace("__MARKET_STR__", &format!("{:?}", self.config.py_filter_trdmarket));
+
+        let output = Command::new(&self.config.python_bin)
+            .arg("-c")
+            .arg(script)
+            .output()
+            .map_err(|e| anyhow!("failed to run python futu snapshot script: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            return Err(anyhow!("python futu snapshot script failed: {}", stderr));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if stdout.is_empty() {
+            return Err(anyhow!("python futu snapshot script returned empty output"));
+        }
+
+        let value = parse_json_from_stdout(&stdout)
+            .map_err(|e| anyhow!("failed to parse python futu snapshot output: {}", e))?;
+
+        let ok = value.get("ok").and_then(|v| v.as_bool()).unwrap_or(true);
+        if !ok {
+            let err_text = value
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown futu python error");
+            return Err(anyhow!("{}", err_text));
+        }
+
+        let cash_usd = json_get_number(&value, &["cash_usd", "cash", "available_cash", "available_funds"])
+            .unwrap_or(0.0);
+        let buying_power_usd = json_get_number(
+            &value,
+            &["buying_power", "buying_power_usd", "max_power", "available_funds"],
+        )
+        .unwrap_or(cash_usd);
+        let positions = extract_positions(&value);
+        let selected_acc_id = value
+            .get("selected_acc_id")
+            .and_then(|v| {
+                v.as_str()
+                    .map(|s| s.to_string())
+                    .or_else(|| v.as_i64().map(|n| n.to_string()))
+                    .or_else(|| v.as_u64().map(|n| n.to_string()))
+            });
+        let selected_trd_env = value
+            .get("selected_trd_env")
+            .and_then(|v| v.as_str().map(|s| s.to_string()));
+        let selected_market = value
+            .get("selected_market")
+            .and_then(|v| v.as_str().map(|s| s.to_string()));
+        let opend_account_list = value.get("account_list").cloned();
+        let opend_selected_account = value.get("selected_account").cloned();
+        let opend_account_info_raw = value.get("account_info_raw").cloned();
+        let opend_positions_raw = value.get("positions_raw").cloned();
+
+        Ok(FutuExecutionSnapshot {
+            cash_usd,
+            buying_power_usd,
+            positions,
+            selected_acc_id,
+            selected_trd_env,
+            selected_market,
+            opend_account_list,
+            opend_selected_account,
+            opend_account_info_raw,
+            opend_positions_raw,
+        })
+    }
+}
+
+fn parse_json_from_stdout(stdout: &str) -> Result<serde_json::Value> {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(stdout) {
+        return Ok(v);
+    }
+
+    let start = stdout
+        .find('{')
+        .ok_or_else(|| anyhow!("no json object start found in stdout"))?;
+    let end = stdout
+        .rfind('}')
+        .ok_or_else(|| anyhow!("no json object end found in stdout"))?;
+    if end <= start {
+        return Err(anyhow!("invalid json object range in stdout"));
+    }
+
+    serde_json::from_str::<serde_json::Value>(&stdout[start..=end])
+        .map_err(|e| anyhow!("{}", e))
 }
 
 fn json_get_number(value: &serde_json::Value, keys: &[&str]) -> Option<f64> {
