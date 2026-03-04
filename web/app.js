@@ -35,12 +35,45 @@ let lastPortfolio = null;
 let lastPaperSeries = [];
 let latestQuoteMap = new Map();
 let latestQuoteExchangeTsMap = new Map();
+let latestQuoteDeltaMap = new Map();
 let lastQuoteRequestSymbols = [];
 let lastQuoteMissingSymbols = [];
 let lastQuoteMissingUpdatedAtMs = 0;
 let lastQuotesAt = 0;
 let lastQuotesStampText = '--';
 let lastExchangeStampText = '--';
+const normalizeQuoteRequestSymbol = (symbol) => {
+  const upper = String(symbol || '').trim().toUpperCase();
+  if (!upper) return '';
+  const usMatch = upper.match(/^US\.(.+)$/);
+  if (usMatch && usMatch[1]) return usMatch[1];
+  return upper;
+};
+const getLatestQuotePrice = (symbol) => {
+  const upper = String(symbol || '').trim().toUpperCase();
+  if (!upper) return null;
+  const direct = Number(latestQuoteMap.get(upper));
+  if (Number.isFinite(direct)) return direct;
+  const normalized = normalizeQuoteRequestSymbol(upper);
+  const normalizedPx = Number(latestQuoteMap.get(normalized));
+  return Number.isFinite(normalizedPx) ? normalizedPx : null;
+};
+const getLatestQuoteExchangeTs = (symbol) => {
+  const upper = String(symbol || '').trim().toUpperCase();
+  if (!upper) return null;
+  const direct = Number(latestQuoteExchangeTsMap.get(upper));
+  if (Number.isFinite(direct) && direct > 0) return direct;
+  const normalized = normalizeQuoteRequestSymbol(upper);
+  const normalizedTs = Number(latestQuoteExchangeTsMap.get(normalized));
+  return Number.isFinite(normalizedTs) && normalizedTs > 0 ? normalizedTs : null;
+};
+const getLatestQuoteDelta = (symbol) => {
+  const upper = String(symbol || '').trim().toUpperCase();
+  if (!upper) return null;
+  return latestQuoteDeltaMap.get(upper)
+    || latestQuoteDeltaMap.get(normalizeQuoteRequestSymbol(upper))
+    || null;
+};
 const actionStatus = document.getElementById('actionStatus');
 const quotesAsOf = document.getElementById('quotesAsOf');
 const paperStartBtn = document.getElementById('paperStart');
@@ -103,6 +136,7 @@ let futuOpenOrderEditState = {
 };
 let selectedPaperRangeDays = 0.5;
 let selectedFutuRangeDays = 0.5;
+let selectedFutuCurveMode = 'account';
 let paperSessionStartMs = null;
 let manualPaperTargets = [];
 let paperTargetsDirty = false;
@@ -135,14 +169,17 @@ let paperFullContext = {
   metricsByTime: new Map(),
   latest: null,
 };
+let lastPaperChartDataSignature = '';
 let futuFullContext = {
   portfolioSeries: [],
+  strategyFtSeries: [],
   benchmarkSeries: [],
   metricsByTime: new Map(),
   latest: null,
 };
 let futuRenderContext = {
   portfolioSeries: [],
+  strategyFtSeries: [],
   benchmarkSeries: [],
   metricsByTime: new Map(),
   latest: null,
@@ -151,8 +188,12 @@ let latestPaperStatus = null;
 let latestFutuStatus = null;
 const paperRangeButtons = Array.from(document.querySelectorAll('[data-paper-range-days]'));
 const futuRangeButtons = Array.from(document.querySelectorAll('[data-futu-range-days]'));
+const futuCurveModeButtons = Array.from(document.querySelectorAll('[data-futu-curve-mode]'));
 
 const futuLegend = document.getElementById('futuLegend');
+const futuLegendTitle = document.getElementById('futuLegendTitle');
+const futuLegendPortfolioKey = document.getElementById('futuLegendPortfolioKey');
+const futuLegendPortfolioPnlKey = document.getElementById('futuLegendPortfolioPnlKey');
 const futuLegendPortfolio = document.getElementById('futuLegendPortfolio');
 const futuLegendPortfolioPnl = document.getElementById('futuLegendPortfolioPnl');
 const futuLegendBenchmark = document.getElementById('futuLegendBenchmark');
@@ -164,6 +205,12 @@ const tradeFilterButtons = Array.from(document.querySelectorAll('[data-trade-fil
 const tradeSearchInput = document.getElementById('tradeSearchInput');
 const futuActivityFilterInput = document.getElementById('futuActivityFilterInput');
 const futuActivityRangeSelect = document.getElementById('futuActivityRangeSelect');
+const futuCapitalCapInput = document.getElementById('futuCapitalCapInput');
+const futuCapitalCapApplyBtn = document.getElementById('futuCapitalCapApply');
+const futuCapitalCapHint = document.getElementById('futuCapitalCapHint');
+const futuStrategyCapitalInput = document.getElementById('futuStrategyCapitalInput');
+const futuStrategyCapitalApplyBtn = document.getElementById('futuStrategyCapitalApply');
+const futuStrategyCapitalHint = document.getElementById('futuStrategyCapitalHint');
 const futuManualSymbolInput = document.getElementById('futuManualSymbol');
 const futuManualSideSelect = document.getElementById('futuManualSide');
 const futuManualQtyInput = document.getElementById('futuManualQty');
@@ -535,11 +582,8 @@ const setDataSourceChip = (sourceRaw, wsConnected = false, wsDiagnostics = null,
     return;
   }
 
-  const lower = source.toLowerCase();
-  let label = source;
-  if (lower.includes('yahoo')) {
-    label = 'Yfinance';
-  }
+  const label = source;
+  const lower = label.toLowerCase();
   dataSourceChip.textContent = `Data: ${label}`;
 
   if (label !== dataSourceLastValue) {
@@ -969,11 +1013,139 @@ const buildFallbackPaperContext = (snapshot) => {
   };
 };
 
+const getFutuModeLabel = () => (selectedFutuCurveMode === 'strategy' ? 'Strategy' : 'Account');
+
+const syncFutuLegendModeLabels = () => {
+  const modeLabel = getFutuModeLabel();
+  if (futuLegendTitle) futuLegendTitle.textContent = `${modeLabel} Metrics`;
+  if (futuLegendPortfolioKey) futuLegendPortfolioKey.textContent = `${modeLabel} NAV`;
+  if (futuLegendPortfolioPnlKey) futuLegendPortfolioPnlKey.textContent = `${modeLabel} PnL`;
+};
+
+const computeFutuStrategyRealtimeMetrics = (futuStatus) => {
+  const strategySnapshot = futuStatus?.latest_strategy_snapshot;
+  const strategyHoldings = Array.isArray(futuStatus?.latest_snapshot?.holdings)
+    ? futuStatus.latest_snapshot.holdings
+    : [];
+
+  let investedValue = strategyHoldings.reduce((sum, holding) => {
+    const symbol = String(holding?.symbol || '').toUpperCase();
+    const symbolNoPrefix = symbol.includes('.') ? symbol.split('.').slice(1).join('.') : symbol;
+    const livePrice = getLatestQuotePrice(symbol) ?? getLatestQuotePrice(symbolNoPrefix);
+    const currentPrice = Number.isFinite(livePrice) ? livePrice : Number(holding?.price);
+    const quantity = Number(holding?.quantity);
+    if (!Number.isFinite(currentPrice) || !Number.isFinite(quantity) || quantity <= 0) return sum;
+    return sum + currentPrice * quantity;
+  }, 0);
+
+  let pnlUsd = strategyHoldings.reduce((sum, holding) => {
+    const symbol = String(holding?.symbol || '').toUpperCase();
+    const symbolNoPrefix = symbol.includes('.') ? symbol.split('.').slice(1).join('.') : symbol;
+    const livePrice = getLatestQuotePrice(symbol) ?? getLatestQuotePrice(symbolNoPrefix);
+    const currentPrice = Number.isFinite(livePrice) ? livePrice : Number(holding?.price);
+    const quantity = Number(holding?.quantity);
+    const avgCost = Number(holding?.avg_cost);
+    if (!Number.isFinite(currentPrice) || !Number.isFinite(quantity) || !Number.isFinite(avgCost) || quantity <= 0) return sum;
+    return sum + (currentPrice - avgCost) * quantity;
+  }, 0);
+
+  const strategyBase = Number(futuStatus?.strategy_start_capital_usd);
+  if (Number.isFinite(strategyBase) && strategyBase > 0 && Number.isFinite(investedValue) && investedValue > strategyBase) {
+    const scale = Math.max(0, Math.min(1, strategyBase / investedValue));
+    investedValue *= scale;
+    pnlUsd *= scale;
+  }
+  const fallbackCash = Number(strategySnapshot?.cash_usd);
+  const totalValue = Number.isFinite(strategyBase) && strategyBase > 0
+    ? strategyBase + pnlUsd
+    : (Number.isFinite(fallbackCash) ? fallbackCash + investedValue : NaN);
+  const cashUsd = Number.isFinite(totalValue) ? (totalValue - investedValue) : NaN;
+  const cashWeightPct = Number.isFinite(totalValue) && totalValue > 0 ? (cashUsd / totalValue) * 100 : NaN;
+  const pnlPct = Number.isFinite(strategyBase) && strategyBase > 0 ? (pnlUsd / strategyBase) * 100 : NaN;
+
+  return {
+    totalValue,
+    cashUsd,
+    investedValue,
+    cashWeightPct,
+    pnlUsd,
+    pnlPct,
+    baseCapital: strategyBase,
+  };
+};
+
+const buildFutuSeriesContext = (futuStatus) => {
+  if (selectedFutuCurveMode === 'strategy') {
+    const strategySnapshots = Array.isArray(futuStatus?.strategy_snapshots) ? futuStatus.strategy_snapshots : [];
+    const strategyLatest = futuStatus?.latest_strategy_snapshot;
+    const ftCtx = (() => {
+      const ctx = buildPaperSeriesContext(strategySnapshots);
+      if (ctx.portfolioSeries.length > 0) return ctx;
+      return buildFallbackPaperContext(strategyLatest);
+    })();
+
+    const rtMetrics = computeFutuStrategyRealtimeMetrics(futuStatus);
+    const rtValue = Number(rtMetrics?.totalValue);
+    const strategyFtSeries = ftCtx.portfolioSeries || [];
+
+    let portfolioSeries = strategyFtSeries;
+    let latest = ftCtx.latest;
+    let metricsByTime = ftCtx.metricsByTime;
+
+    if (Number.isFinite(rtValue) && rtValue > 0 && strategyFtSeries.length > 0) {
+      const lastIdx = strategyFtSeries.length - 1;
+      portfolioSeries = strategyFtSeries.map((p, i) => (i === lastIdx ? { time: p.time, value: rtValue } : p));
+      const latestTime = portfolioSeries[lastIdx].time;
+      const latestMetrics = { ...(ftCtx.latest || {}) };
+      const benchmarkValue = Number(latestMetrics.benchmarkValue);
+      const baseCapital = Number(rtMetrics.baseCapital);
+      const portfolioPnlUsd = Number(rtMetrics.pnlUsd);
+      const portfolioPnlPct = Number(rtMetrics.pnlPct);
+      const spreadUsd = Number.isFinite(benchmarkValue) ? rtValue - benchmarkValue : NaN;
+      const spreadPct = Number.isFinite(benchmarkValue) && benchmarkValue !== 0
+        ? (spreadUsd / benchmarkValue) * 100
+        : NaN;
+
+      latest = {
+        ...latestMetrics,
+        time: latestTime,
+        portfolioValue: rtValue,
+        portfolioPnlUsd: Number.isFinite(portfolioPnlUsd)
+          ? portfolioPnlUsd
+          : (Number.isFinite(baseCapital) ? rtValue - baseCapital : Number(latestMetrics.portfolioPnlUsd)),
+        portfolioPnlPct: Number.isFinite(portfolioPnlPct)
+          ? portfolioPnlPct
+          : (Number.isFinite(baseCapital) && baseCapital > 0
+            ? ((rtValue - baseCapital) / baseCapital) * 100
+            : Number(latestMetrics.portfolioPnlPct)),
+        spreadUsd,
+        spreadPct,
+      };
+
+      metricsByTime = new Map(ftCtx.metricsByTime || []);
+      metricsByTime.set(latestTime, latest);
+    }
+
+    return {
+      portfolioSeries,
+      strategyFtSeries,
+      benchmarkSeries: ftCtx.benchmarkSeries || [],
+      metricsByTime,
+      latest,
+    };
+  }
+  const accountSnapshots = Array.isArray(futuStatus?.snapshots) ? futuStatus.snapshots : [];
+  const ctx = buildPaperSeriesContext(accountSnapshots);
+  if (ctx.portfolioSeries.length > 0) return { ...ctx, strategyFtSeries: [] };
+  return { ...buildFallbackPaperContext(futuStatus?.latest_snapshot), strategyFtSeries: [] };
+};
+
 const filterPaperContextByRangeDays = (ctx, rangeDays) => {
   const days = Number(rangeDays);
   if (!ctx || !Array.isArray(ctx.portfolioSeries) || ctx.portfolioSeries.length === 0) {
     return {
       portfolioSeries: [],
+      strategyFtSeries: [],
       benchmarkSeries: [],
       metricsByTime: new Map(),
       latest: null,
@@ -988,6 +1160,9 @@ const filterPaperContextByRangeDays = (ctx, rangeDays) => {
   const cutoff = latestTime - Math.floor(days * 86400);
 
   const portfolioSeries = ctx.portfolioSeries.filter((p) => p.time >= cutoff);
+  const strategyFtSeries = Array.isArray(ctx.strategyFtSeries)
+    ? ctx.strategyFtSeries.filter((p) => p.time >= cutoff)
+    : [];
   const benchmarkSeries = ctx.benchmarkSeries.filter((p) => p.time >= cutoff);
   const metricsByTime = new Map();
   for (const [time, metrics] of ctx.metricsByTime.entries()) {
@@ -1004,6 +1179,7 @@ const filterPaperContextByRangeDays = (ctx, rangeDays) => {
 
   return {
     portfolioSeries,
+    strategyFtSeries,
     benchmarkSeries,
     metricsByTime,
     latest,
@@ -1080,6 +1256,15 @@ const renderPaperChartFromCurrentContext = () => {
   }
 
   updatePaperRangePadBand();
+};
+
+const buildSnapshotDataSignature = (status) => {
+  const snapshots = Array.isArray(status?.snapshots) ? status.snapshots : [];
+  const latest = status?.latest_snapshot || null;
+  const latestTs = latest?.timestamp || '';
+  const latestNav = Number(latest?.total_value);
+  const latestNavText = Number.isFinite(latestNav) ? latestNav.toFixed(6) : '--';
+  return `${snapshots.length}|${latestTs}|${latestNavText}`;
 };
 
 const ensureVisibleSeries = (series = []) => {
@@ -1607,6 +1792,7 @@ const renderFutuConnectionKpis = (futuStatus, futuContext) => {
   if (!grid) return;
 
   const snapshot = futuStatus?.latest_snapshot;
+  const strategySnapshot = futuStatus?.latest_strategy_snapshot;
   if (!snapshot) {
     grid.innerHTML = `<div class='empty-state'><div class='empty-state-icon'>📉</div>No live FUTU snapshot yet.</div>`;
     if (badge) badge.style.display = 'none';
@@ -1626,6 +1812,12 @@ const renderFutuConnectionKpis = (futuStatus, futuContext) => {
   const maxDrawdownPct = computeMaxDrawdownPct(futuContext?.portfolioSeries || []);
   const winRate = computeFutuSellWinRate(futuStatus);
   const spreadPct = Number(futuContext?.latest?.spreadPct);
+  const strategyNav = Number(strategySnapshot?.total_value);
+  const strategyPnlUsd = Number(strategySnapshot?.pnl_usd);
+  const strategyPnlPct = Number(strategySnapshot?.pnl_pct);
+  const strategyPnlMood = Number.isFinite(strategyPnlUsd)
+    ? (strategyPnlUsd >= 0 ? 'kpi-positive' : 'kpi-negative')
+    : 'kpi-neutral';
 
   const pnlMood = Number.isFinite(pnlUsd) ? (pnlUsd >= 0 ? 'kpi-positive' : 'kpi-negative') : 'kpi-neutral';
   const investedMood = Number.isFinite(investedPct) && investedPct > 90 ? 'kpi-warn' : 'kpi-neutral';
@@ -1644,6 +1836,16 @@ const renderFutuConnectionKpis = (futuStatus, futuContext) => {
     <div class='paper-kpi-card ${pnlMood}'>
       <div class='paper-kpi-label'>Session PnL</div>
       <div class='paper-kpi-value ${Number.isFinite(pnlUsd) && pnlUsd < 0 ? 'down' : 'up'}'>${Number.isFinite(pnlUsd) ? `${formatSignedMoney(pnlUsd)} (${formatPct(pnlPct)})` : '--'}</div>
+      <div class='futu-kpi-sub'>USD</div>
+    </div>
+    <div class='paper-kpi-card kpi-neutral'>
+      <div class='paper-kpi-label'>Strategy NAV</div>
+      <div class='paper-kpi-value'>${Number.isFinite(strategyNav) ? `$${strategyNav.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--'}</div>
+      <div class='futu-kpi-sub'>USD</div>
+    </div>
+    <div class='paper-kpi-card ${strategyPnlMood}'>
+      <div class='paper-kpi-label'>Strategy PnL</div>
+      <div class='paper-kpi-value ${Number.isFinite(strategyPnlUsd) && strategyPnlUsd < 0 ? 'down' : 'up'}'>${Number.isFinite(strategyPnlUsd) ? `${formatSignedMoney(strategyPnlUsd)} (${formatPct(strategyPnlPct)})` : '--'}</div>
       <div class='futu-kpi-sub'>USD</div>
     </div>
     <div class='paper-kpi-card ${investedMood}'>
@@ -1863,6 +2065,7 @@ const setLegendText = (metrics) => {
 
 const setFutuLegendText = (metrics) => {
   if (!futuLegendPortfolio || !futuLegendPortfolioPnl || !futuLegendBenchmark || !futuLegendBenchmarkPnl || !futuLegendSpread || !futuLegendUpdated) return;
+  syncFutuLegendModeLabels();
 
   if (!metrics) {
     futuLegendPortfolio.textContent = '--';
@@ -2447,7 +2650,7 @@ const fillAssetTable = (alloc, paperStatus) => {
     const modelPrice = Number.isFinite(f.expected_return)
       ? f.current_price * Math.exp(f.expected_return * MODEL_PRICE_HORIZON_DAYS)
       : f.current_price;
-    const current = latestQuoteMap.get(f.symbol) ?? paperMap.get(f.symbol);
+    const current = getLatestQuotePrice(f.symbol);
     const dev = current == null ? null : (current - modelPrice);
     const devPct = current == null ? null : (dev / modelPrice * 100);
     const optWeight = weightMap.get(f.symbol);
@@ -2566,7 +2769,7 @@ const fillHoldingsTable = (paperStatus) => {
     const row = snapshotMap.get(sym);
     const holding = holdingsMap.get(sym);
     const targetWeight = targetMap.get(sym);
-    const currentPrice = row?.price ?? latestQuoteMap.get(sym);
+    const currentPrice = getLatestQuotePrice(sym);
     const quantity = holding?.quantity ?? (holdingsSet.has(sym) ? 0 : null);
     const assetValue = holding?.asset_value ?? (quantity != null && currentPrice != null ? quantity * currentPrice : null);
     const snapshotAvgCost = holding?.avg_cost;
@@ -2756,6 +2959,76 @@ const fillFutuCapitalSummaryTable = (futuStatus) => {
   `;
   tb.appendChild(totalTr);
 
+  const strategySnapshot = futuStatus?.latest_strategy_snapshot;
+  const strategyTotal = Number(strategySnapshot?.total_value);
+  const strategyCash = Number(strategySnapshot?.cash_usd);
+  const strategyInvested = Number(strategySnapshot?.invested_value_usd);
+  const strategyCashWeightPct = Number(strategySnapshot?.cash_weight_pct);
+  const strategyPnlUsd = Number(strategySnapshot?.pnl_usd);
+  const strategyPnlPct = Number(strategySnapshot?.pnl_pct);
+  const strategyReturnText = Number.isFinite(strategyPnlPct)
+    ? `${strategyPnlPct >= 0 ? '+' : ''}${strategyPnlPct.toFixed(2)}%`
+    : '--';
+  const strategyPnlText = Number.isFinite(strategyPnlUsd) && Number.isFinite(strategyPnlPct)
+    ? `${formatSignedMoney(strategyPnlUsd)} (${strategyReturnText})`
+    : '--';
+  const strategyPnlClass = Number.isFinite(strategyPnlUsd)
+    ? (strategyPnlUsd >= 0 ? 'up' : 'down')
+    : '';
+  const strategyBgClass = Number.isFinite(strategyPnlUsd)
+    ? (strategyPnlUsd >= 0 ? 'pnl-bg-up' : 'pnl-bg-down')
+    : '';
+
+  const strategyTr = document.createElement('tr');
+  strategyTr.innerHTML = `
+    <td><strong>STRATEGY SUBACCOUNT FT</strong></td>
+    <td>Futu Snapshot</td>
+    <td class='num'>${Number.isFinite(strategyCashWeightPct) ? `${strategyCashWeightPct.toFixed(2)}%` : '--'}</td>
+    <td class='num'>${Number.isFinite(strategyCash) ? '$' + strategyCash.toFixed(2) : '--'}</td>
+    <td class='num'>${Number.isFinite(strategyInvested) && Number.isFinite(strategyTotal) && strategyTotal > 0
+      ? `$${strategyInvested.toFixed(2)} (${((strategyInvested / strategyTotal) * 100).toFixed(2)}%)`
+      : (Number.isFinite(strategyInvested) ? '$' + strategyInvested.toFixed(2) : '--')}</td>
+    <td class='num'>${Number.isFinite(strategyTotal) ? '$' + strategyTotal.toFixed(2) : '--'}</td>
+    <td class='num ${strategyPnlClass} ${strategyBgClass}'>${strategyReturnText}</td>
+    <td class='num ${strategyPnlClass} ${strategyBgClass}'>${strategyPnlText}</td>
+  `;
+  tb.appendChild(strategyTr);
+
+  const rtMetrics = computeFutuStrategyRealtimeMetrics(futuStatus);
+  const rtInvested = Number(rtMetrics.investedValue);
+  const rtPnlUsd = Number(rtMetrics.pnlUsd);
+  const rtTotal = Number(rtMetrics.totalValue);
+  const rtCash = Number(rtMetrics.cashUsd);
+  const rtCashWeightPct = Number(rtMetrics.cashWeightPct);
+  const rtPnlPct = Number(rtMetrics.pnlPct);
+  const rtReturnText = Number.isFinite(rtPnlPct)
+    ? `${rtPnlPct >= 0 ? '+' : ''}${rtPnlPct.toFixed(2)}%`
+    : '--';
+  const rtPnlText = Number.isFinite(rtPnlUsd)
+    ? `${formatSignedMoney(rtPnlUsd)} (${rtReturnText})`
+    : '--';
+  const rtPnlClass = Number.isFinite(rtPnlUsd)
+    ? (rtPnlUsd >= 0 ? 'up' : 'down')
+    : '';
+  const rtBgClass = Number.isFinite(rtPnlUsd)
+    ? (rtPnlUsd >= 0 ? 'pnl-bg-up' : 'pnl-bg-down')
+    : '';
+
+  const strategyRtTr = document.createElement('tr');
+  strategyRtTr.innerHTML = `
+    <td><strong>STRATEGY SUBACCOUNT RT</strong></td>
+    <td>Realtime Calc</td>
+    <td class='num'>${Number.isFinite(rtCashWeightPct) ? `${rtCashWeightPct.toFixed(2)}%` : '--'}</td>
+    <td class='num'>${Number.isFinite(rtCash) ? '$' + rtCash.toFixed(2) : '--'}</td>
+    <td class='num'>${Number.isFinite(rtInvested) && Number.isFinite(rtTotal) && rtTotal > 0
+      ? `$${rtInvested.toFixed(2)} (${((rtInvested / rtTotal) * 100).toFixed(2)}%)`
+      : (Number.isFinite(rtInvested) ? '$' + rtInvested.toFixed(2) : '--')}</td>
+    <td class='num'>${Number.isFinite(rtTotal) ? '$' + rtTotal.toFixed(2) : '--'}</td>
+    <td class='num ${rtPnlClass} ${rtBgClass}'>${rtReturnText}</td>
+    <td class='num ${rtPnlClass} ${rtBgClass}'>${rtPnlText}</td>
+  `;
+  tb.appendChild(strategyRtTr);
+
   const metaEl = document.getElementById('futuRuntimeMeta');
   if (metaEl) {
     const runtimeFile = futuStatus?.runtime_file ? String(futuStatus.runtime_file) : '--';
@@ -2803,16 +3076,13 @@ const renderRealtimeMarketGrid = (gridId, snapshot, fallbackSymbols = []) => {
   }
 
   for (const sym of allInputs) {
-    const row = snapshotMap.get(sym);
-    const quotePx = Number(latestQuoteMap.get(sym));
-    const rowPrice = Number(row?.price);
-    const rtPrice = Number.isFinite(rowPrice) ? rowPrice : (Number.isFinite(quotePx) ? quotePx : null);
-    const source = rtPrice != null ? 'rt' : 'snapshot';
-    const price = rtPrice;
+    const price = getLatestQuotePrice(sym);
+    const source = price != null ? 'rt' : 'none';
     const isHolding = holdings.has(sym);
 
-    const ch = row?.change_1m;
-    const chPct = row?.change_1m_pct;
+    const delta = getLatestQuoteDelta(sym);
+    const ch = Number(delta?.delta);
+    const chPct = Number(delta?.pct);
     const hasCh = Number.isFinite(ch);
     const chSign = hasCh ? (ch >= 0 ? '+' : '') : '';
     const chClass = hasCh ? (ch >= 0 ? 'up' : 'down') : '';
@@ -2820,9 +3090,9 @@ const renderRealtimeMarketGrid = (gridId, snapshot, fallbackSymbols = []) => {
 
     const sourceBadge = source === 'rt'
       ? `<span class='source-badge rt'>RT</span>`
-      : `<span class='source-badge forecast'>SNAP</span>`;
+      : `<span class='source-badge forecast'>--</span>`;
     const updatedText = source === 'rt' ? lastQuotesStampText : '--';
-    const exchangeRawMs = Number(latestQuoteExchangeTsMap.get(sym));
+    const exchangeRawMs = Number(getLatestQuoteExchangeTs(sym));
     const exchangeText = source === 'rt' && Number.isFinite(exchangeRawMs) && exchangeRawMs > 0
       ? (() => {
         const d = new Date(exchangeRawMs);
@@ -2876,10 +3146,11 @@ const renderFutuChartSummaryStrip = () => {
   }
 
   const upDown = (v) => Number.isFinite(v) ? (v >= 0 ? 'up' : 'down') : '';
+  const modeLabel = getFutuModeLabel();
   strip.style.display = '';
   strip.innerHTML = `
     <div class='strip-item'>
-      <span class='strip-label'>NAV</span>
+      <span class='strip-label'>${modeLabel} NAV</span>
       <span class='strip-val'>${Number.isFinite(nav) ? '$' + nav.toFixed(2) : '--'}</span>
     </div>
     <div class='strip-item'>
@@ -2903,6 +3174,11 @@ const renderFutuChartFromCurrentContext = () => {
   futuMetricsByTime = filtered.metricsByTime;
   if (filtered.portfolioSeries?.length > 0) {
     futuPortfolioLine.setData(ensureVisibleSeries(filtered.portfolioSeries));
+    if (selectedFutuCurveMode === 'strategy' && filtered.strategyFtSeries?.length > 0) {
+      futuStrategyFtLine.setData(ensureVisibleSeries(filtered.strategyFtSeries));
+    } else {
+      futuStrategyFtLine.setData([]);
+    }
     futuBenchmarkLine.setData(filtered.benchmarkSeries?.length > 0 ? ensureVisibleSeries(filtered.benchmarkSeries) : []);
 
     const timeScale = futuChart?.chart?.timeScale?.();
@@ -2917,6 +3193,7 @@ const renderFutuChartFromCurrentContext = () => {
     setFutuLegendText(filtered.latest || null);
   } else {
     futuPortfolioLine.setData([]);
+    futuStrategyFtLine.setData([]);
     futuBenchmarkLine.setData([]);
     setFutuLegendText(null);
   }
@@ -2934,7 +3211,6 @@ const fillFutuHoldingsTable = (futuStatus) => {
   tb.innerHTML = '';
 
   const snapshot = futuStatus?.latest_snapshot;
-  const isRealMode = String(futuStatus?.selected_trd_env || '').toUpperCase() === 'REAL';
   const toNum = (value) => {
     const number = Number(value);
     return Number.isFinite(number) ? number : null;
@@ -2942,8 +3218,31 @@ const fillFutuHoldingsTable = (futuStatus) => {
   const holdingsSet = new Set(snapshot?.holdings_symbols || []);
   const snapshotMap = new Map((snapshot?.symbols || []).map(x => [x.symbol, x]));
   const holdingsMap = new Map((snapshot?.holdings || []).map(x => [x.symbol, x]));
+  const targetWeightMap = new Map();
+  for (const t of (latestPaperStatus?.target_weights || [])) {
+    const symbol = String(t?.symbol || '').trim().toUpperCase();
+    const weight = Number(t?.weight);
+    if (!symbol || !Number.isFinite(weight)) continue;
+    targetWeightMap.set(symbol, weight);
+    const parts = symbol.split('.');
+    if (parts.length === 2 && parts[1]) {
+      targetWeightMap.set(parts[1], weight);
+    } else {
+      const marketPrefix = String(futuStatus?.selected_market || 'US').trim().toUpperCase();
+      if (marketPrefix) targetWeightMap.set(`${marketPrefix}.${symbol}`, weight);
+    }
+  }
+  const rawPositionsRows = (() => {
+    const raw = futuStatus?.opend_positions_raw;
+    if (Array.isArray(raw)) return raw;
+    if (!raw || typeof raw !== 'object') return [];
+    if (Array.isArray(raw?.data)) return raw.data;
+    if (Array.isArray(raw?.positions)) return raw.positions;
+    if (Array.isArray(raw?.rows)) return raw.rows;
+    return [];
+  })();
   const rawPositionsMap = new Map(
-    (Array.isArray(futuStatus?.opend_positions_raw) ? futuStatus.opend_positions_raw : [])
+    rawPositionsRows
       .map((row) => [String(row?.code || '').toUpperCase(), row])
       .filter(([code]) => !!code)
   );
@@ -2969,36 +3268,63 @@ const fillFutuHoldingsTable = (futuStatus) => {
     const row = snapshotMap.get(sym);
     const holding = holdingsMap.get(sym);
     const rawRow = rawPositionsMap.get(sym) || rawPositionsMap.get(`US.${sym}`) || null;
-    const currentPrice = row?.price ?? latestQuoteMap.get(sym);
+    const rawNominalPrice = [
+      toNum(rawRow?.nominal_price),
+      toNum(rawRow?.market_price),
+      toNum(rawRow?.price),
+      toNum(rawRow?.last_price),
+    ].find((v) => Number.isFinite(v) && v > 0) ?? null;
+    const livePrice = getLatestQuotePrice(sym);
+    const currentPrice = livePrice ?? rawNominalPrice;
     const quantity = holding?.quantity ?? null;
-    const assetValue = holding?.asset_value ?? (quantity != null && currentPrice != null ? quantity * currentPrice : null);
-    const avgCostFromRaw = isRealMode ? toNum(rawRow?.average_cost) : null;
+    const rawMarketValue = [
+      toNum(rawRow?.market_val),
+      toNum(rawRow?.market_value),
+      toNum(rawRow?.asset_value),
+    ].find((v) => Number.isFinite(v) && v >= 0) ?? null;
+    const assetValue = (quantity != null && currentPrice != null)
+      ? quantity * currentPrice
+      : (rawMarketValue ?? holding?.asset_value ?? null);
+    const avgCostFromRaw = [
+      toNum(rawRow?.average_cost),
+      toNum(rawRow?.avg_cost),
+      toNum(rawRow?.cost_price),
+      toNum(rawRow?.diluted_cost),
+      toNum(rawRow?.cost),
+    ].find((v) => Number.isFinite(v) && v > 0) ?? null;
     const avgCostFromHolding = toNum(holding?.avg_cost);
     const avgCost = (avgCostFromRaw != null && avgCostFromRaw > 0) ? avgCostFromRaw : avgCostFromHolding;
     const validAvgCost = Number.isFinite(avgCost) && avgCost > 0 ? avgCost : null;
+    const symUpper = String(sym || '').toUpperCase();
+    const symStripped = symUpper.includes('.') ? symUpper.split('.').slice(1).join('.') : symUpper;
+    const targetWeight = targetWeightMap.get(symUpper) ?? targetWeightMap.get(symStripped);
 
     let unrealizedText = '--';
     let unrealizedClass = '';
-    if (isRealMode && rawRow) {
+    if (quantity != null && currentPrice != null && validAvgCost != null && quantity > 0) {
+      const unrealizedUsd = (currentPrice - validAvgCost) * quantity;
+      const unrealizedPct = validAvgCost !== 0 ? ((currentPrice - validAvgCost) / validAvgCost) * 100 : 0;
+      unrealizedText = `${formatSignedMoney(unrealizedUsd)} (${unrealizedPct >= 0 ? '+' : ''}${unrealizedPct.toFixed(2)}%)`;
+      unrealizedClass = unrealizedUsd >= 0 ? 'up' : 'down';
+    }
+    if (unrealizedText === '--' && rawRow) {
       const ratioAvgCost = toNum(rawRow?.pl_ratio_avg_cost);
+      const ratioAny = ratioAvgCost ?? toNum(rawRow?.pl_ratio);
       const plValValid = String(rawRow?.pl_val_valid).toLowerCase() !== 'false';
       const plVal = plValValid ? toNum(rawRow?.pl_val) : null;
-      if (ratioAvgCost != null) {
-        const ratioText = `${ratioAvgCost >= 0 ? '+' : ''}${ratioAvgCost.toFixed(2)}%`;
+      if (ratioAny != null) {
+        const ratioText = `${ratioAny >= 0 ? '+' : ''}${ratioAny.toFixed(2)}%`;
         if (plVal != null) {
           unrealizedText = `${formatSignedMoney(plVal)} (${ratioText})`;
           unrealizedClass = plVal >= 0 ? 'up' : 'down';
         } else {
           unrealizedText = `-- (${ratioText})`;
-          unrealizedClass = ratioAvgCost >= 0 ? 'up' : 'down';
+          unrealizedClass = ratioAny >= 0 ? 'up' : 'down';
         }
+      } else if (plVal != null) {
+        unrealizedText = formatSignedMoney(plVal);
+        unrealizedClass = plVal >= 0 ? 'up' : 'down';
       }
-    }
-    if (unrealizedText === '--' && quantity != null && currentPrice != null && validAvgCost != null && quantity > 0) {
-      const unrealizedUsd = (currentPrice - validAvgCost) * quantity;
-      const unrealizedPct = validAvgCost !== 0 ? ((currentPrice - validAvgCost) / validAvgCost) * 100 : 0;
-      unrealizedText = `${formatSignedMoney(unrealizedUsd)} (${unrealizedPct >= 0 ? '+' : ''}${unrealizedPct.toFixed(2)}%)`;
-      unrealizedClass = unrealizedUsd >= 0 ? 'up' : 'down';
     }
 
     const tr = document.createElement('tr');
@@ -3009,7 +3335,7 @@ const fillFutuHoldingsTable = (futuStatus) => {
       <td class='num'>${currentPrice == null ? '--' : '$' + currentPrice.toFixed(2)}</td>
       <td class='num'>${validAvgCost == null ? '--' : '$' + validAvgCost.toFixed(2)}</td>
       <td class='num'>${assetValue == null ? '--' : '$' + assetValue.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</td>
-      <td class='num'>--</td>
+      <td class='num'>${Number.isFinite(targetWeight) ? `${(targetWeight * 100).toFixed(2)}%` : '--'}</td>
       <td class='num ${unrealizedClass}' style='font-weight:600;'>${unrealizedText}</td>
       <td><button class='ghost futu-manual-fill-btn' data-symbol='${sym}' data-price='${currentPrice == null ? '' : currentPrice.toFixed(4)}'>Prefill</button></td>
     `;
@@ -3132,6 +3458,38 @@ const futuReadBool = (row, keys) => {
   return null;
 };
 
+const futuEscapeHtml = (value) => String(value)
+  .replaceAll('&', '&amp;')
+  .replaceAll('<', '&lt;')
+  .replaceAll('>', '&gt;')
+  .replaceAll('"', '&quot;')
+  .replaceAll("'", '&#39;');
+
+const futuParseTimeMs = (raw) => {
+  const text = String(raw || '').trim();
+  if (!text) return NaN;
+
+  let parsed = Date.parse(text);
+  if (Number.isFinite(parsed)) return parsed;
+
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d+)?$/.test(text)) {
+    parsed = Date.parse(text.replace(' ', 'T'));
+  }
+  return parsed;
+};
+
+const futuRenderDualTime = (row, keys) => {
+  const rawTime = futuReadField(row, keys, '--');
+  if (rawTime === '--') return '--';
+
+  const parsedMs = futuParseTimeMs(rawTime);
+  const localTime = Number.isFinite(parsedMs)
+    ? new Date(parsedMs).toLocaleString()
+    : '--';
+
+  return `<span style='white-space:nowrap;'>${futuEscapeHtml(localTime)}</span>`;
+};
+
 const futuOrderLooksOpen = (row) => {
   const canCancel = futuReadBool(row, ['can_cancel', 'is_can_cancel', 'can_cancelled']);
   if (canCancel === true) return true;
@@ -3201,7 +3559,7 @@ const renderFutuOpenOrdersTable = (futuStatus) => {
   }
 
   for (const row of rows) {
-    const created = futuReadField(row, ['create_time', 'created_at', 'time']);
+    const created = futuRenderDualTime(row, ['create_time', 'created_at', 'time']);
     const orderId = futuReadField(row, ['order_id', 'id']);
     const symbol = futuReadField(row, ['code', 'symbol', 'ticker']);
     const side = futuReadField(row, ['trd_side', 'side']);
@@ -3211,6 +3569,10 @@ const renderFutuOpenOrdersTable = (futuStatus) => {
     const dealtAvg = futuReadNumber(row, ['dealt_avg_price', 'filled_avg_price']);
     const orderType = futuReadField(row, ['order_type']);
     const orderStatus = futuReadField(row, ['order_status', 'status']);
+    const orderTypeUpper = String(orderType).toUpperCase();
+    const priceDisplay = (orderTypeUpper.includes('MARKET') && Number.isFinite(price) && price <= 0)
+      ? 'MKT'
+      : (price == null ? '--' : '$' + price.toFixed(4));
 
     const paramsParts = [
       `market=${futuReadField(row, ['order_market'], '--')}`,
@@ -3240,12 +3602,12 @@ const renderFutuOpenOrdersTable = (futuStatus) => {
 
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td style='white-space:nowrap;'>${created}</td>
+      <td>${created}</td>
       <td title='${orderId}'><span style='font-family:var(--mono);font-size:11px;color:var(--muted);'>${orderId}</span></td>
       <td style='font-weight:600;letter-spacing:.2px;'>${symbol}</td>
       <td class='${String(side).toUpperCase().includes('BUY') ? 'up' : (String(side).toUpperCase().includes('SELL') ? 'down' : '')}' style='font-weight:700;letter-spacing:.3px;'>${side}</td>
       <td class='num'>${qty == null ? '--' : qty.toFixed(2)}</td>
-      <td class='num'>${price == null ? '--' : '$' + price.toFixed(4)}</td>
+      <td class='num'>${priceDisplay}</td>
       <td class='num'>${dealtQty == null ? '--' : dealtQty.toFixed(2)}</td>
       <td class='num'>${dealtAvg == null ? '--' : '$' + dealtAvg.toFixed(4)}</td>
       <td><span style='font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.3px;'>${orderType}</span></td>
@@ -3311,7 +3673,7 @@ const renderFutuCancelHistoryTable = (futuStatus) => {
   }
 
   for (const row of rows) {
-    const ts = futuReadField(row, ['timestamp', 'updated_time', 'time']);
+    const ts = futuRenderDualTime(row, ['timestamp', 'updated_time', 'create_time', 'time']);
     const orderId = futuReadField(row, ['order_id', 'id']);
     const symbol = futuReadField(row, ['symbol', 'code']);
     const side = futuReadField(row, ['trd_side', 'side']);
@@ -3327,7 +3689,7 @@ const renderFutuCancelHistoryTable = (futuStatus) => {
 
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td style='white-space:nowrap;'>${ts}</td>
+      <td>${ts}</td>
       <td><span style='font-family:var(--mono);font-size:11px;color:var(--muted);'>${orderId}</span></td>
       <td style='font-weight:600;letter-spacing:.2px;'>${symbol}</td>
       <td class='${String(side).toUpperCase().includes('BUY') ? 'up' : (String(side).toUpperCase().includes('SELL') ? 'down' : '')}' style='font-weight:700;letter-spacing:.3px;'>${side}</td>
@@ -3363,8 +3725,7 @@ const renderFutuTradeHistory = (futuStatus) => {
   }
 
   box.innerHTML = rows.map((tr) => {
-    const tsRaw = futuReadField(tr, ['create_time', 'updated_time', 'time'], '--');
-    const ts = tsRaw !== '--' ? new Date(tsRaw).toLocaleString() : '--';
+    const ts = futuRenderDualTime(tr, ['create_time', 'updated_time', 'time']);
     const side = futuReadField(tr, ['trd_side', 'side'], '--').toUpperCase();
     const sideClass = side.includes('BUY') ? 'buy' : (side.includes('SELL') ? 'sell' : '');
     const symbol = futuReadField(tr, ['code', 'symbol'], '--');
@@ -3396,7 +3757,19 @@ const renderFutuTradeHistory = (futuStatus) => {
 };
 
 const refreshRealtimeQuotes = async () => {
-  const symbols = collectTrackedSymbols();
+  const trackedSymbols = collectTrackedSymbols();
+  if (!trackedSymbols.length) return;
+  const quoteToTrackedMap = new Map();
+  for (const symbol of trackedSymbols) {
+    const tracked = String(symbol || '').trim().toUpperCase();
+    if (!tracked) continue;
+    const requestSymbol = normalizeQuoteRequestSymbol(tracked);
+    if (!requestSymbol) continue;
+    if (!quoteToTrackedMap.has(requestSymbol)) quoteToTrackedMap.set(requestSymbol, new Set());
+    quoteToTrackedMap.get(requestSymbol).add(tracked);
+    quoteToTrackedMap.get(requestSymbol).add(requestSymbol);
+  }
+  const symbols = Array.from(quoteToTrackedMap.keys());
   if (!symbols.length) return;
   const now = Date.now();
   if (now - lastQuotesAt < 25000) return;
@@ -3411,18 +3784,34 @@ const refreshRealtimeQuotes = async () => {
     lastQuoteRequestSymbols = symbols.slice();
     lastQuoteMissingSymbols = symbols.filter((symbol) => !returnedSymbols.has(symbol));
     lastQuoteMissingUpdatedAtMs = Date.now();
+    const previousQuoteMap = new Map(latestQuoteMap);
     let hasNewerQuote = false;
-    for (const [symbol, priceRaw] of incomingPrices) {
+    for (const [symbolRaw, priceRaw] of incomingPrices) {
+      const symbol = String(symbolRaw || '').toUpperCase();
       const price = Number(priceRaw);
       if (!Number.isFinite(price)) continue;
       const newTs = Number((q.exchange_ts_ms || {})[symbol]);
-      const prevTs = Number(latestQuoteExchangeTsMap.get(symbol));
-      if (!Number.isFinite(prevTs) || (Number.isFinite(newTs) && newTs > prevTs)) {
-        hasNewerQuote = true;
-      }
-      latestQuoteMap.set(symbol, price);
-      if (Number.isFinite(newTs) && newTs > 0) {
-        latestQuoteExchangeTsMap.set(symbol, newTs);
+      const targets = quoteToTrackedMap.get(symbol) || new Set([symbol]);
+
+      for (const targetSymbol of targets) {
+        const prevTs = Number(latestQuoteExchangeTsMap.get(targetSymbol));
+        if (!Number.isFinite(prevTs) || (Number.isFinite(newTs) && newTs > prevTs)) {
+          hasNewerQuote = true;
+        }
+        latestQuoteMap.set(targetSymbol, price);
+
+        const prevPrice = Number(previousQuoteMap.get(targetSymbol));
+        if (Number.isFinite(prevPrice) && prevPrice > 0) {
+          const delta = price - prevPrice;
+          latestQuoteDeltaMap.set(targetSymbol, {
+            delta,
+            pct: (delta / prevPrice) * 100,
+          });
+        }
+
+        if (Number.isFinite(newTs) && newTs > 0) {
+          latestQuoteExchangeTsMap.set(targetSymbol, newTs);
+        }
       }
     }
 
@@ -3465,6 +3854,7 @@ attachChartAutoResize(paperChart);
 
 const futuChart = createChartCompat('futuChart');
 const futuPortfolioLine = futuChart.addLineSeries({ color: '#00d4aa', lineWidth: 2 });
+const futuStrategyFtLine = futuChart.addLineSeries({ color: '#5b9cf6', lineWidth: 2, lineStyle: 2 });
 const futuBenchmarkLine = futuChart.addLineSeries({ color: '#f59e0b', lineWidth: 2 });
 attachChartAutoResize(futuChart);
 
@@ -3496,10 +3886,15 @@ if (futuActivityFilterInput) {
 if (futuActivityRangeSelect) {
   futuActivityRangeSelect.addEventListener('change', async () => {
     futuActivityRangeDays = Number(futuActivityRangeSelect.value || 30);
+    const capRaw = Number(futuCapitalCapInput?.value);
+    const cap = Number.isFinite(capRaw) && capRaw > 0 ? capRaw : null;
     try {
       await api('/api/futu/activity-config', {
         method: 'POST',
-        body: JSON.stringify({ history_order_range_days: futuActivityRangeDays }),
+        body: JSON.stringify({
+          history_order_range_days: futuActivityRangeDays,
+          rebalance_capital_limit_usd: cap,
+        }),
       });
     } catch (error) {
       setStatus(`FUTU activity range update failed: ${error.message}`, 'err');
@@ -3507,6 +3902,70 @@ if (futuActivityRangeSelect) {
     renderFutuOpenOrdersTable(latestFutuStatus || {});
     renderFutuCancelHistoryTable(latestFutuStatus || {});
     renderFutuTradeHistory(latestFutuStatus || {});
+  });
+}
+
+if (futuCapitalCapApplyBtn) {
+  futuCapitalCapApplyBtn.addEventListener('click', async () => {
+    const capRaw = Number(futuCapitalCapInput?.value);
+    const cap = Number.isFinite(capRaw) && capRaw > 0 ? capRaw : null;
+    futuCapitalCapApplyBtn.disabled = true;
+    const oldText = futuCapitalCapApplyBtn.textContent;
+    futuCapitalCapApplyBtn.textContent = 'Applying...';
+    try {
+      await api('/api/futu/activity-config', {
+        method: 'POST',
+        body: JSON.stringify({
+          history_order_range_days: futuActivityRangeDays,
+          rebalance_capital_limit_usd: cap,
+        }),
+      });
+      if (futuCapitalCapHint) {
+        futuCapitalCapHint.textContent = cap == null
+          ? 'Current rebalance cap: Unlimited'
+          : `Current rebalance cap: $${cap.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+      }
+      setStatus('FUTU rebalance capital limit updated', 'ok');
+      await refreshFutu();
+    } catch (error) {
+      setStatus(`FUTU rebalance cap update failed: ${error.message}`, 'err');
+      alert(error.message);
+    } finally {
+      futuCapitalCapApplyBtn.disabled = false;
+      futuCapitalCapApplyBtn.textContent = oldText || '💰 Apply Cap';
+    }
+  });
+}
+
+if (futuStrategyCapitalApplyBtn) {
+  futuStrategyCapitalApplyBtn.addEventListener('click', async () => {
+    const capRaw = Number(futuStrategyCapitalInput?.value);
+    if (!Number.isFinite(capRaw) || capRaw <= 0) {
+      setStatus('FUTU strategy startup capital must be > 0', 'err');
+      return;
+    }
+    futuStrategyCapitalApplyBtn.disabled = true;
+    const oldText = futuStrategyCapitalApplyBtn.textContent;
+    futuStrategyCapitalApplyBtn.textContent = 'Applying...';
+    try {
+      await api('/api/futu/strategy-capital', {
+        method: 'POST',
+        body: JSON.stringify({
+          strategy_start_capital_usd: capRaw,
+        }),
+      });
+      if (futuStrategyCapitalHint) {
+        futuStrategyCapitalHint.textContent = `Strategy startup capital: $${capRaw.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+      }
+      setStatus('FUTU strategy startup capital updated', 'ok');
+      await refreshFutu();
+    } catch (error) {
+      setStatus(`FUTU strategy startup capital update failed: ${error.message}`, 'err');
+      alert(error.message);
+    } finally {
+      futuStrategyCapitalApplyBtn.disabled = false;
+      futuStrategyCapitalApplyBtn.textContent = oldText || '🧮 Apply Strategy Capital';
+    }
   });
 }
 
@@ -3658,6 +4117,24 @@ for (const btn of futuRangeButtons) {
     selectedFutuRangeDays = days;
     renderFutuChartFromCurrentContext();
     renderFutuChartSummaryStrip();
+  });
+}
+
+for (const btn of futuCurveModeButtons) {
+  btn.addEventListener('click', () => {
+    const mode = String(btn.dataset.futuCurveMode || '').trim().toLowerCase();
+    if (mode !== 'account' && mode !== 'strategy') return;
+    selectedFutuCurveMode = mode;
+    for (const b of futuCurveModeButtons) {
+      b.classList.toggle('active', String(b.dataset.futuCurveMode || '').trim().toLowerCase() === mode);
+    }
+    syncFutuLegendModeLabels();
+    futuFullContext = buildFutuSeriesContext(latestFutuStatus || {});
+    renderFutuChartFromCurrentContext();
+    renderFutuChartSummaryStrip();
+    if (latestFutuStatus) {
+      renderFutuConnectionKpis(latestFutuStatus, futuFullContext);
+    }
   });
 }
 
@@ -3867,10 +4344,14 @@ const refreshPaper = async () => {
     hydratePaperTargetsFromStatus(st);
     renderStrategyDispatchPreview();
 
-    const ctx = buildPaperSeriesContext(st.snapshots || []);
-    paperFullContext = ctx.portfolioSeries.length > 0 ? ctx : buildFallbackPaperContext(st.latest_snapshot);
-    renderPaperChartFromCurrentContext();
-    renderChartSummaryStrip();
+    const nextPaperSig = buildSnapshotDataSignature(st);
+    if (nextPaperSig !== lastPaperChartDataSignature) {
+      const ctx = buildPaperSeriesContext(st.snapshots || []);
+      paperFullContext = ctx.portfolioSeries.length > 0 ? ctx : buildFallbackPaperContext(st.latest_snapshot);
+      renderPaperChartFromCurrentContext();
+      renderChartSummaryStrip();
+      lastPaperChartDataSignature = nextPaperSig;
+    }
     const fallbackSymbols = [
       ...(lastPortfolio?.asset_forecasts || []).map((x) => x.symbol),
       ...(document.getElementById('pSymbols')?.value || '')
@@ -3918,6 +4399,13 @@ setInterval(refreshPaper, 4000);
 const refreshFutu = async () => {
   try {
     const st = await api('/api/futu/status');
+    if (!latestPaperStatus || !Array.isArray(latestPaperStatus?.target_weights) || latestPaperStatus.target_weights.length === 0) {
+      try {
+        latestPaperStatus = await api('/api/paper/status');
+      } catch {
+        // ignore; FUTU table will fallback to '--' when paper status unavailable
+      }
+    }
     latestFutuStatus = st;
 
     const futuExecDot = document.getElementById('futuExecDot');
@@ -3980,8 +4468,8 @@ const refreshFutu = async () => {
 
     if (futuCtrlStatus) futuCtrlStatus.textContent = st.running ? (st.connected ? 'RUNNING' : 'STARTED') : 'STOPPED';
     if (futuCtrlDot) {
-      futuCtrlDot.classList.toggle('active', !!st.running);
-      futuCtrlDot.classList.toggle('paused', !st.running);
+      futuCtrlDot.classList.toggle('active', !!st.running && !!st.connected);
+      futuCtrlDot.classList.toggle('paused', !!st.running && !st.connected);
     }
     if (futuTabBadge) {
       if (!st.running) {
@@ -3992,6 +4480,27 @@ const refreshFutu = async () => {
       } else {
         futuTabBadge.classList.remove('paused');
         futuTabBadge.classList.add('running');
+      }
+    }
+    if (futuStrategyCapitalInput) {
+      const strategyCap = Number(st?.strategy_start_capital_usd);
+      futuStrategyCapitalInput.value = Number.isFinite(strategyCap) && strategyCap > 0
+        ? String(strategyCap.toFixed(2))
+        : '';
+    }
+    if (futuStrategyCapitalHint) {
+      const strategyCap = Number(st?.strategy_start_capital_usd);
+      futuStrategyCapitalHint.textContent = Number.isFinite(strategyCap) && strategyCap > 0
+        ? `Strategy startup capital: $${strategyCap.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+        : 'Strategy startup capital: --';
+    }
+    if (futuCtrlCapital) {
+      const acctNav = Number(st?.latest_snapshot?.total_value);
+      const stratNav = Number(st?.latest_strategy_snapshot?.total_value);
+      if (Number.isFinite(acctNav) && Number.isFinite(stratNav)) {
+        futuCtrlCapital.textContent = `Acct ${acctNav.toLocaleString(undefined, { maximumFractionDigits: 2 })} · Strat ${stratNav.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+      } else {
+        futuCtrlCapital.textContent = Number.isFinite(acctNav) ? acctNav.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '--';
       }
     }
 
@@ -4047,9 +4556,36 @@ const refreshFutu = async () => {
         futuActivityRangeSelect.value = hasOption ? targetValue : '30';
       }
     }
+    if (futuCapitalCapInput) {
+      const cap = Number(st?.rebalance_capital_limit_usd);
+      futuCapitalCapInput.value = Number.isFinite(cap) && cap > 0 ? String(cap.toFixed(2)) : '';
+    }
+    if (futuCapitalCapHint) {
+      const cap = Number(st?.rebalance_capital_limit_usd);
+      futuCapitalCapHint.textContent = Number.isFinite(cap) && cap > 0
+        ? `Current rebalance cap: $${cap.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+        : 'Current rebalance cap: Unlimited';
+    }
     if (futuCtrlCapital) {
-      const t = Number(st?.latest_snapshot?.total_value);
-      futuCtrlCapital.textContent = Number.isFinite(t) ? t.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '--';
+      const acctNav = Number(st?.latest_snapshot?.total_value);
+      const stratNav = Number(st?.latest_strategy_snapshot?.total_value);
+      if (Number.isFinite(acctNav) && Number.isFinite(stratNav)) {
+        futuCtrlCapital.textContent = `Acct ${acctNav.toLocaleString(undefined, { maximumFractionDigits: 2 })} · Strat ${stratNav.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+      } else {
+        futuCtrlCapital.textContent = Number.isFinite(acctNav) ? acctNav.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '--';
+      }
+    }
+    if (futuStrategyCapitalInput) {
+      const strategyCap = Number(st?.strategy_start_capital_usd);
+      futuStrategyCapitalInput.value = Number.isFinite(strategyCap) && strategyCap > 0
+        ? String(strategyCap.toFixed(2))
+        : '';
+    }
+    if (futuStrategyCapitalHint) {
+      const strategyCap = Number(st?.strategy_start_capital_usd);
+      futuStrategyCapitalHint.textContent = Number.isFinite(strategyCap) && strategyCap > 0
+        ? `Strategy startup capital: $${strategyCap.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+        : 'Strategy startup capital: --';
     }
     if (futuLoadPathInput && st.runtime_file) {
       futuLoadPathInput.value = String(st.runtime_file);
@@ -4066,15 +4602,20 @@ const refreshFutu = async () => {
 
     if (futuExecCapital) {
       const totalVal = Number(st?.latest_snapshot?.total_value);
-      futuExecCapital.textContent = Number.isFinite(totalVal) ? totalVal.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '--';
+      const strategyVal = Number(st?.latest_strategy_snapshot?.total_value);
+      if (Number.isFinite(totalVal) && Number.isFinite(strategyVal)) {
+        futuExecCapital.textContent = `A ${totalVal.toLocaleString(undefined, { maximumFractionDigits: 2 })} | S ${strategyVal.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+      } else {
+        futuExecCapital.textContent = Number.isFinite(totalVal) ? totalVal.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '--';
+      }
     }
     if (futuExecPool) {
       const count = Number(st?.latest_snapshot?.symbols?.length || 0);
       futuExecPool.textContent = `${count} symbols`;
     }
 
-    const ctx = buildPaperSeriesContext(st.snapshots || []);
-    futuFullContext = ctx.portfolioSeries.length > 0 ? ctx : buildFallbackPaperContext(st.latest_snapshot);
+    futuFullContext = buildFutuSeriesContext(st);
+    syncFutuLegendModeLabels();
     renderFutuConnectionKpis(st, futuFullContext);
     renderFutuChartFromCurrentContext();
     renderFutuChartSummaryStrip();

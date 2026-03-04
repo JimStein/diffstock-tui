@@ -181,6 +181,18 @@ struct FutuPositionState {
     updated_at: Option<String>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct FutuStrategySnapshot {
+    timestamp: String,
+    total_value: f64,
+    cash_usd: f64,
+    invested_value_usd: f64,
+    cash_weight_pct: f64,
+    pnl_usd: f64,
+    pnl_pct: f64,
+    benchmark_return_pct: f64,
+}
+
 #[derive(Clone, Debug, Serialize)]
 struct FutuRuntimeState {
     running: bool,
@@ -199,6 +211,8 @@ struct FutuRuntimeState {
     selected_trd_env: Option<String>,
     selected_market: Option<String>,
     selected_account: Option<serde_json::Value>,
+    opend_account_info_raw: Option<serde_json::Value>,
+    opend_positions_raw: Option<serde_json::Value>,
     latest_snapshot: Option<paper_trading::MinutePortfolioSnapshot>,
     snapshots: Vec<paper_trading::MinutePortfolioSnapshot>,
     positions: Vec<FutuPositionState>,
@@ -207,6 +221,10 @@ struct FutuRuntimeState {
     trade_history: Vec<serde_json::Value>,
     history_orders: Vec<serde_json::Value>,
     history_order_range_days: u32,
+    rebalance_capital_limit_usd: Option<f64>,
+    strategy_start_capital_usd: Option<f64>,
+    latest_strategy_snapshot: Option<FutuStrategySnapshot>,
+    strategy_snapshots: Vec<FutuStrategySnapshot>,
     logs: Vec<String>,
     data_live_source: String,
     data_ws_connected: bool,
@@ -256,6 +274,10 @@ struct FutuSimRuntimeLine {
     positions: Vec<FutuPositionState>,
     snapshot: paper_trading::MinutePortfolioSnapshot,
     #[serde(default)]
+    strategy_start_capital_usd: Option<f64>,
+    #[serde(default)]
+    strategy_snapshot: Option<FutuStrategySnapshot>,
+    #[serde(default)]
     opend_account_list: Option<serde_json::Value>,
     #[serde(default)]
     opend_selected_account: Option<serde_json::Value>,
@@ -284,6 +306,8 @@ impl Default for FutuRuntimeState {
             selected_trd_env: None,
             selected_market: None,
             selected_account: None,
+            opend_account_info_raw: None,
+            opend_positions_raw: None,
             latest_snapshot: None,
             snapshots: Vec::new(),
             positions: Vec::new(),
@@ -292,6 +316,10 @@ impl Default for FutuRuntimeState {
             trade_history: Vec::new(),
             history_orders: Vec::new(),
             history_order_range_days: 30,
+            rebalance_capital_limit_usd: None,
+            strategy_start_capital_usd: Some(80_000.0),
+            latest_strategy_snapshot: None,
+            strategy_snapshots: Vec::new(),
             logs: vec![runtime_log_with_ts(
                 "Futu execution initialized (waiting for OpenD / API configuration)",
             )],
@@ -447,6 +475,12 @@ struct FutuLoadRequest {
 #[derive(Debug, Deserialize)]
 struct FutuActivityConfigRequest {
     history_order_range_days: Option<u32>,
+    rebalance_capital_limit_usd: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FutuStrategyCapitalRequest {
+    strategy_start_capital_usd: f64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -533,6 +567,7 @@ pub async fn run_webui_server(port: u16, backend_default: config::ComputeBackend
         .route("/api/paper/stop", post(paper_stop))
         .route("/api/futu/status", get(futu_status))
         .route("/api/futu/activity-config", post(futu_activity_config))
+        .route("/api/futu/strategy-capital", post(futu_strategy_capital))
         .route("/api/futu/manual-order", post(futu_manual_order))
         .route("/api/futu/modify-order", post(futu_modify_order))
         .route("/api/futu/account-list", get(futu_account_list))
@@ -906,12 +941,20 @@ async fn futu_activity_config(
     Json(req): Json<FutuActivityConfigRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ApiError>)> {
     let range_days = req.history_order_range_days.unwrap_or(30).clamp(0, 3650);
+    let cap_limit = req
+        .rebalance_capital_limit_usd
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .map(|v| v.max(1.0));
 
     let mut fs = state.futu.lock().await;
     fs.history_order_range_days = range_days;
+    fs.rebalance_capital_limit_usd = cap_limit;
     fs.logs.push(runtime_log_with_ts(format!(
-        "Futu activity config updated => history_order_range_days={}d",
-        range_days
+        "Futu activity config updated => history_order_range_days={}d, rebalance_capital_limit_usd={}",
+        range_days,
+        cap_limit
+            .map(|v| format!("{:.2}", v))
+            .unwrap_or_else(|| "UNLIMITED".to_string())
     )));
     if fs.logs.len() > 200 {
         let keep_from = fs.logs.len().saturating_sub(200);
@@ -921,6 +964,38 @@ async fn futu_activity_config(
     Ok(Json(serde_json::json!({
         "ok": true,
         "history_order_range_days": range_days,
+        "rebalance_capital_limit_usd": cap_limit,
+    })))
+}
+
+async fn futu_strategy_capital(
+    State(state): State<WebState>,
+    Json(req): Json<FutuStrategyCapitalRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ApiError>)> {
+    let capital = req.strategy_start_capital_usd;
+    if !capital.is_finite() || capital <= 0.0 {
+        return Err(api_err(
+            StatusCode::BAD_REQUEST,
+            "strategy_start_capital_usd must be > 0",
+        ));
+    }
+
+    let mut fs = state.futu.lock().await;
+    fs.strategy_start_capital_usd = Some(capital);
+    fs.latest_strategy_snapshot = None;
+    fs.strategy_snapshots.clear();
+    fs.logs.push(runtime_log_with_ts(format!(
+        "Futu strategy startup capital updated => {:.2}",
+        capital
+    )));
+    if fs.logs.len() > 200 {
+        let keep_from = fs.logs.len().saturating_sub(200);
+        fs.logs = fs.logs.split_off(keep_from);
+    }
+
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "strategy_start_capital_usd": capital,
     })))
 }
 
@@ -1284,6 +1359,8 @@ async fn futu_account_apply(
                 fs.selected_trd_env = payload.selected_trd_env.clone();
                 fs.selected_market = payload.selected_market.clone();
                 fs.selected_account = payload.opend_selected_account.clone();
+                fs.opend_account_info_raw = payload.opend_account_info_raw.clone();
+                fs.opend_positions_raw = payload.opend_positions_raw.clone();
                 fs.positions = payload
                     .positions
                     .iter()
@@ -1445,9 +1522,17 @@ async fn futu_load(
     fs.selected_trd_env = last.selected_trd_env.clone();
     fs.selected_market = last.selected_market.clone();
     fs.selected_account = last.opend_selected_account.clone();
+    fs.opend_account_info_raw = last.opend_account_info_raw.clone();
+    fs.opend_positions_raw = last.opend_positions_raw.clone();
     fs.positions = last.positions.clone();
     fs.latest_snapshot = Some(last.snapshot.clone());
     fs.snapshots = snapshots;
+    fs.strategy_start_capital_usd = last.strategy_start_capital_usd;
+    fs.latest_strategy_snapshot = last.strategy_snapshot.clone();
+    fs.strategy_snapshots = runtime_lines
+        .iter()
+        .filter_map(|line| line.strategy_snapshot.clone())
+        .collect::<Vec<_>>();
     let loaded_snapshot_count = fs.snapshots.len();
     if fs.preferred_acc_id.is_none() {
         fs.preferred_acc_id = Some("9468130".to_string());
@@ -1492,6 +1577,22 @@ fn normalize_futu_symbol_for_market(symbol: &str, market: &str) -> String {
         return trimmed;
     }
     format!("{}.{}", market.trim().to_uppercase(), trimmed)
+}
+
+fn futu_quote_lookup_keys(symbol: &str) -> Vec<String> {
+    let normalized = symbol.trim().to_uppercase();
+    if normalized.is_empty() {
+        return Vec::new();
+    }
+
+    let mut keys = vec![normalized.clone()];
+    if let Some((_, rhs)) = normalized.split_once('.') {
+        let stripped = rhs.trim();
+        if !stripped.is_empty() && stripped != normalized {
+            keys.push(stripped.to_string());
+        }
+    }
+    keys
 }
 
 fn futu_history_date_range(days: u32) -> (Option<String>, Option<String>) {
@@ -1615,7 +1716,16 @@ async fn futu_execution_loop(
     let mut initial_capital: Option<f64> = None;
     let mut last_account_binding: Option<String> = None;
     let mut last_opend_dump: Option<String> = None;
+    let mut last_selected_account_dump: Option<String> = None;
     let mut last_rebalance_signal: Option<String> = None;
+    let mut benchmark_base_price: Option<f64> = None;
+    let mut benchmark_last_price: Option<f64> = None;
+    let mut strategy_start_capital: Option<f64> = None;
+    let mut strategy_cash_usd: f64 = 0.0;
+    let mut strategy_seed_cost_basis_usd: f64 = 0.0;
+    let mut strategy_positions_qty: HashMap<String, f64> = HashMap::new();
+    let mut strategy_configured_capital_last: Option<f64> = None;
+    let mut strategy_needs_seed: bool = true;
 
     loop {
         let is_running = {
@@ -1628,9 +1738,19 @@ async fn futu_execution_loop(
             continue;
         }
 
-        let (preferred_acc_id, history_order_range_days) = {
+        let (
+            preferred_acc_id,
+            history_order_range_days,
+            rebalance_capital_limit_usd,
+            strategy_start_capital_usd,
+        ) = {
             let fs = futu_state.lock().await;
-            (fs.preferred_acc_id.clone(), fs.history_order_range_days)
+            (
+                fs.preferred_acc_id.clone(),
+                fs.history_order_range_days,
+                fs.rebalance_capital_limit_usd,
+                fs.strategy_start_capital_usd,
+            )
         };
 
         let (payload, conn_info, config_err) = match futu::FutuApiClient::from_env() {
@@ -1687,16 +1807,42 @@ async fn futu_execution_loop(
                     }
                 };
 
+                if strategy_configured_capital_last != strategy_start_capital_usd {
+                    strategy_configured_capital_last = strategy_start_capital_usd;
+                    strategy_positions_qty.clear();
+                    if let Some(capital) = strategy_start_capital_usd.filter(|v| v.is_finite() && *v > 0.0)
+                    {
+                        strategy_start_capital = Some(capital);
+                    } else {
+                        strategy_start_capital = None;
+                    }
+                    strategy_cash_usd = 0.0;
+                    strategy_seed_cost_basis_usd = 0.0;
+                    strategy_needs_seed = true;
+                }
+
                 let (rebalance_signal, target_weights) = {
                     let ps = paper_state.lock().await;
                     let signal = ps.last_analysis.as_ref().map(|a| a.timestamp.clone());
                     let targets = ps
                         .target_weights
                         .iter()
-                        .map(|t| (t.symbol.clone(), t.weight))
+                        .filter_map(|t| {
+                            let symbol = t.symbol.trim().to_uppercase();
+                            if symbol.is_empty() || !t.weight.is_finite() || t.weight <= 0.0 {
+                                None
+                            } else {
+                                Some((symbol, t.weight))
+                            }
+                        })
                         .collect::<Vec<_>>();
                     (signal, targets)
                 };
+                let selected_market = payload
+                    .selected_market
+                    .clone()
+                    .unwrap_or_else(|| "US".to_string())
+                    .to_uppercase();
 
                 let mut rebalance_logs: Vec<String> = Vec::new();
                 let mut cancel_events_this_cycle: Vec<serde_json::Value> = Vec::new();
@@ -1806,45 +1952,105 @@ async fn futu_execution_loop(
 
                                 let missing_price_symbols = needed_symbols
                                     .iter()
-                                    .filter(|symbol| !live_price_by_symbol.contains_key(*symbol))
+                                    .filter(|symbol| {
+                                        !futu_quote_lookup_keys(symbol)
+                                            .iter()
+                                            .any(|key| live_price_by_symbol.contains_key(key))
+                                    })
                                     .cloned()
                                     .collect::<Vec<_>>();
 
                                 if !missing_price_symbols.is_empty() {
+                                    let mut fetch_symbols = missing_price_symbols
+                                        .iter()
+                                        .flat_map(|symbol| futu_quote_lookup_keys(symbol))
+                                        .collect::<Vec<_>>();
+                                    fetch_symbols.sort();
+                                    fetch_symbols.dedup();
+
                                     if let Ok(extra_quotes) =
-                                        data::fetch_latest_prices_with_meta_ws_only(&missing_price_symbols).await
+                                        data::fetch_latest_prices_with_meta_prefetch(&fetch_symbols).await
                                     {
                                         for (symbol, quote) in extra_quotes {
                                             if quote.price.is_finite() && quote.price > 0.0 {
-                                                live_price_by_symbol.insert(symbol, quote.price);
+                                                live_price_by_symbol.insert(symbol.clone(), quote.price);
+
+                                                for target_symbol in &missing_price_symbols {
+                                                    if futu_quote_lookup_keys(target_symbol)
+                                                        .iter()
+                                                        .any(|key| key == &symbol)
+                                                    {
+                                                        live_price_by_symbol
+                                                            .insert(target_symbol.clone(), quote.price);
+                                                    }
+                                                }
                                             }
                                         }
                                     }
                                 }
 
-                                let mut total_holdings_value = 0.0;
-                                for symbol in &candidate_symbols {
-                                    let qty = current_qty_by_symbol.get(symbol).copied().unwrap_or(0.0);
+                                let candidate_symbol_set = candidate_symbols
+                                    .iter()
+                                    .cloned()
+                                    .collect::<std::collections::HashSet<_>>();
+
+                                let mut total_holdings_value_all = 0.0;
+                                let mut non_candidate_holdings_value = 0.0;
+                                for (symbol, qty) in &current_qty_by_symbol {
                                     if qty.abs() < 1e-9 {
                                         continue;
                                     }
-                                    if let Some(price) = live_price_by_symbol.get(symbol) {
-                                        total_holdings_value += qty * price;
+
+                                    let Some(price) = futu_quote_lookup_keys(symbol)
+                                        .iter()
+                                        .find_map(|key| live_price_by_symbol.get(key).copied())
+                                    else {
+                                        continue;
+                                    };
+
+                                    let position_value = qty.max(0.0) * price;
+                                    total_holdings_value_all += position_value;
+                                    if !candidate_symbol_set.contains(symbol) {
+                                        non_candidate_holdings_value += position_value;
                                     }
                                 }
-                                let total_portfolio_value = payload.cash_usd + total_holdings_value;
 
-                                if total_portfolio_value <= 0.0 {
+                                let account_total_assets = payload.cash_usd.max(0.0) + total_holdings_value_all;
+
+                                let base_rebalance_assets =
+                                    (account_total_assets - non_candidate_holdings_value).max(0.0);
+                                let capped_rebalance_assets = rebalance_capital_limit_usd
+                                    .map(|limit| base_rebalance_assets.min(limit.max(1.0)))
+                                    .unwrap_or(base_rebalance_assets);
+                                let executable_rebalance_assets = capped_rebalance_assets * 0.95;
+
+                                rebalance_logs.push(runtime_log_with_ts(format!(
+                                    "Futu SIM rebalance budget => total_assets={:.2}, non_candidate_assets={:.2}, base={:.2}, cap={}, executable(95%)={:.2}",
+                                    account_total_assets,
+                                    non_candidate_holdings_value,
+                                    base_rebalance_assets,
+                                    rebalance_capital_limit_usd
+                                        .map(|v| format!("{:.2}", v))
+                                        .unwrap_or_else(|| "UNLIMITED".to_string()),
+                                    executable_rebalance_assets,
+                                )));
+
+                                if executable_rebalance_assets <= 0.0 {
                                     rebalance_logs.push(runtime_log_with_ts(format!(
-                                        "Futu SIM rebalance signal {} ignored: non-positive portfolio value",
+                                        "Futu SIM rebalance signal {} ignored: non-positive executable rebalance assets",
                                         signal_id
                                     )));
                                 } else {
                                     let mut sell_orders: Vec<(String, f64, f64)> = Vec::new();
                                     let mut buy_orders: Vec<(String, f64, f64)> = Vec::new();
+                                    let mut skipped_missing_price_symbols: Vec<String> = Vec::new();
 
                                     for symbol in &candidate_symbols {
-                                        let Some(price) = live_price_by_symbol.get(symbol).copied() else {
+                                        let Some(price) = futu_quote_lookup_keys(symbol)
+                                            .iter()
+                                            .find_map(|key| live_price_by_symbol.get(key).copied())
+                                        else {
+                                            skipped_missing_price_symbols.push(symbol.clone());
                                             rebalance_logs.push(runtime_log_with_ts(format!(
                                                 "WARNING: Futu SIM rebalance skipped {} due to missing live price",
                                                 symbol
@@ -1854,7 +2060,7 @@ async fn futu_execution_loop(
 
                                         let current_qty = current_qty_by_symbol.get(symbol).copied().unwrap_or(0.0);
                                         let target_weight = normalized_targets.get(symbol).copied().unwrap_or(0.0);
-                                        let target_value = total_portfolio_value * target_weight;
+                                        let target_value = executable_rebalance_assets * target_weight;
                                         let target_qty = (target_value / price).floor().max(0.0);
                                         let delta_qty = target_qty - current_qty;
 
@@ -1870,11 +2076,67 @@ async fn futu_execution_loop(
                                     }
 
                                     if sell_orders.is_empty() && buy_orders.is_empty() {
-                                        rebalance_logs.push(runtime_log_with_ts(format!(
-                                            "Futu SIM rebalance signal {} -> no executable deltas",
-                                            signal_id
-                                        )));
+                                        if !skipped_missing_price_symbols.is_empty() {
+                                            skipped_missing_price_symbols.sort();
+                                            skipped_missing_price_symbols.dedup();
+                                            consume_rebalance_signal = false;
+                                            rebalance_logs.push(runtime_log_with_ts(format!(
+                                                "WARNING: Futu SIM rebalance signal {} deferred: missing prices for {}",
+                                                signal_id,
+                                                skipped_missing_price_symbols.join(",")
+                                            )));
+                                        } else {
+                                            rebalance_logs.push(runtime_log_with_ts(format!(
+                                                "Futu SIM rebalance signal {} -> no executable deltas",
+                                                signal_id
+                                            )));
+                                        }
                                     } else {
+                                        let planned_sell_cash = sell_orders
+                                            .iter()
+                                            .map(|(_, qty, price)| qty * price)
+                                            .sum::<f64>();
+                                        let planned_buy_cash = buy_orders
+                                            .iter()
+                                            .map(|(_, qty, price)| qty * price)
+                                            .sum::<f64>();
+                                        let available_after_sells = payload.cash_usd.max(0.0) + planned_sell_cash;
+
+                                        let mut invalid_buy_symbols = buy_orders
+                                            .iter()
+                                            .filter_map(|(symbol, qty, price)| {
+                                                if !qty.is_finite() || *qty < 1.0 || !price.is_finite() || *price <= 0.0 {
+                                                    Some(symbol.clone())
+                                                } else {
+                                                    None
+                                                }
+                                            })
+                                            .collect::<Vec<_>>();
+                                        invalid_buy_symbols.sort();
+                                        invalid_buy_symbols.dedup();
+
+                                        if !invalid_buy_symbols.is_empty() {
+                                            consume_rebalance_signal = false;
+                                            rebalance_logs.push(runtime_log_with_ts(format!(
+                                                "WARNING: Futu SIM rebalance deferred: invalid buy plan for {}",
+                                                invalid_buy_symbols.join(",")
+                                            )));
+                                        }
+
+                                        if consume_rebalance_signal && planned_buy_cash > available_after_sells + 1e-6 {
+                                            consume_rebalance_signal = false;
+                                            rebalance_logs.push(runtime_log_with_ts(format!(
+                                                "WARNING: Futu SIM rebalance deferred: planned buys not fully affordable (need {:.2}, available {:.2} after planned sells)",
+                                                planned_buy_cash,
+                                                available_after_sells,
+                                            )));
+                                        }
+
+                                        if !consume_rebalance_signal {
+                                            rebalance_logs.push(runtime_log_with_ts(
+                                                "Futu SIM rebalance kept pending for next cycle after buy feasibility check",
+                                            ));
+                                        } else {
                                         match futu::FutuApiClient::from_env() {
                                             Ok(mut trade_client) => {
                                                 trade_client.set_account_id_override(payload.selected_acc_id.clone());
@@ -1885,8 +2147,10 @@ async fn futu_execution_loop(
                                                 let market_value = payload.selected_market.clone();
 
                                                 let mut cancel_stage_ok = true;
+                                                let mut defer_new_orders_until_next_cycle = false;
                                                 match trade_client.get_order_list().await {
                                                     Ok(order_list_raw) => {
+                                                        let rebalance_remark_prefix = "AUTO_REBALANCE:";
                                                         let mut pending_open_orders = Vec::<serde_json::Value>::new();
                                                         let rows = futu_extract_order_rows(&order_list_raw);
                                                         for row in rows {
@@ -1933,6 +2197,7 @@ async fn futu_execution_loop(
                                                                     "price": row.get("price").cloned(),
                                                                     "order_status": futu_json_get_string(&row, &["order_status", "status"]),
                                                                     "order_type": futu_json_get_string(&row, &["order_type"]),
+                                                                    "remark": futu_json_get_string(&row, &["remark"]),
                                                                 }));
                                                             }
                                                         }
@@ -1947,22 +2212,55 @@ async fn futu_execution_loop(
                                                                 == futu_json_get_string(b, &["order_id"]).unwrap_or_default()
                                                         });
 
-                                                        if pending_open_orders.len() > 20 {
-                                                            consume_rebalance_signal = false;
-                                                            rebalance_logs.push(runtime_log_with_ts(format!(
-                                                                "WARNING: Futu SIM found {} open orders; canceling first 20 due to API limit, then will retry remaining orders",
-                                                                pending_open_orders.len()
-                                                            )));
-                                                        }
-
-                                                        let cancel_targets = pending_open_orders
+                                                        let mut cancel_targets = pending_open_orders
                                                             .into_iter()
-                                                            .take(20)
+                                                            .filter(|row| {
+                                                                let remark = futu_json_get_string(row, &["remark"])
+                                                                    .unwrap_or_default();
+                                                                let is_auto_rebalance = remark
+                                                                    .trim()
+                                                                    .to_uppercase()
+                                                                    .starts_with(&rebalance_remark_prefix.to_uppercase());
+                                                                if is_auto_rebalance {
+                                                                    return true;
+                                                                }
+
+                                                                let row_symbol_raw = futu_json_get_string(
+                                                                    row,
+                                                                    &["symbol", "code", "ticker"],
+                                                                )
+                                                                .unwrap_or_default();
+                                                                let row_symbol = normalize_futu_symbol_for_market(
+                                                                    &row_symbol_raw,
+                                                                    &selected_market,
+                                                                );
+                                                                !row_symbol.is_empty()
+                                                                    && candidate_symbol_set.contains(&row_symbol)
+                                                            })
                                                             .collect::<Vec<_>>();
 
                                                         if !cancel_targets.is_empty() {
                                                             rebalance_logs.push(runtime_log_with_ts(format!(
-                                                                "Futu SIM rebalance found {} open orders; canceling before new orders",
+                                                                "Futu SIM rebalance found {} auto-rebalance open orders to cancel first",
+                                                                cancel_targets.len()
+                                                            )));
+                                                        }
+
+                                                        if cancel_targets.len() > 20 {
+                                                            consume_rebalance_signal = false;
+                                                            defer_new_orders_until_next_cycle = true;
+                                                            rebalance_logs.push(runtime_log_with_ts(format!(
+                                                                "WARNING: Futu SIM found {} auto-rebalance open orders; canceling first 20 due to API limit, then will retry remaining orders",
+                                                                cancel_targets.len()
+                                                            )));
+                                                        }
+                                                        cancel_targets.truncate(20);
+
+                                                        if !cancel_targets.is_empty() {
+                                                            defer_new_orders_until_next_cycle = true;
+                                                            consume_rebalance_signal = false;
+                                                            rebalance_logs.push(runtime_log_with_ts(format!(
+                                                                "Futu SIM rebalance found {} auto-rebalance open orders; canceling before new orders",
                                                                 cancel_targets.len()
                                                             )));
 
@@ -2037,6 +2335,10 @@ async fn futu_execution_loop(
                                                         "Futu SIM rebalance aborted before new orders because cancel stage failed",
                                                     ));
                                                     consume_rebalance_signal = false;
+                                                } else if defer_new_orders_until_next_cycle {
+                                                    rebalance_logs.push(runtime_log_with_ts(
+                                                        "Futu SIM rebalance deferred: pending orders were canceled first; will place new orders in next cycle",
+                                                    ));
                                                 } else {
 
                                                 for (symbol, qty, price) in sell_orders {
@@ -2053,7 +2355,7 @@ async fn futu_execution_loop(
                                                         trd_env: env_value.clone(),
                                                         acc_id: acc_value.clone(),
                                                         adjust_limit: None,
-                                                        remark: None,
+                                                        remark: Some(format!("AUTO_REBALANCE:{}", signal_id)),
                                                         time_in_force: None,
                                                         fill_outside_rth: None,
                                                         session: None,
@@ -2109,7 +2411,7 @@ async fn futu_execution_loop(
                                                         trd_env: env_value.clone(),
                                                         acc_id: acc_value.clone(),
                                                         adjust_limit: None,
-                                                        remark: None,
+                                                        remark: Some(format!("AUTO_REBALANCE:{}", signal_id)),
                                                         time_in_force: None,
                                                         fill_outside_rth: None,
                                                         session: None,
@@ -2148,6 +2450,7 @@ async fn futu_execution_loop(
                                                 )));
                                             }
                                         }
+                                        }
                                     }
                                 }
                             }
@@ -2169,6 +2472,7 @@ async fn futu_execution_loop(
                 let mut minute_holdings = Vec::new();
                 let mut holdings_symbols = Vec::new();
                 let mut total_holdings_value = 0.0;
+                let mut live_price_by_symbol_cycle: HashMap<String, f64> = HashMap::new();
 
                 for position in &payload.positions {
                     let fallback_prev_price = prev_prices
@@ -2204,6 +2508,7 @@ async fn futu_execution_loop(
                         change_1m,
                         change_1m_pct,
                     });
+                    live_price_by_symbol_cycle.insert(position.symbol.clone(), live_price);
 
                     if position.quantity.abs() > 1e-9 {
                         let asset_value = live_price * position.quantity;
@@ -2233,13 +2538,279 @@ async fn futu_execution_loop(
                 let pnl_usd = total_value - base;
                 let pnl_pct = if base > 0.0 { (pnl_usd / base) * 100.0 } else { 0.0 };
 
+                let benchmark_live_price = match data::fetch_latest_price_with_meta(
+                    paper_trading::BENCHMARK_SYMBOL,
+                )
+                .await
+                {
+                    Ok(quote) if quote.price.is_finite() && quote.price > 0.0 => Some(quote.price),
+                    _ => benchmark_last_price,
+                };
+
+                if let Some(px) = benchmark_live_price {
+                    if benchmark_base_price.is_none() {
+                        benchmark_base_price = Some(px);
+                    }
+                    benchmark_last_price = Some(px);
+                }
+
+                let benchmark_return_pct = match (benchmark_base_price, benchmark_live_price) {
+                    (Some(base_px), Some(curr_px)) if base_px > 0.0 => {
+                        ((curr_px / base_px) - 1.0) * 100.0
+                    }
+                    _ => 0.0,
+                };
+
+                let mut strategy_symbols = strategy_positions_qty
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>();
+                for (symbol, weight) in &target_weights {
+                    if !weight.is_finite() || *weight <= 0.0 {
+                        continue;
+                    }
+                    let normalized = normalize_futu_symbol_for_market(symbol, &selected_market);
+                    if !normalized.is_empty() {
+                        strategy_symbols.push(normalized);
+                    }
+                }
+                strategy_symbols.sort();
+                strategy_symbols.dedup();
+
+                let missing_strategy_symbols = strategy_symbols
+                    .iter()
+                    .filter(|symbol| {
+                        !futu_quote_lookup_keys(symbol)
+                            .iter()
+                            .any(|k| live_price_by_symbol_cycle.contains_key(k))
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+
+                if !missing_strategy_symbols.is_empty() {
+                    let mut fetch_symbols = missing_strategy_symbols
+                        .iter()
+                        .flat_map(|symbol| futu_quote_lookup_keys(symbol))
+                        .collect::<Vec<_>>();
+                    fetch_symbols.sort();
+                    fetch_symbols.dedup();
+
+                    if let Ok(extra_quotes) =
+                        data::fetch_latest_prices_with_meta_prefetch(&fetch_symbols).await
+                    {
+                        for (symbol, quote) in extra_quotes {
+                            if quote.price.is_finite() && quote.price > 0.0 {
+                                live_price_by_symbol_cycle.insert(symbol.clone(), quote.price);
+                                for target_symbol in &missing_strategy_symbols {
+                                    if futu_quote_lookup_keys(target_symbol)
+                                        .iter()
+                                        .any(|key| key == &symbol)
+                                    {
+                                        live_price_by_symbol_cycle
+                                            .insert(target_symbol.clone(), quote.price);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let candidate_symbol_set = target_weights
+                    .iter()
+                    .filter_map(|(symbol, weight)| {
+                        if !weight.is_finite() || *weight <= 0.0 {
+                            return None;
+                        }
+                        let normalized = normalize_futu_symbol_for_market(symbol, &selected_market);
+                        if normalized.is_empty() {
+                            None
+                        } else {
+                            Some(normalized)
+                        }
+                    })
+                    .collect::<std::collections::HashSet<_>>();
+
+                if strategy_needs_seed {
+                    strategy_positions_qty.clear();
+                    let mut seeded_invested = 0.0;
+
+                    if !candidate_symbol_set.is_empty() {
+                        for position in &payload.positions {
+                            if position.quantity <= 1e-9 {
+                                continue;
+                            }
+                            let normalized_symbol =
+                                normalize_futu_symbol_for_market(&position.symbol, &selected_market);
+                            if normalized_symbol.is_empty()
+                                || !candidate_symbol_set.contains(&normalized_symbol)
+                            {
+                                continue;
+                            }
+
+                            let price = if position.avg_cost.is_finite() && position.avg_cost > 0.0 {
+                                position.avg_cost
+                            } else {
+                                futu_quote_lookup_keys(&normalized_symbol)
+                                    .iter()
+                                    .find_map(|key| live_price_by_symbol_cycle.get(key).copied())
+                                    .or_else(|| {
+                                        if position.market_price.is_finite() && position.market_price > 0.0 {
+                                            Some(position.market_price)
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .unwrap_or(0.0)
+                            };
+
+                            if !price.is_finite() || price <= 0.0 {
+                                continue;
+                            }
+
+                            strategy_positions_qty.insert(normalized_symbol, position.quantity);
+                            seeded_invested += position.quantity * price;
+                        }
+                    }
+
+                    let configured_start = strategy_start_capital_usd
+                        .filter(|v| v.is_finite() && *v > 0.0)
+                        .unwrap_or(total_value.max(1.0));
+                    let effective_start = configured_start.max(seeded_invested);
+                    strategy_start_capital = Some(effective_start);
+                    strategy_seed_cost_basis_usd = seeded_invested;
+                    strategy_cash_usd = (effective_start - seeded_invested).max(0.0);
+                    strategy_needs_seed = false;
+
+                    rebalance_logs.push(runtime_log_with_ts(format!(
+                        "Futu strategy sleeve initialized (cost-basis seed) => configured_start={:.2}, existing_candidate_holdings={:.2}, effective_start={:.2}, cash={:.2}, seeded_symbols={}",
+                        configured_start,
+                        seeded_invested,
+                        effective_start,
+                        strategy_cash_usd,
+                        strategy_positions_qty.len(),
+                    )));
+                }
+
+                if strategy_start_capital.is_none() {
+                    let inferred_start = strategy_start_capital_usd
+                        .filter(|v| v.is_finite() && *v > 0.0)
+                        .unwrap_or(total_value.max(1.0));
+                    strategy_start_capital = Some(inferred_start);
+                    strategy_cash_usd = inferred_start;
+                }
+
+                let actual_candidate_qty = payload
+                    .positions
+                    .iter()
+                    .filter_map(|position| {
+                        if position.quantity <= 1e-9 {
+                            return None;
+                        }
+                        let normalized =
+                            normalize_futu_symbol_for_market(&position.symbol, &selected_market);
+                        if normalized.is_empty()
+                            || candidate_symbol_set.is_empty()
+                            || !candidate_symbol_set.contains(&normalized)
+                        {
+                            return None;
+                        }
+                        Some((normalized, position.quantity))
+                    })
+                    .collect::<HashMap<_, _>>();
+
+                strategy_positions_qty = actual_candidate_qty;
+                if let Some(base) = strategy_start_capital {
+                    strategy_cash_usd = (base - strategy_seed_cost_basis_usd).max(0.0);
+                }
+
+                let raw_strategy_holdings_value = minute_holdings
+                    .iter()
+                    .filter_map(|holding| {
+                        if holding.quantity <= 1e-9 {
+                            return None;
+                        }
+                        let normalized =
+                            normalize_futu_symbol_for_market(&holding.symbol, &selected_market);
+                        if normalized.is_empty()
+                            || candidate_symbol_set.is_empty()
+                            || !candidate_symbol_set.contains(&normalized)
+                        {
+                            return None;
+                        }
+
+                        if holding.asset_value.is_finite() {
+                            Some(holding.asset_value)
+                        } else if holding.price.is_finite() {
+                            Some(holding.price * holding.quantity)
+                        } else {
+                            None
+                        }
+                    })
+                    .sum::<f64>();
+
+                let raw_strategy_unrealized_pnl = minute_holdings
+                    .iter()
+                    .filter_map(|holding| {
+                        if holding.quantity <= 1e-9 {
+                            return None;
+                        }
+                        let normalized =
+                            normalize_futu_symbol_for_market(&holding.symbol, &selected_market);
+                        if normalized.is_empty()
+                            || candidate_symbol_set.is_empty()
+                            || !candidate_symbol_set.contains(&normalized)
+                        {
+                            return None;
+                        }
+
+                        if !holding.price.is_finite() || !holding.avg_cost.is_finite() || holding.avg_cost <= 0.0 {
+                            return None;
+                        }
+
+                        Some((holding.price - holding.avg_cost) * holding.quantity)
+                    })
+                    .sum::<f64>();
+
+                let strategy_base = strategy_start_capital.unwrap_or(total_value.max(1.0));
+                let strategy_exposure_scale = if strategy_base > 0.0
+                    && raw_strategy_holdings_value.is_finite()
+                    && raw_strategy_holdings_value > strategy_base
+                {
+                    (strategy_base / raw_strategy_holdings_value).clamp(0.0, 1.0)
+                } else {
+                    1.0
+                };
+                let strategy_holdings_value = raw_strategy_holdings_value * strategy_exposure_scale;
+                let strategy_pnl_usd = raw_strategy_unrealized_pnl * strategy_exposure_scale;
+                let strategy_total_value = (strategy_base + strategy_pnl_usd).max(0.0);
+                strategy_cash_usd = strategy_total_value - strategy_holdings_value;
+                let strategy_pnl_pct = if strategy_base > 0.0 {
+                    (strategy_pnl_usd / strategy_base) * 100.0
+                } else {
+                    0.0
+                };
+                let strategy_snapshot = FutuStrategySnapshot {
+                    timestamp: timestamp.clone(),
+                    total_value: strategy_total_value,
+                    cash_usd: strategy_cash_usd,
+                    invested_value_usd: strategy_holdings_value,
+                    cash_weight_pct: if strategy_total_value > 0.0 {
+                        (strategy_cash_usd / strategy_total_value) * 100.0
+                    } else {
+                        0.0
+                    },
+                    pnl_usd: strategy_pnl_usd,
+                    pnl_pct: strategy_pnl_pct,
+                    benchmark_return_pct,
+                };
+
                 let snapshot = paper_trading::MinutePortfolioSnapshot {
                     timestamp: timestamp.clone(),
                     total_value,
                     cash_usd: payload.cash_usd,
                     pnl_usd,
                     pnl_pct,
-                    benchmark_return_pct: 0.0,
+                    benchmark_return_pct,
                     symbols: minute_symbols,
                     holdings: minute_holdings,
                     holdings_symbols,
@@ -2268,7 +2839,10 @@ async fn futu_execution_loop(
                 if let Ok(mut query_client) = futu::FutuApiClient::from_env() {
                     query_client.set_account_id_override(payload.selected_acc_id.clone());
                     if let Ok(order_list_raw) = query_client.get_order_list().await {
-                        open_orders_snapshot = futu_extract_order_rows(&order_list_raw);
+                        open_orders_snapshot = futu_extract_order_rows(&order_list_raw)
+                            .into_iter()
+                            .filter(futu_order_is_open)
+                            .collect();
                     }
                     if let Ok(trade_list_raw) = query_client.get_today_executed_trades().await {
                         trade_history_snapshot = futu_extract_order_rows(&trade_list_raw);
@@ -2294,6 +2868,8 @@ async fn futu_execution_loop(
                 fs.selected_trd_env = payload.selected_trd_env.clone();
                 fs.selected_market = payload.selected_market.clone();
                 fs.selected_account = payload.opend_selected_account.clone();
+                fs.opend_account_info_raw = payload.opend_account_info_raw.clone();
+                fs.opend_positions_raw = payload.opend_positions_raw.clone();
                 fs.positions = payload
                     .positions
                     .iter()
@@ -2320,6 +2896,12 @@ async fn futu_execution_loop(
                 if fs.snapshots.len() > 6000 {
                     let keep_from = fs.snapshots.len().saturating_sub(6000);
                     fs.snapshots = fs.snapshots.split_off(keep_from);
+                }
+                fs.latest_strategy_snapshot = Some(strategy_snapshot.clone());
+                fs.strategy_snapshots.push(strategy_snapshot);
+                if fs.strategy_snapshots.len() > 6000 {
+                    let keep_from = fs.strategy_snapshots.len().saturating_sub(6000);
+                    fs.strategy_snapshots = fs.strategy_snapshots.split_off(keep_from);
                 }
 
                 if fs.runtime_file.is_none() {
@@ -2366,10 +2948,14 @@ async fn futu_execution_loop(
                 }
 
                 if let Some(selected_account) = payload.opend_selected_account.as_ref() {
-                    fs.logs.push(runtime_log_with_ts(format!(
-                        "Futu OpenD selected account row => {}",
-                        selected_account
-                    )));
+                    let selected_account_dump = selected_account.to_string();
+                    if last_selected_account_dump.as_deref() != Some(selected_account_dump.as_str()) {
+                        fs.logs.push(runtime_log_with_ts(format!(
+                            "Futu OpenD selected account row => {}",
+                            selected_account_dump
+                        )));
+                        last_selected_account_dump = Some(selected_account_dump);
+                    }
                 }
 
                 let opend_dump = serde_json::json!({
@@ -2440,6 +3026,8 @@ async fn futu_execution_loop(
                         holdings: Vec::new(),
                         holdings_symbols: Vec::new(),
                     }),
+                    strategy_start_capital_usd: fs.strategy_start_capital_usd,
+                    strategy_snapshot: fs.latest_strategy_snapshot.clone(),
                     opend_account_list: payload.opend_account_list.clone(),
                     opend_selected_account: payload.opend_selected_account.clone(),
                     opend_account_info_raw: payload.opend_account_info_raw.clone(),
@@ -2499,7 +3087,7 @@ async fn futu_execution_loop(
             }
         }
 
-        tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
     }
 }
 
@@ -3336,6 +3924,8 @@ fn load_futu_runtime_lines(path: &Path) -> Result<Vec<FutuSimRuntimeLine>> {
                 pnl_pct: snapshot.pnl_pct,
                 positions: Vec::new(),
                 snapshot,
+                strategy_start_capital_usd: None,
+                strategy_snapshot: None,
                 opend_account_list: None,
                 opend_selected_account: None,
                 opend_account_info_raw: None,

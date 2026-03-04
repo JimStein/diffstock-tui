@@ -2005,6 +2005,18 @@
     }
 
     /* ─── Futu Open Orders table polish ─── */
+    #tab-futu .futu-table-scroll {
+      height: 320px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,.10) transparent;
+      border: 1px solid rgba(255,255,255,.05);
+      border-radius: 8px;
+    }
+    #tab-futu .futu-table-scroll::-webkit-scrollbar { width: 5px; }
+    #tab-futu .futu-table-scroll::-webkit-scrollbar-track { background: transparent; }
+    #tab-futu .futu-table-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 6px; }
+    #tab-futu .futu-table-scroll table { margin: 0; }
     #futuOpenOrdersTable { table-layout: auto; }
     #futuOpenOrdersTable td:nth-child(4),
     #futuCancelHistoryTable td:nth-child(4) {
@@ -2051,7 +2063,7 @@
 
     /* ─── Futu Trade History card polish ─── */
     #tab-futu .trade-history {
-      max-height: 340px;
+      height: 320px;
       scrollbar-width: thin;
       scrollbar-color: rgba(255,255,255,.08) transparent;
     }
@@ -2697,6 +2709,28 @@
                 </div>
               </div>
               <div id="futuAccountApplyHint" class="futu-account-apply-hint">Default account: #9468130</div>
+              <div class="futu-account-apply-row" style="margin-top:8px;">
+                <div class="field" style="min-width:220px; flex:1;">
+                  <label class="field-label">FUTU Rebalance Capital Limit ($)</label>
+                  <input id="futuCapitalCapInput" type="number" min="0" step="100" placeholder="0 = Unlimited" style="width:100%;" />
+                </div>
+                <div class="field">
+                  <label class="field-label">&nbsp;</label>
+                  <button id="futuCapitalCapApply" class="primary">💰 Apply Cap</button>
+                </div>
+              </div>
+              <div id="futuCapitalCapHint" class="futu-account-apply-hint">Current rebalance cap: Unlimited</div>
+              <div class="futu-account-apply-row" style="margin-top:8px;">
+                <div class="field" style="min-width:220px; flex:1;">
+                  <label class="field-label">FUTU Strategy Startup Capital ($)</label>
+                  <input id="futuStrategyCapitalInput" type="number" min="1000" step="100" placeholder="e.g. 80000" style="width:100%;" />
+                </div>
+                <div class="field">
+                  <label class="field-label">&nbsp;</label>
+                  <button id="futuStrategyCapitalApply" class="primary">🧮 Apply Strategy Capital</button>
+                </div>
+              </div>
+              <div id="futuStrategyCapitalHint" class="futu-account-apply-hint">Strategy startup capital: --</div>
               <div class="row" style="align-items:flex-start;">
                 <div class="field" style="flex:1; min-width:220px;">
                   <label class="field-label">FUTU Runtime JSONL Path</label>
@@ -2967,6 +3001,10 @@
 
         <div class="panel" style="padding:12px;">
           <div class="chart-summary-strip" id="futuChartSummaryStrip" style="display:none;"></div>
+          <div class="range-group" id="futuCurveModeGroup" style="margin-bottom:8px;">
+            <button class="range-btn active" data-futu-curve-mode="account">Account Curve</button>
+            <button class="range-btn" data-futu-curve-mode="strategy">Strategy Curve</button>
+          </div>
           <div class="range-group" id="futuRangeGroup">
             <button class="range-btn" data-futu-range-days="0.25">6h</button>
             <button class="range-btn active" data-futu-range-days="0.5">12h</button>
@@ -2978,9 +3016,9 @@
           <div class="chart-wrap">
             <div id="futuChart"></div>
             <div class="chart-legend" id="futuLegend">
-              <div class="legend-title">Futu Metrics</div>
-              <div class="legend-row"><span class="legend-key">Portfolio</span><span class="legend-val" id="futuLegendPortfolio">--</span></div>
-              <div class="legend-row"><span class="legend-key">Portfolio PnL</span><span class="legend-val" id="futuLegendPortfolioPnl">--</span></div>
+              <div class="legend-title" id="futuLegendTitle">Futu Metrics</div>
+              <div class="legend-row"><span class="legend-key" id="futuLegendPortfolioKey">Portfolio</span><span class="legend-val" id="futuLegendPortfolio">--</span></div>
+              <div class="legend-row"><span class="legend-key" id="futuLegendPortfolioPnlKey">Portfolio PnL</span><span class="legend-val" id="futuLegendPortfolioPnl">--</span></div>
               <div class="legend-row"><span class="legend-key">QQQ Benchmark</span><span class="legend-val" id="futuLegendBenchmark">--</span></div>
               <div class="legend-row"><span class="legend-key">QQQ Return</span><span class="legend-val" id="futuLegendBenchmarkPnl">--</span></div>
               <div class="legend-row"><span class="legend-key">Spread</span><span class="legend-val" id="futuLegendSpread">--</span></div>
@@ -3118,25 +3156,27 @@
             <div class="panel-title"><span class="panel-title-icon">🧾</span> Open Orders (Unfilled / Pending)</div>
             <div class="panel-subtitle">Latest uncompleted FUTU orders with full parameters</div>
           </div>
-          <table id="futuOpenOrdersTable">
-            <thead>
-              <tr>
-                <th>Created</th>
-                <th>Order ID</th>
-                <th>Symbol</th>
-                <th>Side</th>
-                <th class="num">Qty</th>
-                <th class="num">Price</th>
-                <th class="num">Dealt Qty</th>
-                <th class="num">Dealt Avg</th>
-                <th>Type</th>
-                <th>Status</th>
-                <th>Params</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
+          <div class="futu-table-scroll">
+            <table id="futuOpenOrdersTable">
+              <thead>
+                <tr>
+                  <th>Created</th>
+                  <th>Order ID</th>
+                  <th>Symbol</th>
+                  <th>Side</th>
+                  <th class="num">Qty</th>
+                  <th class="num">Price</th>
+                  <th class="num">Dealt Qty</th>
+                  <th class="num">Dealt Avg</th>
+                  <th>Type</th>
+                  <th>Status</th>
+                  <th>Params</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
         </div>
 
         <div class="panel">
@@ -3144,22 +3184,24 @@
             <div class="panel-title"><span class="panel-title-icon">🚫</span> Cancel History</div>
             <div class="panel-subtitle">Canceled orders generated by FUTU rebalance flow</div>
           </div>
-          <table id="futuCancelHistoryTable">
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Order ID</th>
-                <th>Symbol</th>
-                <th>Side</th>
-                <th class="num">Qty</th>
-                <th class="num">Price</th>
-                <th>Status</th>
-                <th>Reason</th>
-                <th>Signal</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
+          <div class="futu-table-scroll">
+            <table id="futuCancelHistoryTable">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Order ID</th>
+                  <th>Symbol</th>
+                  <th>Side</th>
+                  <th class="num">Qty</th>
+                  <th class="num">Price</th>
+                  <th>Status</th>
+                  <th>Reason</th>
+                  <th>Signal</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
         </div>
 
         <div class="panel">

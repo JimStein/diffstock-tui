@@ -1,0 +1,89 @@
+{
+  "created_at": "2026-03-02T20:39:59.860908100+08:00",
+  "initial_capital_usd": 80000.0,
+  "trading_fee_rate": 0.0005,
+  "analysis_times_local": [
+    "02:30",
+    "23:30"
+  ],
+  "benchmark_symbol": "QQQ",
+  "benchmark_initial_price": 607.29,
+  "optimization_time_local": "22:00",
+  "optimization_weekdays": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "candidate_symbols": [
+    "COPX",
+    "IAU",
+    "NVDA",
+    "TLT"
+  ],
+  "targets": [
+    {
+      "symbol": "COPX",
+      "target_weight": 0.12622230884134944
+    },
+    {
+      "symbol": "IAU",
+      "target_weight": 0.3999295604712378
+    },
+    {
+      "symbol": "NVDA",
+      "target_weight": 0.07481504027226477
+    },
+    {
+      "symbol": "TLT",
+      "target_weight": 0.39903309041514784
+    }
+  ],
+  "analyses": [
+    {
+      "timestamp": "2026-03-02T20:39:59.862655900+08:00",
+      "portfolio_value_before": 80000.0,
+      "portfolio_value_after": 79960.162935,
+      "cash_after": 286.03293500000655,
+      "trades": [
+        {
+          "timestamp": "2026-03-02T20:39:59.862655900+08:00",
+          "symbol": "COPX",
+          "side": "BUY",
+          "quantity": 105.0,
+          "price": 95.7,
+          "notional": 10048.5,
+          "fee": 5.02425
+        },
+        {
+          "timestamp": "2026-03-02T20:39:59.862655900+08:00",
+          "symbol": "IAU",
+          "side": "BUY",
+          "quantity": 322.0,
+          "price": 99.07,
+          "notional": 31900.539999999997,
+          "fee": 15.95027
+        },
+        {
+          "timestamp": "2026-03-02T20:39:59.862655900+08:00",
+          "symbol": "NVDA",
+          "side": "BUY",
+          "quantity": 33.0,
+          "price": 177.19,
+          "notional": 5847.2699999999995,
+          "fee": 2.923635
+        },
+        {
+          "timestamp": "2026-03-02T20:39:59.862655900+08:00",
+          "symbol": "TLT",
+          "side": "BUY",
+          "quantity": 351.0,
+          "price": 90.82,
+          "notional": 31877.819999999996,
+          "fee": 15.938909999999998
+        }
+      ]
+    }
+  ]
+}

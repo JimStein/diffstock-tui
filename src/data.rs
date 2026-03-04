@@ -1819,13 +1819,6 @@ pub async fn fetch_latest_price_with_meta(symbol: &str) -> Result<LivePrice> {
                     candidates.push(price);
                 }
 
-                match fetch_latest_price_snapshot_polygon(symbol, &api_key).await {
-                    Ok(price) => candidates.push(price),
-                    Err(e) => {
-                        last_error = Some(e);
-                    }
-                }
-
                 match fetch_latest_price_1m_polygon(symbol, &api_key).await {
                     Ok(price) => candidates.push(price),
                     Err(e) => {

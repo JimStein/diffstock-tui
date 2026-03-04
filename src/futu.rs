@@ -671,8 +671,8 @@ finally:
             selected_market: None,
             opend_account_list: None,
             opend_selected_account: None,
-            opend_account_info_raw: None,
-            opend_positions_raw: None,
+            opend_account_info_raw: Some(account_json),
+            opend_positions_raw: Some(positions_json),
         })
     }
 }
