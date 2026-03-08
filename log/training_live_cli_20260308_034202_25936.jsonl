@@ -1,0 +1,3 @@
+{"event":"start","timestamp":"2026-03-08T03:42:02.672457300+00:00","run_type":"cli","epoch":null,"train_loss":null,"val_loss":null,"best_val_loss":null,"message":"training_started"}
+{"event":"epoch","timestamp":"2026-03-08T03:43:40.150389600+00:00","run_type":"cli","epoch":1,"train_loss":1.0166482962847907,"val_loss":0.8220349573621563,"best_val_loss":0.8220349573621563,"message":null}
+{"event":"epoch","timestamp":"2026-03-08T03:45:25.990035200+00:00","run_type":"cli","epoch":2,"train_loss":0.9363177179714331,"val_loss":0.8690041876306721,"best_val_loss":0.8220349573621563,"message":null}

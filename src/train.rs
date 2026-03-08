@@ -1,4 +1,4 @@
-use crate::config::{get_device, AUGMENTATION_COPIES, AUGMENTATION_NOISE, BATCH_SIZE, CUDA_BATCH_SIZE, DATA_RANGE, DIFF_STEPS, DROPOUT_RATE, EPOCHS, FORECAST, HIDDEN_DIM, INPUT_DIM, LEARNING_RATE, LOOKBACK, LSTM_LAYERS, NUM_LAYERS, PATIENCE, TRAIN_LOG_INTERVAL_BATCHES, TRAINING_SYMBOLS, WEIGHT_DECAY};
+use crate::config::{configured_training_batch_size, get_device, AUGMENTATION_COPIES, AUGMENTATION_NOISE, DATA_RANGE, DIFF_STEPS, DROPOUT_RATE, EPOCHS, FORECAST, HIDDEN_DIM, INPUT_DIM, LEARNING_RATE, LOOKBACK, LSTM_LAYERS, NUM_LAYERS, PATIENCE, TRAIN_LOG_INTERVAL_BATCHES, TRAINING_SYMBOLS, WEIGHT_DECAY};
 use crate::data::TrainingDataset;
 use crate::diffusion::GaussianDiffusion;
 use crate::features::{build_training_dataset_bundle, configured_feature_benchmark_symbol, FeatureEngineConfig, FeatureManifest, FeatureSelectionConfig};
@@ -134,9 +134,11 @@ pub async fn train_model(
 ) -> Result<()> {
     info!("Training mode started...");
 
+    let resolved_batch_size = batch_size.unwrap_or(configured_training_batch_size(use_cuda));
+
     info!("Configuration: Epochs={}, Batch Size={}, LR={}",
         epochs.unwrap_or(EPOCHS),
-        batch_size.unwrap_or(BATCH_SIZE),
+        resolved_batch_size,
         learning_rate.unwrap_or(LEARNING_RATE)
     );
 
@@ -224,8 +226,7 @@ async fn train_loop_with_progress(
     }
     let device = get_device(use_cuda);
     let epochs = epochs.unwrap_or(EPOCHS);
-    let default_batch_size = if use_cuda { CUDA_BATCH_SIZE } else { BATCH_SIZE };
-    let batch_size = batch_size.unwrap_or(default_batch_size);
+    let batch_size = batch_size.unwrap_or(configured_training_batch_size(use_cuda));
     let learning_rate = learning_rate.unwrap_or(LEARNING_RATE);
     let input_dim = feature_manifest.input_dim;
 
@@ -570,8 +571,7 @@ pub async fn train_model_with_data_and_manifest(
     let device = get_device(use_cuda);
 
     let epochs = epochs.unwrap_or(EPOCHS);
-    let default_batch_size = if use_cuda { CUDA_BATCH_SIZE } else { BATCH_SIZE };
-    let batch_size = batch_size.unwrap_or(default_batch_size);
+    let batch_size = batch_size.unwrap_or(configured_training_batch_size(use_cuda));
     let learning_rate = learning_rate.unwrap_or(LEARNING_RATE);
     let input_dim = feature_manifest.input_dim;
 

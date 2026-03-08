@@ -96,6 +96,27 @@ pub fn project_file_path(file_name: &str) -> std::path::PathBuf {
     project_root_path().join(file_name)
 }
 
+fn parse_env_usize(name: &str) -> Option<usize> {
+    std::env::var(name)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .filter(|value| *value > 0)
+}
+
+pub fn configured_training_batch_size(use_cuda: bool) -> usize {
+    if use_cuda {
+        parse_env_usize("DIFFSTOCK_CUDA_BATCH_SIZE")
+            .or_else(|| parse_env_usize("DIFFSTOCK_BATCH_SIZE"))
+            .unwrap_or(CUDA_BATCH_SIZE)
+    } else {
+        parse_env_usize("DIFFSTOCK_BATCH_SIZE").unwrap_or(BATCH_SIZE)
+    }
+}
+
+pub fn configured_onnx_opset() -> usize {
+    parse_env_usize("DIFFSTOCK_ONNX_OPSET").unwrap_or(ONNX_OPSET)
+}
+
 pub fn model_weights_safetensors_path() -> std::path::PathBuf {
     project_file_path("model_weights.safetensors")
 }
@@ -144,13 +165,14 @@ pub fn get_device(use_cuda: bool) -> Device {
 pub const LOOKBACK: usize = 60;
 pub const FORECAST: usize = 10;
 pub const BATCH_SIZE: usize = 128;
-pub const CUDA_BATCH_SIZE: usize = 256;
+pub const CUDA_BATCH_SIZE: usize = 512;
 pub const EPOCHS: usize = 500;
 pub const LEARNING_RATE: f64 = 1.5e-4;
 pub const INPUT_DIM: usize = 2;
 pub const HIDDEN_DIM: usize = 512;
 pub const NUM_LAYERS: usize = 8;
 pub const DIFF_STEPS: usize = 200;
+pub const ONNX_OPSET: usize = 18;
 pub const PATIENCE: usize = 120;
 pub const LSTM_LAYERS: usize = 2;
 pub const DROPOUT_RATE: f64 = 0.10;

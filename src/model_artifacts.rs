@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use candle_nn::VarMap;
 use std::path::Path;
 use std::process::Command;
@@ -61,6 +61,8 @@ fn try_export_onnx(
         .arg(input_path)
         .arg("--output")
         .arg(output_path)
+        .arg("--opset")
+        .arg(crate::config::configured_onnx_opset().to_string())
         .arg("--input-dim")
         .arg(feature_manifest.input_dim.to_string())
         .arg("--lookback")
@@ -69,7 +71,8 @@ fn try_export_onnx(
         .arg(feature_manifest.forecast.to_string())
         .arg("--num-assets")
         .arg(crate::config::TRAINING_SYMBOLS.len().to_string())
-        .status()?;
+        .status()
+        .with_context(|| format!("failed to launch ONNX exporter '{}'", exporter))?;
 
     if status.success() {
         info!("Saved ONNX checkpoint: {}", output_path.display());

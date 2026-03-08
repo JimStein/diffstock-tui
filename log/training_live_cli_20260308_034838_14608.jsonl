@@ -1,0 +1,6 @@
+{"event":"start","timestamp":"2026-03-08T03:48:38.904064500+00:00","run_type":"cli","epoch":null,"train_loss":null,"val_loss":null,"best_val_loss":null,"message":"training_started"}
+{"event":"epoch","timestamp":"2026-03-08T03:50:02.588945200+00:00","run_type":"cli","epoch":1,"train_loss":1.145881596733542,"val_loss":0.8513042430082957,"best_val_loss":0.8513042430082957,"message":null}
+{"event":"epoch","timestamp":"2026-03-08T03:51:28.484346900+00:00","run_type":"cli","epoch":2,"train_loss":0.8836475505548365,"val_loss":0.7912873526414236,"best_val_loss":0.7912873526414236,"message":null}
+{"event":"epoch","timestamp":"2026-03-08T03:52:54.785110+00:00","run_type":"cli","epoch":3,"train_loss":0.8569954084415062,"val_loss":0.7693138122558594,"best_val_loss":0.7693138122558594,"message":null}
+{"event":"epoch","timestamp":"2026-03-08T03:54:22.321471800+00:00","run_type":"cli","epoch":4,"train_loss":0.83313707744374,"val_loss":0.7492908587058386,"best_val_loss":0.7492908587058386,"message":null}
+{"event":"epoch","timestamp":"2026-03-08T03:55:49.275838900+00:00","run_type":"cli","epoch":5,"train_loss":0.8473987030047997,"val_loss":0.7894380191961924,"best_val_loss":0.7492908587058386,"message":null}

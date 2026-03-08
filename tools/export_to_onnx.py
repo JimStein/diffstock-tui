@@ -149,7 +149,7 @@ def main() -> int:
     parser.add_argument("--input", required=True, help="Path to model_weights.safetensors")
     parser.add_argument("--output", required=True, help="Path to denoiser ONNX output (e.g., model_weights.onnx)")
     parser.add_argument("--encoder-output", default=None, help="Optional encoder ONNX output path")
-    parser.add_argument("--opset", type=int, default=17)
+    parser.add_argument("--opset", type=int, default=18)
     parser.add_argument("--input-dim", type=int, default=2)
     parser.add_argument("--hidden-dim", type=int, default=512)
     parser.add_argument("--lstm-layers", type=int, default=2)
@@ -204,6 +204,7 @@ def main() -> int:
             output_names=["cond"],
             dynamic_axes={"x_hist": {0: "batch"}, "cond": {0: "batch"}},
             opset_version=args.opset,
+            dynamo=False,
         )
 
         x_t = torch.randn(1, 1, args.forecast, dtype=torch.float32)
@@ -224,6 +225,7 @@ def main() -> int:
                 "epsilon_pred": {0: "batch", 2: "time"},
             },
             opset_version=args.opset,
+            dynamo=False,
         )
 
     print(f"[export_to_onnx] exported denoiser ONNX: {denoiser_out}", file=sys.stderr)
