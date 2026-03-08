@@ -1,0 +1,11 @@
+D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_featurecheck\debug\deps\libc-d61d667b542d03db.d: C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.177\src\lib.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.177\src\macros.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.177\src\new\mod.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.177\src\primitives.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.177\src\windows\mod.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.177\src\windows\msvc\mod.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.177\src\types.rs
+
+D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_featurecheck\debug\deps\liblibc-d61d667b542d03db.rmeta: C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.177\src\lib.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.177\src\macros.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.177\src\new\mod.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.177\src\primitives.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.177\src\windows\mod.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.177\src\windows\msvc\mod.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.177\src\types.rs
+
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.177\src\lib.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.177\src\macros.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.177\src\new\mod.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.177\src\primitives.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.177\src\windows\mod.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.177\src\windows\msvc\mod.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.177\src\types.rs:

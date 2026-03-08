@@ -1,0 +1,1 @@
+cargo:rustc-env=MIME_TYPES_GENERATED_PATH=D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_featurecheck\debug\build\mime_guess-8d5b6d816f6d1340\out\mime_types_generated.rs

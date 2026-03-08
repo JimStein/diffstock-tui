@@ -1,5 +1,6 @@
 use crate::data::StockData;
 use crate::diffusion::GaussianDiffusion;
+use crate::features::{load_feature_manifest_if_exists, prepare_latest_feature_context, FeatureManifest};
 use crate::models::time_grad::{EpsilonTheta, RNNEncoder};
 use crate::config::{get_device, ComputeBackend, CUDA_INFERENCE_BATCH_SIZE, DDIM_ETA, DDIM_INFERENCE_STEPS, DIFF_STEPS, DROPOUT_RATE, FORECAST, HIDDEN_DIM, INFERENCE_BATCH_SIZE, INPUT_DIM, LOOKBACK, LSTM_LAYERS, NUM_LAYERS, TRAINING_SYMBOLS};
 use anyhow::Result;
@@ -7,10 +8,13 @@ use anyhow::Result;
 use anyhow::Context;
 use candle_core::{DType, Tensor};
 use candle_nn::VarBuilder;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 use chrono::Duration;
-use tracing::{info, warn};
+#[cfg(feature = "directml")]
+use tracing::info;
+use tracing::warn;
 
 #[cfg(feature = "directml")]
 use ort::execution_providers::DirectMLExecutionProvider;
@@ -27,6 +31,73 @@ pub struct ForecastData {
     pub p70: Vec<(f64, f64)>,
     pub p90: Vec<(f64, f64)>,
     pub _paths: Vec<Vec<f64>>, // Raw paths for potential detailed inspection
+}
+
+async fn build_required_feature_histories(
+    data: &StockData,
+    manifest: &FeatureManifest,
+) -> Result<HashMap<String, StockData>> {
+    let mut histories = HashMap::new();
+    histories.insert(data.symbol.to_uppercase(), data.clone());
+
+    if let Some(benchmark) = &manifest.benchmark_symbol {
+        if !benchmark.eq_ignore_ascii_case(&data.symbol) {
+            let benchmark_data = crate::data::fetch_range(benchmark, crate::config::DATA_RANGE).await?;
+            histories.insert(benchmark.to_uppercase(), benchmark_data);
+        }
+    }
+
+    Ok(histories)
+}
+
+fn prepare_context_from_histories(
+    data: &StockData,
+    histories: &HashMap<String, StockData>,
+    manifest: Option<&FeatureManifest>,
+) -> Result<(Vec<f32>, usize, usize, f64, f64)> {
+    if let Some(manifest) = manifest {
+        if manifest.target_feature != "log_return_1d" {
+            anyhow::bail!(
+                "current inference path only supports target_feature=log_return_1d, got {}",
+                manifest.target_feature
+            );
+        }
+        let prepared = prepare_latest_feature_context(histories, &data.symbol, manifest)?;
+        return Ok((
+            prepared.normalized_features,
+            manifest.lookback,
+            prepared.input_dim,
+            prepared.target_mean,
+            prepared.target_std,
+        ));
+    }
+
+    let context_len = LOOKBACK;
+    if data.history.len() < context_len + 1 {
+        return Err(anyhow::anyhow!("Not enough history data (need at least {} days)", context_len + 1));
+    }
+
+    let start_idx = data.history.len() - context_len;
+    let mut features = Vec::with_capacity(context_len);
+    let mut close_vals = Vec::with_capacity(context_len);
+
+    for i in 0..context_len {
+        let idx = start_idx + i;
+        let close_ret = (data.history[idx].close / data.history[idx - 1].close).ln();
+        let overnight_ret = (data.history[idx].open / data.history[idx - 1].close).ln();
+        features.push(vec![close_ret, overnight_ret]);
+        close_vals.push(close_ret);
+    }
+
+    let mean = close_vals.iter().sum::<f64>() / context_len as f64;
+    let variance = close_vals.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (context_len as f64 - 1.0);
+    let std = variance.sqrt() + 1e-6;
+    let normalized_features = features
+        .iter()
+        .flat_map(|f| vec![((f[0] - mean) / std) as f32, ((f[1] - mean) / std) as f32])
+        .collect::<Vec<_>>();
+
+    Ok((normalized_features, context_len, INPUT_DIM, mean, std))
 }
 
 pub async fn run_inference_with_backend(
@@ -86,6 +157,69 @@ pub async fn run_inference_with_backend(
                 );
             }
             run_inference(data, horizon, num_simulations, progress_tx, false).await
+        }
+    }
+}
+
+pub async fn run_inference_with_backend_from_histories(
+    histories: &HashMap<String, StockData>,
+    symbol: &str,
+    horizon: usize,
+    num_simulations: usize,
+    progress_tx: Option<Sender<f64>>,
+    backend: ComputeBackend,
+) -> Result<ForecastData> {
+    let data = histories
+        .get(&symbol.trim().to_ascii_uppercase())
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("historical inference missing symbol {}", symbol))?;
+
+    let feature_manifest = load_feature_manifest_if_exists();
+    if feature_manifest.is_none() {
+        return run_inference_with_backend(Arc::new(data), horizon, num_simulations, progress_tx, backend).await;
+    }
+
+    match backend {
+        ComputeBackend::Cuda => {
+            run_inference_from_histories(histories, symbol, horizon, num_simulations, progress_tx, true).await
+        }
+        ComputeBackend::Cpu => {
+            run_inference_from_histories(histories, symbol, horizon, num_simulations, progress_tx, false).await
+        }
+        ComputeBackend::Auto => {
+            run_inference_from_histories(
+                histories,
+                symbol,
+                horizon,
+                num_simulations,
+                progress_tx,
+                cfg!(feature = "cuda"),
+            )
+            .await
+        }
+        ComputeBackend::Directml => {
+            #[cfg(feature = "directml")]
+            {
+                if let Some(model_path) = crate::config::find_directml_onnx_model_path() {
+                    match run_inference_directml_from_histories(
+                        histories,
+                        symbol,
+                        horizon,
+                        num_simulations,
+                        progress_tx.clone(),
+                        &model_path,
+                    )
+                    .await
+                    {
+                        Ok(forecast) => return Ok(forecast),
+                        Err(e) => warn!(
+                            "DirectML historical-slice inference failed ({}). Falling back to CPU path.",
+                            e
+                        ),
+                    }
+                }
+            }
+            run_inference_from_histories(histories, symbol, horizon, num_simulations, progress_tx, false).await
         }
     }
 }
@@ -193,38 +327,17 @@ pub async fn run_inference_directml(
     info!(
         "DirectML inference path: preprocessing tensors on CPU; denoiser executes via ONNX Runtime DirectML EP"
     );
-
-    let context_len = LOOKBACK;
-    if data.history.len() < context_len + 1 {
-        return Err(anyhow::anyhow!(
-            "Not enough history data (need at least {} days)",
-            context_len + 1
-        ));
-    }
-
-    let start_idx = data.history.len() - context_len;
-
-    let mut features = Vec::with_capacity(context_len);
-    let mut close_vals = Vec::with_capacity(context_len);
-
-    for i in 0..context_len {
-        let idx = start_idx + i;
-        let close_ret = (data.history[idx].close / data.history[idx - 1].close).ln();
-        let overnight_ret = (data.history[idx].open / data.history[idx - 1].close).ln();
-        features.push(vec![close_ret, overnight_ret]);
-        close_vals.push(close_ret);
-    }
-
-    let mean = close_vals.iter().sum::<f64>() / context_len as f64;
-    let variance =
-        close_vals.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (context_len as f64 - 1.0);
-    let std = variance.sqrt() + 1e-6;
-
-    let normalized_features: Vec<f32> = features
-        .iter()
-        .flat_map(|f| vec![((f[0] - mean) / std) as f32, ((f[1] - mean) / std) as f32])
-        .collect();
-    let context_tensor = Tensor::from_slice(&normalized_features, (1, context_len, 2), &device)?;
+    let feature_manifest = load_feature_manifest_if_exists();
+    let histories = if let Some(manifest) = &feature_manifest {
+        build_required_feature_histories(data.as_ref(), manifest).await?
+    } else {
+        let mut map = HashMap::new();
+        map.insert(data.symbol.to_uppercase(), (*data).clone());
+        map
+    };
+    let (normalized_features, context_len, input_dim, mean, std) =
+        prepare_context_from_histories(data.as_ref(), &histories, feature_manifest.as_ref())?;
+    let context_tensor = Tensor::from_slice(&normalized_features, (1, context_len, input_dim), &device)?;
 
     let symbol_upper = data.symbol.to_uppercase();
     let asset_id = TRAINING_SYMBOLS
@@ -251,7 +364,7 @@ pub async fn run_inference_directml(
     };
 
     let encoder = RNNEncoder::new(
-        INPUT_DIM,
+        input_dim,
         HIDDEN_DIM,
         LSTM_LAYERS,
         DROPOUT_RATE,
@@ -280,7 +393,7 @@ pub async fn run_inference_directml(
     let start_date = data.history.last().unwrap().date;
     let inference_batch_size = INFERENCE_BATCH_SIZE;
 
-    let chunk_len = FORECAST.max(1);
+    let chunk_len = feature_manifest.as_ref().map(|m| m.forecast).unwrap_or(FORECAST).max(1);
     let chunks_per_path = horizon.div_ceil(chunk_len);
     let total_horizon_batches = num_simulations.div_ceil(inference_batch_size);
     let total_steps = total_horizon_batches * chunks_per_path;
@@ -374,41 +487,18 @@ pub async fn run_inference(
 ) -> Result<ForecastData> {
     // 1. Setup Device and Data
     let device = get_device(use_cuda);
-    
-    // Prepare Context Data (Last LOOKBACK days)
-    let context_len = LOOKBACK;
-    if data.history.len() < context_len + 1 {
-        return Err(anyhow::anyhow!("Not enough history data (need at least {} days)", context_len + 1));
-    }
+    let feature_manifest = load_feature_manifest_if_exists();
+    let histories = if let Some(manifest) = &feature_manifest {
+        build_required_feature_histories(data.as_ref(), manifest).await?
+    } else {
+        let mut map = HashMap::new();
+        map.insert(data.symbol.to_uppercase(), (*data).clone());
+        map
+    };
+    let (normalized_features, context_len, input_dim, mean, std) =
+        prepare_context_from_histories(data.as_ref(), &histories, feature_manifest.as_ref())?;
 
-    let start_idx = data.history.len() - context_len;
-    
-    // Calculate features for the context window
-    let mut features = Vec::with_capacity(context_len);
-    let mut close_vals = Vec::with_capacity(context_len);
-
-    for i in 0..context_len {
-        let idx = start_idx + i;
-        let close_ret = (data.history[idx].close / data.history[idx-1].close).ln();
-        let overnight_ret = (data.history[idx].open / data.history[idx-1].close).ln();
-        features.push(vec![close_ret, overnight_ret]);
-        close_vals.push(close_ret);
-    }
-
-    // Normalize Context
-    let mean = close_vals.iter().sum::<f64>() / context_len as f64;
-    let variance = close_vals.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (context_len as f64 - 1.0);
-    let std = variance.sqrt() + 1e-6;
-
-    let normalized_features: Vec<f32> = features.iter().flat_map(|f| {
-        vec![
-            ((f[0] - mean) / std) as f32,
-            ((f[1] - mean) / std) as f32
-        ]
-    }).collect();
-
-    // [1, SeqLen, 2]
-    let context_tensor = Tensor::from_slice(&normalized_features, (1, context_len, 2), &device)?;
+    let context_tensor = Tensor::from_slice(&normalized_features, (1, context_len, input_dim), &device)?;
 
     // Determine Asset ID (case-insensitive match)
     let symbol_upper = data.symbol.to_uppercase();
@@ -431,7 +521,7 @@ pub async fn run_inference(
         VarBuilder::zeros(DType::F32, &device)
     };
 
-    let encoder = RNNEncoder::new(INPUT_DIM, HIDDEN_DIM, LSTM_LAYERS, DROPOUT_RATE, vb.pp("encoder"))?;
+    let encoder = RNNEncoder::new(input_dim, HIDDEN_DIM, LSTM_LAYERS, DROPOUT_RATE, vb.pp("encoder"))?;
     let model = EpsilonTheta::new(1, HIDDEN_DIM, HIDDEN_DIM, NUM_LAYERS, num_assets, DROPOUT_RATE, vb.pp("model"))?;
     let diffusion = GaussianDiffusion::new(DIFF_STEPS, &device)?;
 
@@ -448,7 +538,7 @@ pub async fn run_inference(
         INFERENCE_BATCH_SIZE
     };
 
-    let chunk_len = FORECAST.max(1);
+    let chunk_len = feature_manifest.as_ref().map(|m| m.forecast).unwrap_or(FORECAST).max(1);
     let chunks_per_path = horizon.div_ceil(chunk_len);
     let total_horizon_batches = num_simulations.div_ceil(inference_batch_size);
     let total_steps = total_horizon_batches * chunks_per_path;
@@ -532,6 +622,228 @@ pub async fn run_inference(
         p90,
         _paths: all_paths,
     })
+}
+
+#[cfg(feature = "directml")]
+pub async fn run_inference_directml_from_histories(
+    histories: &HashMap<String, StockData>,
+    symbol: &str,
+    horizon: usize,
+    num_simulations: usize,
+    progress_tx: Option<Sender<f64>>,
+    model_path: &std::path::Path,
+) -> Result<ForecastData> {
+    let feature_manifest = load_feature_manifest_if_exists()
+        .ok_or_else(|| anyhow::anyhow!("feature manifest missing for historical-slice DirectML inference"))?;
+    let data = histories
+        .get(&symbol.trim().to_ascii_uppercase())
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("historical inference missing symbol {}", symbol))?;
+    let device = get_device(false);
+    let (normalized_features, context_len, input_dim, mean, std) =
+        prepare_context_from_histories(&data, histories, Some(&feature_manifest))?;
+    let context_tensor = Tensor::from_slice(&normalized_features, (1, context_len, input_dim), &device)?;
+
+    let symbol_upper = data.symbol.to_uppercase();
+    let asset_id = TRAINING_SYMBOLS
+        .iter()
+        .position(|&s| s.eq_ignore_ascii_case(&symbol_upper))
+        .unwrap_or(0);
+
+    let vb = if let Some(weights_path) = crate::config::find_model_weights_safetensors_path() {
+        unsafe { VarBuilder::from_mmaped_safetensors(&[weights_path], DType::F32, &device)? }
+    } else {
+        VarBuilder::zeros(DType::F32, &device)
+    };
+
+    let encoder = RNNEncoder::new(input_dim, HIDDEN_DIM, LSTM_LAYERS, DROPOUT_RATE, vb.pp("encoder"))?;
+    let diffusion = GaussianDiffusion::new(DIFF_STEPS, &device)?;
+    let hidden_state = encoder.forward(&context_tensor, false)?;
+    let hidden_state = hidden_state.unsqueeze(2)?;
+
+    let mut session = Session::builder()?
+        .with_execution_providers([DirectMLExecutionProvider::default().build()])?
+        .commit_from_file(model_path)
+        .with_context(|| format!("failed to load DirectML ONNX model '{}'", model_path.display()))?;
+
+    let mut all_paths = Vec::with_capacity(num_simulations);
+    let start_date = data.history.last().unwrap().date;
+    let inference_batch_size = INFERENCE_BATCH_SIZE;
+    let chunk_len = feature_manifest.forecast.max(1);
+    let chunks_per_path = horizon.div_ceil(chunk_len);
+    let total_horizon_batches = num_simulations.div_ceil(inference_batch_size);
+    let total_steps = total_horizon_batches * chunks_per_path;
+    let mut completed_steps = 0;
+
+    let mut remaining = num_simulations;
+    while remaining > 0 {
+        let batch = remaining.min(inference_batch_size);
+        let mut batch_paths: Vec<Vec<f64>> = (0..batch).map(|_| Vec::with_capacity(horizon)).collect();
+        let mut last_vals: Vec<f64> = vec![data.history.last().unwrap().close; batch];
+
+        let mut produced = 0;
+        while produced < horizon {
+            let current_chunk = (horizon - produced).min(chunk_len);
+            let samples = sample_ddim_batched_directml(
+                &mut session,
+                &diffusion,
+                &hidden_state,
+                asset_id as u32,
+                batch,
+                current_chunk,
+                DDIM_INFERENCE_STEPS,
+                DDIM_ETA,
+            )?;
+
+            let chunk_vals = samples.squeeze(1)?.to_vec2::<f32>()?;
+            for (path_idx, returns) in chunk_vals.iter().enumerate() {
+                for &predicted_norm_ret in returns {
+                    let predicted_ret = (predicted_norm_ret as f64 * std) + mean;
+                    let next_price = last_vals[path_idx] * predicted_ret.exp();
+                    batch_paths[path_idx].push(next_price);
+                    last_vals[path_idx] = next_price;
+                }
+            }
+
+            completed_steps += 1;
+            if let Some(tx) = &progress_tx {
+                let _ = tx.send(completed_steps as f64 / total_steps as f64).await;
+            }
+            produced += current_chunk;
+        }
+
+        all_paths.extend(batch_paths);
+        remaining -= batch;
+    }
+
+    let mut p10 = Vec::with_capacity(horizon);
+    let mut p30 = Vec::with_capacity(horizon);
+    let mut p50 = Vec::with_capacity(horizon);
+    let mut p70 = Vec::with_capacity(horizon);
+    let mut p90 = Vec::with_capacity(horizon);
+    for t in 0..horizon {
+        let mut time_slice: Vec<f64> = all_paths.iter().map(|p| p[t]).collect();
+        time_slice.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let idx_10 = (num_simulations as f64 * 0.1) as usize;
+        let idx_30 = (num_simulations as f64 * 0.3) as usize;
+        let idx_50 = (num_simulations as f64 * 0.5) as usize;
+        let idx_70 = (num_simulations as f64 * 0.7) as usize;
+        let idx_90 = (num_simulations as f64 * 0.9) as usize;
+        let time_point = (start_date + Duration::days(t as i64 + 1)).timestamp() as f64;
+        p10.push((time_point, time_slice[idx_10]));
+        p30.push((time_point, time_slice[idx_30]));
+        p50.push((time_point, time_slice[idx_50]));
+        p70.push((time_point, time_slice[idx_70]));
+        p90.push((time_point, time_slice[idx_90]));
+    }
+
+    Ok(ForecastData { p10, p30, p50, p70, p90, _paths: all_paths })
+}
+
+pub async fn run_inference_from_histories(
+    histories: &HashMap<String, StockData>,
+    symbol: &str,
+    horizon: usize,
+    num_simulations: usize,
+    progress_tx: Option<Sender<f64>>,
+    use_cuda: bool,
+) -> Result<ForecastData> {
+    let data = histories
+        .get(&symbol.trim().to_ascii_uppercase())
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("historical inference missing symbol {}", symbol))?;
+    let device = get_device(use_cuda);
+    let feature_manifest = load_feature_manifest_if_exists();
+    let (normalized_features, context_len, input_dim, mean, std) =
+        prepare_context_from_histories(&data, histories, feature_manifest.as_ref())?;
+    let context_tensor = Tensor::from_slice(&normalized_features, (1, context_len, input_dim), &device)?;
+
+    let symbol_upper = data.symbol.to_uppercase();
+    let asset_id = TRAINING_SYMBOLS.iter().position(|&s| s.eq_ignore_ascii_case(&symbol_upper)).unwrap_or(0);
+    let num_assets = TRAINING_SYMBOLS.len();
+    let vb = if let Some(weights_path) = crate::config::find_model_weights_safetensors_path() {
+        unsafe { VarBuilder::from_mmaped_safetensors(&[weights_path], DType::F32, &device)? }
+    } else {
+        VarBuilder::zeros(DType::F32, &device)
+    };
+
+    let encoder = RNNEncoder::new(input_dim, HIDDEN_DIM, LSTM_LAYERS, DROPOUT_RATE, vb.pp("encoder"))?;
+    let model = EpsilonTheta::new(1, HIDDEN_DIM, HIDDEN_DIM, NUM_LAYERS, num_assets, DROPOUT_RATE, vb.pp("model"))?;
+    let diffusion = GaussianDiffusion::new(DIFF_STEPS, &device)?;
+    let hidden_state = encoder.forward(&context_tensor, false)?;
+    let hidden_state = hidden_state.unsqueeze(2)?;
+
+    let mut all_paths = Vec::with_capacity(num_simulations);
+    let start_date = data.history.last().unwrap().date;
+    let inference_batch_size = if use_cuda { CUDA_INFERENCE_BATCH_SIZE } else { INFERENCE_BATCH_SIZE };
+    let chunk_len = feature_manifest.as_ref().map(|m| m.forecast).unwrap_or(FORECAST).max(1);
+    let chunks_per_path = horizon.div_ceil(chunk_len);
+    let total_horizon_batches = num_simulations.div_ceil(inference_batch_size);
+    let total_steps = total_horizon_batches * chunks_per_path;
+    let mut completed_steps = 0;
+
+    let mut remaining = num_simulations;
+    while remaining > 0 {
+        let batch = remaining.min(inference_batch_size);
+        let mut batch_paths: Vec<Vec<f64>> = (0..batch).map(|_| Vec::with_capacity(horizon)).collect();
+        let mut last_vals: Vec<f64> = vec![data.history.last().unwrap().close; batch];
+
+        let mut produced = 0;
+        while produced < horizon {
+            let current_chunk = (horizon - produced).min(chunk_len);
+            let samples = diffusion.sample_ddim_batched(
+                &model,
+                &hidden_state,
+                asset_id as u32,
+                batch,
+                current_chunk,
+                DDIM_INFERENCE_STEPS,
+                DDIM_ETA,
+            )?;
+
+            let chunk_vals = samples.squeeze(1)?.to_vec2::<f32>()?;
+            for (path_idx, returns) in chunk_vals.iter().enumerate() {
+                for &predicted_norm_ret in returns {
+                    let predicted_ret = (predicted_norm_ret as f64 * std) + mean;
+                    let next_price = last_vals[path_idx] * predicted_ret.exp();
+                    batch_paths[path_idx].push(next_price);
+                    last_vals[path_idx] = next_price;
+                }
+            }
+
+            completed_steps += 1;
+            if let Some(tx) = &progress_tx {
+                let _ = tx.send(completed_steps as f64 / total_steps as f64).await;
+            }
+            produced += current_chunk;
+        }
+
+        all_paths.extend(batch_paths);
+        remaining -= batch;
+    }
+
+    let mut p10 = Vec::with_capacity(horizon);
+    let mut p30 = Vec::with_capacity(horizon);
+    let mut p50 = Vec::with_capacity(horizon);
+    let mut p70 = Vec::with_capacity(horizon);
+    let mut p90 = Vec::with_capacity(horizon);
+    for t in 0..horizon {
+        let mut time_slice: Vec<f64> = all_paths.iter().map(|p| p[t]).collect();
+        time_slice.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let idx_10 = (num_simulations as f64 * 0.1) as usize;
+        let idx_30 = (num_simulations as f64 * 0.3) as usize;
+        let idx_50 = (num_simulations as f64 * 0.5) as usize;
+        let idx_70 = (num_simulations as f64 * 0.7) as usize;
+        let idx_90 = (num_simulations as f64 * 0.9) as usize;
+        let time_point = (start_date + Duration::days(t as i64 + 1)).timestamp() as f64;
+        p10.push((time_point, time_slice[idx_10]));
+        p30.push((time_point, time_slice[idx_30]));
+        p50.push((time_point, time_slice[idx_50]));
+        p70.push((time_point, time_slice[idx_70]));
+        p90.push((time_point, time_slice[idx_90]));
+    }
+
+    Ok(ForecastData { p10, p30, p50, p70, p90, _paths: all_paths })
 }
 
 pub async fn run_backtest(data: Arc<StockData>, use_cuda: bool) -> Result<()> {

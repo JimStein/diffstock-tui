@@ -1,0 +1,10 @@
+D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_featurecheck\debug\deps\chrono_tz-e27eecdf0ee96633.d: C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.10.4\src\lib.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.10.4\src\binary_search.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.10.4\src\prebuilt\mod.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.10.4\src\prebuilt\directory.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.10.4\src\timezone_impl.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.10.4\src\prebuilt\timezones.rs
+
+D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_featurecheck\debug\deps\libchrono_tz-e27eecdf0ee96633.rmeta: C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.10.4\src\lib.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.10.4\src\binary_search.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.10.4\src\prebuilt\mod.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.10.4\src\prebuilt\directory.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.10.4\src\timezone_impl.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.10.4\src\prebuilt\timezones.rs
+
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.10.4\src\lib.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.10.4\src\binary_search.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.10.4\src\prebuilt\mod.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.10.4\src\prebuilt\directory.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.10.4\src\timezone_impl.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chrono-tz-0.10.4\src\prebuilt\timezones.rs:

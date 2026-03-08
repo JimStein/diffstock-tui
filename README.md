@@ -98,6 +98,10 @@ Create `.env` from `.env.example` and set:
 POLYGON_API_KEY=your_polygon_api_key_here
 DIFFSTOCK_DATA_PROVIDER=polygon
 DIFFSTOCK_WS_PRIORITY_RTH_ONLY=true
+DIFFSTOCK_FEATURE_PROFILE=custom
+DIFFSTOCK_FEATURE_BENCHMARK=QQQ
+DIFFSTOCK_FEATURE_INCLUDE=log_return_1d,ret_5d,ret_20d,excess_ret_5d_vs_benchmark,excess_ret_20d_vs_benchmark,price_to_ema_20,macd_histogram,rolling_std_20,volume_ratio_20,close_location_value
+DIFFSTOCK_TARGET_FEATURE=log_return_1d
 ```
 
 `DIFFSTOCK_DATA_PROVIDER` options:
@@ -107,6 +111,37 @@ DIFFSTOCK_WS_PRIORITY_RTH_ONLY=true
 `DIFFSTOCK_WS_PRIORITY_RTH_ONLY` options:
 - `true` (default): prioritize WebSocket only during US regular session (09:30-16:00 ET), otherwise use freshest source
 - `false`: prioritize WebSocket all day (fallback to snapshot/minute when WS unavailable)
+
+Feature engine selection options:
+- `DIFFSTOCK_FEATURE_PROFILE`: `full` | `core` | `trend` | `custom`
+- `DIFFSTOCK_FEATURE_GROUPS`: optional comma-separated groups to add on top of the profile or define the set when profile=`custom`
+- `DIFFSTOCK_FEATURE_INCLUDE`: optional comma-separated exact feature names to force-include
+- `DIFFSTOCK_FEATURE_EXCLUDE`: optional comma-separated exact feature names to force-exclude
+- `DIFFSTOCK_FEATURE_BENCHMARK`: benchmark symbol used by relative-strength and excess-return features, default `QQQ`
+- `DIFFSTOCK_TARGET_FEATURE`: exact feature name to use later as the training label when building datasets from the feature store
+
+Recommended default training set now uses 10 hand-picked features via `profile=custom`:
+- `log_return_1d`
+- `ret_5d`
+- `ret_20d`
+- `excess_ret_5d_vs_benchmark`
+- `excess_ret_20d_vs_benchmark`
+- `price_to_ema_20`
+- `macd_histogram`
+- `rolling_std_20`
+- `volume_ratio_20`
+- `close_location_value`
+
+Supported feature groups:
+- `returns`
+- `benchmark`
+- `trend`
+- `volatility`
+- `oscillators`
+- `bollinger`
+- `volume`
+- `vwap`
+- `candles`
 
 `auto` mode is disabled to avoid mixed-latency data alignment issues.
 

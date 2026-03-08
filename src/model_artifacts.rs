@@ -7,15 +7,21 @@ use tracing::{info, warn};
 pub const SAFETENSORS_PATH: &str = "model_weights.safetensors";
 pub const ONNX_PATH: &str = "model_weights.onnx";
 
-pub fn save_best_model_artifacts(varmap: &VarMap, use_cuda: bool) -> Result<()> {
+pub fn save_best_model_artifacts(
+    varmap: &VarMap,
+    use_cuda: bool,
+    feature_manifest: &crate::features::FeatureManifest,
+) -> Result<()> {
     let safetensors_path = crate::config::project_file_path(SAFETENSORS_PATH);
     let onnx_path = crate::config::project_file_path(ONNX_PATH);
 
     varmap.save(&safetensors_path)?;
     info!("Saved safetensors checkpoint: {}", safetensors_path.display());
+    let manifest_path = crate::features::save_feature_manifest(feature_manifest)?;
+    info!("Saved feature manifest: {}", manifest_path.display());
 
     if use_cuda {
-        if let Err(e) = try_export_onnx(&safetensors_path, &onnx_path) {
+        if let Err(e) = try_export_onnx(&safetensors_path, &onnx_path, feature_manifest) {
             warn!(
                 "ONNX export step failed (non-fatal): {}. Training continues with safetensors only.",
                 e
@@ -26,7 +32,11 @@ pub fn save_best_model_artifacts(varmap: &VarMap, use_cuda: bool) -> Result<()> 
     Ok(())
 }
 
-fn try_export_onnx(input_path: &Path, output_path: &Path) -> Result<()> {
+fn try_export_onnx(
+    input_path: &Path,
+    output_path: &Path,
+    feature_manifest: &crate::features::FeatureManifest,
+) -> Result<()> {
     let exporter = std::env::var("DIFFSTOCK_ONNX_EXPORTER").unwrap_or_else(|_| "python".to_string());
     let script = std::env::var("DIFFSTOCK_ONNX_EXPORT_SCRIPT")
         .map(std::path::PathBuf::from)
@@ -51,6 +61,14 @@ fn try_export_onnx(input_path: &Path, output_path: &Path) -> Result<()> {
         .arg(input_path)
         .arg("--output")
         .arg(output_path)
+        .arg("--input-dim")
+        .arg(feature_manifest.input_dim.to_string())
+        .arg("--lookback")
+        .arg(feature_manifest.lookback.to_string())
+        .arg("--forecast")
+        .arg(feature_manifest.forecast.to_string())
+        .arg("--num-assets")
+        .arg(crate::config::TRAINING_SYMBOLS.len().to_string())
         .status()?;
 
     if status.success() {

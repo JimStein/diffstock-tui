@@ -1,0 +1,7 @@
+D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_featurecheck\release\deps\tower_service-46942354f85d78f4.d: C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tower-service-0.3.3\src\lib.rs
+
+D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_featurecheck\release\deps\libtower_service-46942354f85d78f4.rlib: C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tower-service-0.3.3\src\lib.rs
+
+D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_featurecheck\release\deps\libtower_service-46942354f85d78f4.rmeta: C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tower-service-0.3.3\src\lib.rs
+
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tower-service-0.3.3\src\lib.rs:

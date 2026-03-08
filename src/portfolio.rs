@@ -1,13 +1,10 @@
-use crate::config::{get_device, ComputeBackend, DATA_RANGE, DDIM_ETA, DDIM_INFERENCE_STEPS, DIFF_STEPS, DROPOUT_RATE, FORECAST, HIDDEN_DIM, INFERENCE_BATCH_SIZE, INPUT_DIM, LOOKBACK, LSTM_LAYERS, NUM_LAYERS, TRAINING_SYMBOLS};
-use crate::diffusion::GaussianDiffusion;
+use crate::config::{ComputeBackend, DATA_RANGE, LOOKBACK};
 use crate::inference::{self, ForecastData};
-use crate::models::time_grad::{EpsilonTheta, RNNEncoder};
 use anyhow::Result;
-use candle_core::{DType, Tensor};
-use candle_nn::VarBuilder;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::info;
 
@@ -99,175 +96,12 @@ pub async fn generate_multi_asset_forecasts(
     num_simulations: usize,
     use_cuda: bool,
 ) -> Result<Vec<AssetForecast>> {
-    let device = get_device(use_cuda);
-    let context_len = LOOKBACK;
-    let num_assets = TRAINING_SYMBOLS.len();
-
-    // Load model weights once
-    let vb = if let Some(weights_path) = crate::config::find_model_weights_safetensors_path() {
-        unsafe {
-            VarBuilder::from_mmaped_safetensors(
-                &[weights_path],
-                DType::F32,
-                &device,
-            )?
-        }
+    let backend = if use_cuda {
+        ComputeBackend::Cuda
     } else {
-        return Err(anyhow::anyhow!(
-            "model_weights.safetensors not found under project root '{}'. Run --train first.",
-            crate::config::project_root_path().display()
-        ));
+        ComputeBackend::Cpu
     };
-
-    let encoder = RNNEncoder::new(INPUT_DIM, HIDDEN_DIM, LSTM_LAYERS, DROPOUT_RATE, vb.pp("encoder"))?;
-    let model = EpsilonTheta::new(1, HIDDEN_DIM, HIDDEN_DIM, NUM_LAYERS, num_assets, DROPOUT_RATE, vb.pp("model"))?;
-    let diffusion = GaussianDiffusion::new(DIFF_STEPS, &device)?;
-
-    let mut forecasts = Vec::with_capacity(symbols.len());
-    let prefetched = crate::data::fetch_ranges_prefetch(symbols, DATA_RANGE).await?;
-
-    for symbol in symbols {
-        info!("Forecasting {}...", symbol);
-
-        // Fetch recent data
-        let data = prefetched
-            .get(symbol)
-            .cloned()
-            .ok_or(anyhow::anyhow!("Prefetched data missing for {}", symbol))?;
-
-        if data.history.len() < context_len + 1 {
-            return Err(anyhow::anyhow!(
-                "Insufficient history for {} ({} days). Optimization stopped.",
-                symbol,
-                data.history.len()
-            ));
-        }
-
-        let current_price = data.history.last().unwrap().close;
-
-        // Prepare context window
-        let start_idx = data.history.len() - context_len;
-        let mut features = Vec::with_capacity(context_len);
-        let mut close_vals = Vec::with_capacity(context_len);
-
-        for i in 0..context_len {
-            let idx = start_idx + i;
-            let close_ret = (data.history[idx].close / data.history[idx - 1].close).ln();
-            let overnight_ret = (data.history[idx].open / data.history[idx - 1].close).ln();
-            features.push(vec![close_ret, overnight_ret]);
-            close_vals.push(close_ret);
-        }
-
-        // Z-score normalize
-        let mean = close_vals.iter().sum::<f64>() / context_len as f64;
-        let variance = close_vals.iter().map(|v| (v - mean).powi(2)).sum::<f64>()
-            / (context_len as f64 - 1.0);
-        let std = variance.sqrt() + 1e-6;
-
-        let normalized: Vec<f32> = features
-            .iter()
-            .flat_map(|f| {
-                vec![((f[0] - mean) / std) as f32, ((f[1] - mean) / std) as f32]
-            })
-            .collect();
-
-        let context_tensor = Tensor::from_slice(&normalized, (1, context_len, 2), &device)?;
-
-        // Asset ID (case-insensitive match)
-        let asset_id = TRAINING_SYMBOLS
-            .iter()
-            .position(|&s| s.eq_ignore_ascii_case(symbol))
-            .unwrap_or(0);
-
-        // Encode
-        let hidden_state = encoder.forward(&context_tensor, false)?;
-        let hidden_state = hidden_state.unsqueeze(2)?;
-
-        // Monte Carlo sampling (batched DDIM for speed)
-        let mut period_returns = Vec::with_capacity(num_simulations);
-
-        let chunk_len = FORECAST.max(1);
-        let mut remaining = num_simulations;
-        while remaining > 0 {
-            let batch = remaining.min(INFERENCE_BATCH_SIZE);
-
-            // Run all horizon steps for this batch
-            let mut batch_log_rets = vec![0.0f64; batch];
-            let mut batch_last_vals = vec![current_price; batch];
-
-            let mut produced = 0;
-            while produced < horizon {
-                let current_chunk = (horizon - produced).min(chunk_len);
-                let samples = diffusion.sample_ddim_batched(
-                    &model,
-                    &hidden_state,
-                    asset_id as u32,
-                    batch,
-                    current_chunk,
-                    DDIM_INFERENCE_STEPS,
-                    DDIM_ETA,
-                )?;
-
-                let chunk_vals = samples.squeeze(1)?.to_vec2::<f32>()?;
-                for (path_idx, returns) in chunk_vals.iter().enumerate() {
-                    for &predicted_norm_ret in returns {
-                        let predicted_ret = (predicted_norm_ret as f64 * std) + mean;
-                        batch_log_rets[path_idx] += predicted_ret;
-                        let next_price = batch_last_vals[path_idx] * predicted_ret.exp();
-                        batch_last_vals[path_idx] = next_price;
-                    }
-                }
-
-                produced += current_chunk;
-            }
-
-            period_returns.extend(batch_log_rets);
-            remaining -= batch;
-        }
-
-        // Statistics
-        let n = period_returns.len() as f64;
-        let mean_ret = period_returns.iter().sum::<f64>() / n;
-        let var_ret = period_returns
-            .iter()
-            .map(|r| (r - mean_ret).powi(2))
-            .sum::<f64>()
-            / (n - 1.0);
-        let std_ret = var_ret.sqrt();
-
-        // Annualize (horizon is in trading days)
-        let periods_per_year = TRADING_DAYS / horizon as f64;
-        let annual_return = mean_ret * periods_per_year;
-        let annual_vol = std_ret * periods_per_year.sqrt();
-        let sharpe = if annual_vol > 1e-8 {
-            (annual_return - RISK_FREE_RATE) / annual_vol
-        } else {
-            0.0
-        };
-
-        // Percentile prices
-        let mut sorted_rets = period_returns.clone();
-        sorted_rets.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let idx_10 = (n * 0.1) as usize;
-        let idx_50 = (n * 0.5) as usize;
-        let idx_90 = (n * 0.9) as usize;
-
-        forecasts.push(AssetForecast {
-            symbol: symbol.clone(),
-            current_price,
-            expected_return: mean_ret / horizon as f64,
-            volatility: std_ret / (horizon as f64).sqrt(),
-            annual_return,
-            annual_vol,
-            sharpe,
-            mc_period_returns: period_returns,
-            p10_price: current_price * sorted_rets[idx_10].exp(),
-            p50_price: current_price * sorted_rets[idx_50].exp(),
-            p90_price: current_price * sorted_rets[idx_90].exp(),
-        });
-    }
-
-    Ok(forecasts)
+    generate_multi_asset_forecasts_via_inference(symbols, horizon, num_simulations, backend).await
 }
 
 async fn generate_multi_asset_forecasts_via_inference(
@@ -312,6 +146,51 @@ async fn generate_multi_asset_forecasts_via_inference(
             forecast,
         )?;
         forecasts.push(asset_forecast);
+    }
+
+    Ok(forecasts)
+}
+
+pub async fn generate_multi_asset_forecasts_from_history_map(
+    histories: &HashMap<String, crate::data::StockData>,
+    symbols: &[String],
+    horizon: usize,
+    num_simulations: usize,
+    backend: ComputeBackend,
+) -> Result<Vec<AssetForecast>> {
+    let mut forecasts = Vec::with_capacity(symbols.len());
+
+    for symbol in symbols {
+        let data = histories
+            .get(symbol)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("Historical slice missing for {}", symbol))?;
+
+        if data.history.len() < LOOKBACK + 1 {
+            return Err(anyhow::anyhow!(
+                "Insufficient sliced history for {} ({} days)",
+                symbol,
+                data.history.len()
+            ));
+        }
+
+        let current_price = data.history.last().map(|c| c.close).unwrap_or_default();
+        let forecast = inference::run_inference_with_backend_from_histories(
+            histories,
+            symbol,
+            horizon,
+            num_simulations,
+            None,
+            backend,
+        )
+        .await?;
+
+        forecasts.push(build_asset_forecast_from_inference(
+            symbol.clone(),
+            current_price,
+            horizon,
+            forecast,
+        )?);
     }
 
     Ok(forecasts)

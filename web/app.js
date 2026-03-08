@@ -30,6 +30,10 @@ const switchTabByName = (tabName) => {
     futuChart.resize();
     futuChart.fit();
   }
+  if (tabName === 'backtest') {
+    backtestChart.resize();
+    backtestChart.fit();
+  }
 };
 let lastPortfolio = null;
 let lastPaperSeries = [];
@@ -76,6 +80,11 @@ const getLatestQuoteDelta = (symbol) => {
 };
 const actionStatus = document.getElementById('actionStatus');
 const quotesAsOf = document.getElementById('quotesAsOf');
+const backtestStartBtn = document.getElementById('backtestStart');
+const backtestSymbolsInput = document.getElementById('backtestSymbols');
+const backtestCapitalInput = document.getElementById('backtestCapital');
+const backtestDaysInput = document.getElementById('backtestDays');
+const backtestRebalanceDaysInput = document.getElementById('backtestRebalanceDays');
 const paperStartBtn = document.getElementById('paperStart');
 const paperLoadBtn = document.getElementById('paperLoad');
 const paperFilePicker = document.getElementById('paperFilePicker');
@@ -119,9 +128,11 @@ let legendForecastP10 = document.getElementById('legendForecastP10');
 let legendForecastP90 = document.getElementById('legendForecastP90');
 let paperMetricsByTime = new Map();
 let futuMetricsByTime = new Map();
+let backtestMetricsByTime = new Map();
 let lastForecastContext = null;
 let forecastBatchResults = new Map(); // symbol → {data, selectedSymbol}
 let forecastSelectedSymbol = null;
+let latestBacktestStatus = null;
 let paperTradeHistory = [];
 let paperTradeSeenKeys = new Set();
 let paperCostBasis = new Map();
@@ -136,6 +147,7 @@ let futuOpenOrderEditState = {
 };
 let selectedPaperRangeDays = 0.5;
 let selectedFutuRangeDays = 0.5;
+let selectedBacktestRangeDays = 365;
 let selectedFutuCurveMode = 'account';
 let paperSessionStartMs = null;
 let manualPaperTargets = [];
@@ -184,8 +196,15 @@ let futuRenderContext = {
   metricsByTime: new Map(),
   latest: null,
 };
+let backtestFullContext = {
+  portfolioSeries: [],
+  benchmarkSeries: [],
+  metricsByTime: new Map(),
+  latest: null,
+};
 let latestPaperStatus = null;
 let latestFutuStatus = null;
+const backtestRangeButtons = Array.from(document.querySelectorAll('[data-backtest-range-days]'));
 const paperRangeButtons = Array.from(document.querySelectorAll('[data-paper-range-days]'));
 const futuRangeButtons = Array.from(document.querySelectorAll('[data-futu-range-days]'));
 const futuCurveModeButtons = Array.from(document.querySelectorAll('[data-futu-curve-mode]'));
@@ -200,6 +219,14 @@ const futuLegendBenchmark = document.getElementById('futuLegendBenchmark');
 const futuLegendBenchmarkPnl = document.getElementById('futuLegendBenchmarkPnl');
 const futuLegendSpread = document.getElementById('futuLegendSpread');
 const futuLegendUpdated = document.getElementById('futuLegendUpdated');
+
+const backtestLegend = document.getElementById('backtestLegend');
+const backtestLegendPortfolio = document.getElementById('backtestLegendPortfolio');
+const backtestLegendPortfolioPnl = document.getElementById('backtestLegendPortfolioPnl');
+const backtestLegendBenchmark = document.getElementById('backtestLegendBenchmark');
+const backtestLegendBenchmarkPnl = document.getElementById('backtestLegendBenchmarkPnl');
+const backtestLegendSpread = document.getElementById('backtestLegendSpread');
+const backtestLegendUpdated = document.getElementById('backtestLegendUpdated');
 
 const tradeFilterButtons = Array.from(document.querySelectorAll('[data-trade-filter]'));
 const tradeSearchInput = document.getElementById('tradeSearchInput');
@@ -1258,6 +1285,47 @@ const renderPaperChartFromCurrentContext = () => {
   updatePaperRangePadBand();
 };
 
+const renderBacktestChartFromCurrentContext = () => {
+  const filtered = filterPaperContextByRangeDays(backtestFullContext, selectedBacktestRangeDays);
+  backtestMetricsByTime = filtered.metricsByTime;
+
+  if (filtered.portfolioSeries.length > 0) {
+    const latestTime = filtered.portfolioSeries[filtered.portfolioSeries.length - 1].time;
+    const selectedDays = Number(selectedBacktestRangeDays);
+    const from = Number.isFinite(selectedDays) && selectedDays > 0
+      ? latestTime - Math.floor(selectedDays * 86400)
+      : filtered.portfolioSeries[0].time;
+    const paddedPortfolioSeries = Number.isFinite(selectedDays) && selectedDays > 0
+      ? padPaperSeriesToRange(filtered.portfolioSeries, from)
+      : filtered.portfolioSeries;
+    const paddedBenchmarkSeries = filtered.benchmarkSeries.length > 0
+      ? (Number.isFinite(selectedDays) && selectedDays > 0
+        ? padPaperSeriesToRange(filtered.benchmarkSeries, from)
+        : filtered.benchmarkSeries)
+      : [];
+
+    backtestPortfolioLine.setData(ensureVisibleSeries(paddedPortfolioSeries));
+    backtestBenchmarkLine.setData(paddedBenchmarkSeries.length > 0 ? ensureVisibleSeries(paddedBenchmarkSeries) : []);
+
+    const timeScale = backtestChart?.chart?.timeScale?.();
+    if (timeScale && Number.isFinite(selectedDays) && selectedDays > 0 && typeof timeScale.setVisibleRange === 'function') {
+      timeScale.setVisibleRange({ from, to: latestTime });
+    } else {
+      backtestChart.fit();
+    }
+    setBacktestLegendText(filtered.latest || backtestFullContext.latest || null);
+  } else {
+    backtestPortfolioLine.setData([]);
+    backtestBenchmarkLine.setData([]);
+    setBacktestLegendText(null);
+  }
+
+  for (const btn of backtestRangeButtons) {
+    const days = Number(btn.dataset.backtestRangeDays);
+    btn.classList.toggle('active', days === selectedBacktestRangeDays);
+  }
+};
+
 const buildSnapshotDataSignature = (status) => {
   const snapshots = Array.isArray(status?.snapshots) ? status.snapshots : [];
   const latest = status?.latest_snapshot || null;
@@ -2095,6 +2163,37 @@ const setFutuLegendText = (metrics) => {
   futuLegendSpread.classList.add(metrics.spreadUsd >= 0 ? 'legend-up' : 'legend-down');
 };
 
+const setBacktestLegendText = (metrics) => {
+  if (!backtestLegendPortfolio || !backtestLegendPortfolioPnl || !backtestLegendBenchmark || !backtestLegendBenchmarkPnl || !backtestLegendSpread || !backtestLegendUpdated) return;
+
+  if (!metrics) {
+    backtestLegendPortfolio.textContent = '--';
+    backtestLegendPortfolioPnl.textContent = '--';
+    backtestLegendBenchmark.textContent = '--';
+    backtestLegendBenchmarkPnl.textContent = '--';
+    backtestLegendSpread.textContent = '--';
+    backtestLegendUpdated.textContent = '--';
+    backtestLegendPortfolioPnl.classList.remove('legend-up', 'legend-down');
+    backtestLegendBenchmarkPnl.classList.remove('legend-up', 'legend-down');
+    backtestLegendSpread.classList.remove('legend-up', 'legend-down');
+    return;
+  }
+
+  backtestLegendPortfolio.textContent = formatMoney(metrics.portfolioValue);
+  backtestLegendPortfolioPnl.textContent = `${metrics.portfolioPnlUsd >= 0 ? '+' : ''}${formatMoney(metrics.portfolioPnlUsd)} (${metrics.portfolioPnlPct >= 0 ? '+' : ''}${metrics.portfolioPnlPct.toFixed(2)}%)`;
+  backtestLegendBenchmark.textContent = formatMoney(metrics.benchmarkValue);
+  backtestLegendBenchmarkPnl.textContent = `${metrics.benchmarkPnlUsd >= 0 ? '+' : ''}${formatMoney(metrics.benchmarkPnlUsd)} (${metrics.benchmarkPnlPct >= 0 ? '+' : ''}${metrics.benchmarkPnlPct.toFixed(2)}%)`;
+  backtestLegendSpread.textContent = `${metrics.spreadUsd >= 0 ? '+' : ''}${formatMoney(metrics.spreadUsd)} (${metrics.spreadPct >= 0 ? '+' : ''}${metrics.spreadPct.toFixed(2)}%)`;
+  backtestLegendUpdated.textContent = metrics.updatedText || '--';
+
+  backtestLegendPortfolioPnl.classList.remove('legend-up', 'legend-down');
+  backtestLegendPortfolioPnl.classList.add(metrics.portfolioPnlUsd >= 0 ? 'legend-up' : 'legend-down');
+  backtestLegendBenchmarkPnl.classList.remove('legend-up', 'legend-down');
+  backtestLegendBenchmarkPnl.classList.add(metrics.benchmarkPnlUsd >= 0 ? 'legend-up' : 'legend-down');
+  backtestLegendSpread.classList.remove('legend-up', 'legend-down');
+  backtestLegendSpread.classList.add(metrics.spreadUsd >= 0 ? 'legend-up' : 'legend-down');
+};
+
 const showPaperLegend = () => {
   if (!paperLegend) return;
   paperLegend.classList.add('visible');
@@ -2105,9 +2204,19 @@ const showFutuLegend = () => {
   futuLegend.classList.add('visible');
 };
 
+const showBacktestLegend = () => {
+  if (!backtestLegend) return;
+  backtestLegend.classList.add('visible');
+};
+
 const hideFutuLegend = () => {
   if (!futuLegend) return;
   futuLegend.classList.remove('visible');
+};
+
+const hideBacktestLegend = () => {
+  if (!backtestLegend) return;
+  backtestLegend.classList.remove('visible');
 };
 
 const hidePaperLegend = () => {
@@ -3858,6 +3967,11 @@ const futuStrategyFtLine = futuChart.addLineSeries({ color: '#5b9cf6', lineWidth
 const futuBenchmarkLine = futuChart.addLineSeries({ color: '#f59e0b', lineWidth: 2 });
 attachChartAutoResize(futuChart);
 
+const backtestChart = createChartCompat('backtestChart');
+const backtestPortfolioLine = backtestChart.addLineSeries({ color: '#00d4aa', lineWidth: 2 });
+const backtestBenchmarkLine = backtestChart.addLineSeries({ color: '#f59e0b', lineWidth: 2 });
+attachChartAutoResize(backtestChart);
+
 for (const btn of tradeFilterButtons) {
   btn.addEventListener('click', () => {
     for (const b of tradeFilterButtons) b.classList.remove('active');
@@ -4110,6 +4224,15 @@ for (const btn of paperRangeButtons) {
   });
 }
 
+for (const btn of backtestRangeButtons) {
+  btn.addEventListener('click', () => {
+    const days = Number(btn.dataset.backtestRangeDays);
+    if (!Number.isFinite(days) || days < 0) return;
+    selectedBacktestRangeDays = days;
+    renderBacktestChartFromCurrentContext();
+  });
+}
+
 for (const btn of futuRangeButtons) {
   btn.addEventListener('click', () => {
     const days = Number(btn.dataset.futuRangeDays);
@@ -4180,10 +4303,32 @@ if (futuChart?.chart && typeof futuChart.chart.subscribeCrosshairMove === 'funct
   });
 }
 
+if (backtestChart?.container) {
+  backtestChart.container.addEventListener('mouseenter', showBacktestLegend);
+  backtestChart.container.addEventListener('mouseleave', hideBacktestLegend);
+}
+
+if (backtestChart?.chart && typeof backtestChart.chart.subscribeCrosshairMove === 'function') {
+  backtestChart.chart.subscribeCrosshairMove((param) => {
+    if (!param || !param.time) return;
+    const t = typeof param.time === 'number'
+      ? param.time
+      : (typeof param.time?.timestamp === 'number' ? param.time.timestamp : null);
+    if (t == null) return;
+
+    const metrics = backtestMetricsByTime.get(t);
+    if (metrics) {
+      setBacktestLegendText(metrics);
+      showBacktestLegend();
+    }
+  });
+}
+
 window.addEventListener('resize', () => {
   fChart.resize();
   paperChart.resize();
   futuChart.resize();
+  backtestChart.resize();
 });
 
 const setPaperStatusChip = (status) => {
@@ -5090,6 +5235,115 @@ const refreshTrain = async () => {
 };
 setInterval(refreshTrain, 5000);
 
+const renderBacktestWeightsTable = (st) => {
+  const tbody = document.querySelector('#backtestWeightsTable tbody');
+  if (!tbody) return;
+  const rows = Array.isArray(st?.latest_weights) ? st.latest_weights : [];
+  if (rows.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="2" class="flat">No rebalance weights yet.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map((row) => `
+    <tr>
+      <td>${row.symbol || '--'}</td>
+      <td class="num">${Number(row.weight || 0).toFixed(4)} (${(Number(row.weight || 0) * 100).toFixed(2)}%)</td>
+    </tr>
+  `).join('');
+};
+
+const renderBacktestKpis = (st) => {
+  const grid = document.getElementById('backtestKpiGrid');
+  if (!grid) return;
+  const latest = backtestFullContext?.latest;
+  const initialCapital = Number(st?.initial_capital_usd || 0);
+  if (!latest || !Number.isFinite(initialCapital) || initialCapital <= 0) {
+    grid.innerHTML = '';
+    return;
+  }
+
+  grid.innerHTML = `
+    <div class="kpi-card">
+      <div class="kpi-label">Final NAV</div>
+      <div class="kpi-value">${formatMoney(latest.portfolioValue)}</div>
+    </div>
+    <div class="kpi-card ${latest.portfolioPnlUsd >= 0 ? 'kpi-positive' : 'kpi-negative'}">
+      <div class="kpi-label">Strategy Return</div>
+      <div class="kpi-value">${latest.portfolioPnlPct >= 0 ? '+' : ''}${latest.portfolioPnlPct.toFixed(2)}%</div>
+      <div class="kpi-sub">${latest.portfolioPnlUsd >= 0 ? '+' : ''}${formatMoney(latest.portfolioPnlUsd)}</div>
+    </div>
+    <div class="kpi-card ${latest.benchmarkPnlUsd >= 0 ? 'kpi-positive' : 'kpi-negative'}">
+      <div class="kpi-label">QQQ Return</div>
+      <div class="kpi-value">${latest.benchmarkPnlPct >= 0 ? '+' : ''}${latest.benchmarkPnlPct.toFixed(2)}%</div>
+      <div class="kpi-sub">${latest.benchmarkPnlUsd >= 0 ? '+' : ''}${formatMoney(latest.benchmarkPnlUsd)}</div>
+    </div>
+    <div class="kpi-card ${latest.spreadUsd >= 0 ? 'kpi-positive' : 'kpi-negative'}">
+      <div class="kpi-label">Alpha vs QQQ</div>
+      <div class="kpi-value">${latest.spreadPct >= 0 ? '+' : ''}${latest.spreadPct.toFixed(2)}%</div>
+      <div class="kpi-sub">${latest.spreadUsd >= 0 ? '+' : ''}${formatMoney(latest.spreadUsd)}</div>
+    </div>
+  `;
+};
+
+const refreshBacktest = async () => {
+  try {
+    const st = await api('/api/backtest/status');
+    latestBacktestStatus = st;
+
+    const rawBox = document.getElementById('backtestRawJson');
+    const phaseLabel = document.getElementById('backtestPhaseLabel');
+    const progressWrap = document.getElementById('backtestProgressWrap');
+    const progressFill = document.getElementById('backtestProgressFill');
+    const progressLeft = document.getElementById('backtestProgressLeft');
+    const progressRight = document.getElementById('backtestProgressRight');
+    const badge = document.getElementById('backtestTabBadge');
+    const logBox = document.getElementById('backtestLogBox');
+
+    if (rawBox) rawBox.textContent = JSON.stringify(st, null, 2);
+    if (badge) {
+      badge.classList.toggle('running', !!st.running);
+      if (!st.running) badge.classList.remove('running');
+    }
+    if (phaseLabel) {
+      phaseLabel.textContent = st.running
+        ? (st.last_message || `Running ${st.progress_current_day || 0}/${st.progress_total_days || 0}`)
+        : (st.last_error ? `Failed: ${st.last_error}` : (st.last_message || 'Idle'));
+    }
+
+    if (progressWrap && progressFill) {
+      const total = Number(st.progress_total_days || 0);
+      const current = Number(st.progress_current_day || 0);
+      if (st.running || current > 0 || total > 0) {
+        progressWrap.style.display = '';
+        const pct = total > 0 ? Math.min(100, (current / total) * 100) : 0;
+        progressFill.style.width = `${pct.toFixed(1)}%`;
+        if (progressLeft) progressLeft.textContent = `${pct.toFixed(0)}%`;
+        if (progressRight) progressRight.textContent = `${current}/${total || '--'} trading days`;
+      } else {
+        progressWrap.style.display = 'none';
+      }
+    }
+
+    const ctx = buildPaperSeriesContext(st.snapshots || []);
+    backtestFullContext = ctx.portfolioSeries.length > 0 ? ctx : buildFallbackPaperContext(st.latest_snapshot);
+    renderBacktestChartFromCurrentContext();
+    renderBacktestKpis(st);
+    renderBacktestWeightsTable(st);
+
+    if (logBox) {
+      const escapeHtml = (value) => String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+      logBox.innerHTML = (st.logs || []).slice(-80).map((x) => `<div>${escapeHtml(x)}</div>`).join('');
+    }
+  } catch (e) {
+    console.warn(e);
+  }
+};
+setInterval(refreshBacktest, 2500);
+
 document.getElementById('trainStart').addEventListener('click', async () => {
   try {
     await withBusy('trainStart', 'Starting...', 'Training started', async () => {
@@ -5106,9 +5360,33 @@ document.getElementById('trainStart').addEventListener('click', async () => {
   } catch (e) { alert(e.message); }
 });
 
+backtestStartBtn?.addEventListener('click', async () => {
+  try {
+    await withBusy('backtestStart', 'Starting...', 'Backtest started', async () => {
+      const symbols = String(backtestSymbolsInput?.value || '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      await api('/api/backtest/start', {
+        method: 'POST',
+        body: JSON.stringify({
+          symbols,
+          initial_capital: Number(backtestCapitalInput?.value || 80000),
+          period_days: Number(backtestDaysInput?.value || 252),
+          rebalance_every_days: Number(backtestRebalanceDaysInput?.value || 1),
+        }),
+      });
+      await refreshBacktest();
+    });
+  } catch (e) {
+    alert(e.message);
+  }
+});
+
 refreshPaper();
 refreshFutu();
 refreshTrain();
+refreshBacktest();
 renderPaperTargetChips();
 refreshRealtimeQuotes();
 setInterval(refreshRealtimeQuotes, 12000);
@@ -5243,6 +5521,29 @@ const restoreState = async () => {
     if (state.train) {
       const rawBox = document.getElementById('trainRawJson');
       if (rawBox) rawBox.textContent = JSON.stringify(state.train, null, 2);
+    }
+
+    if (state.backtest) {
+      latestBacktestStatus = state.backtest;
+      if (backtestSymbolsInput && Array.isArray(state.backtest.candidate_symbols) && state.backtest.candidate_symbols.length > 0) {
+        backtestSymbolsInput.value = state.backtest.candidate_symbols.join(',');
+      }
+      if (backtestCapitalInput && Number.isFinite(Number(state.backtest.initial_capital_usd))) {
+        backtestCapitalInput.value = Number(state.backtest.initial_capital_usd).toFixed(2);
+      }
+      if (backtestDaysInput && Number.isFinite(Number(state.backtest.period_days))) {
+        backtestDaysInput.value = Number(state.backtest.period_days);
+      }
+      if (backtestRebalanceDaysInput && Number.isFinite(Number(state.backtest.rebalance_every_days))) {
+        backtestRebalanceDaysInput.value = Number(state.backtest.rebalance_every_days);
+      }
+      const ctx = buildPaperSeriesContext(state.backtest.snapshots || []);
+      backtestFullContext = ctx.portfolioSeries.length > 0 ? ctx : buildFallbackPaperContext(state.backtest.latest_snapshot);
+      renderBacktestChartFromCurrentContext();
+      renderBacktestKpis(state.backtest);
+      renderBacktestWeightsTable(state.backtest);
+      const rawBox = document.getElementById('backtestRawJson');
+      if (rawBox) rawBox.textContent = JSON.stringify(state.backtest, null, 2);
     }
 
     if (restoredFromLocalBatch && forecastBatchResults.size > 1) {

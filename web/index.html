@@ -662,6 +662,7 @@
     #forecastChart { height: 420px; border-radius: var(--radius); overflow: hidden; box-shadow: inset 0 0 30px rgba(0,0,0,.15); }
     #paperChart { height: 380px; border-radius: var(--radius); overflow: hidden; }
     #futuChart { height: 380px; border-radius: var(--radius); overflow: hidden; }
+    #backtestChart { height: 380px; border-radius: var(--radius); overflow: hidden; }
     .paper-range-pad-band {
       position: absolute;
       left: 0;
@@ -2414,6 +2415,11 @@
           <span class="tab-label">Train Model</span>
           <span class="tab-badge" id="trainTabBadge"></span>
         </button>
+        <button class="tab-btn" data-tab="backtest">
+          <span class="tab-icon-wrap"><span class="tab-icon">🧪</span></span>
+          <span class="tab-label">Backtest Lab</span>
+          <span class="tab-badge" id="backtestTabBadge"></span>
+        </button>
       </nav>
       <div class="sidebar-footer">
         <div class="sidebar-footer-row">
@@ -3261,6 +3267,101 @@
             <summary style="cursor:pointer;font-size:11px;color:var(--muted);user-select:none;">Raw JSON</summary>
             <div id="trainRawJson" class="train-raw-json" style="margin-top:6px;">Idle</div>
           </details>
+        </div>
+      </section>
+
+      <!-- ══════ Backtest Tab ══════ -->
+      <section id="tab-backtest" class="tab-panel hidden">
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title"><span class="panel-title-icon">🧪</span> Rolling Portfolio Backtest</div>
+            <div class="panel-subtitle">Daily rebalance using the current diffusion model, compared against QQQ</div>
+          </div>
+          <div class="row">
+            <div class="field" style="flex:1; min-width:280px;">
+              <label class="field-label">Candidate Pool</label>
+              <input id="backtestSymbols" value="NVDA,MSFT,URA,IAU,COPX,ETN,TLT" placeholder="e.g. NVDA,MSFT,QQQ,TLT" style="width:100%" />
+            </div>
+            <div class="field">
+              <label class="field-label">Initial Capital ($)</label>
+              <input id="backtestCapital" type="number" value="80000" min="1000" step="100" style="width:120px" />
+            </div>
+            <div class="field">
+              <label class="field-label">Backtest Days</label>
+              <input id="backtestDays" type="number" value="252" min="30" max="1500" step="1" style="width:110px" />
+            </div>
+            <div class="field">
+              <label class="field-label">Rebalance Every (days)</label>
+              <input id="backtestRebalanceDays" type="number" value="1" min="1" max="30" step="1" style="width:120px" />
+            </div>
+            <div class="field">
+              <label class="field-label">&nbsp;</label>
+              <button class="primary" id="backtestStart">▶ Run Backtest</button>
+            </div>
+          </div>
+          <div class="small" style="margin-top:10px;">回测逻辑：对候选池每个交易日用截至当日的历史重新预测，生成组合目标权重，然后持有到下一个交易日收盘；基准固定为 QQQ。</div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title"><span class="panel-title-icon">📈</span> Backtest Progress</div>
+            <div class="panel-subtitle" id="backtestPhaseLabel">Idle</div>
+          </div>
+          <div id="backtestProgressWrap" class="train-progress-wrap" style="display:none;">
+            <div class="train-progress-bar"><div class="train-progress-fill" id="backtestProgressFill"></div></div>
+            <div class="train-progress-text"><span id="backtestProgressLeft">--</span><span id="backtestProgressRight">--</span></div>
+          </div>
+          <div id="backtestKpiGrid" class="paper-kpi-grid" style="margin-top:10px;"></div>
+          <details style="margin-top:8px;">
+            <summary style="cursor:pointer;font-size:11px;color:var(--muted);user-select:none;">Raw JSON</summary>
+            <div id="backtestRawJson" class="train-raw-json" style="margin-top:6px;">Idle</div>
+          </details>
+        </div>
+
+        <div class="panel" style="padding:12px;">
+          <div class="range-group" id="backtestRangeGroup">
+            <button class="range-btn" data-backtest-range-days="30">30d</button>
+            <button class="range-btn" data-backtest-range-days="90">90d</button>
+            <button class="range-btn" data-backtest-range-days="180">180d</button>
+            <button class="range-btn active" data-backtest-range-days="365">1y</button>
+            <button class="range-btn" data-backtest-range-days="0">All</button>
+          </div>
+          <div class="chart-wrap">
+            <div id="backtestChart"></div>
+            <div class="chart-legend" id="backtestLegend">
+              <div class="legend-title">Backtest Metrics</div>
+              <div class="legend-row"><span class="legend-key">Portfolio</span><span class="legend-val" id="backtestLegendPortfolio">--</span></div>
+              <div class="legend-row"><span class="legend-key">Portfolio PnL</span><span class="legend-val" id="backtestLegendPortfolioPnl">--</span></div>
+              <div class="legend-row"><span class="legend-key">QQQ Benchmark</span><span class="legend-val" id="backtestLegendBenchmark">--</span></div>
+              <div class="legend-row"><span class="legend-key">QQQ Return</span><span class="legend-val" id="backtestLegendBenchmarkPnl">--</span></div>
+              <div class="legend-row"><span class="legend-key">Spread</span><span class="legend-val" id="backtestLegendSpread">--</span></div>
+              <div class="legend-row"><span class="legend-key">Last Update</span><span class="legend-val" id="backtestLegendUpdated">--</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title"><span class="panel-title-icon">🎯</span> Latest Target Weights</div>
+            <div class="panel-subtitle">Most recent rebalance output used by the backtest engine</div>
+          </div>
+          <table id="backtestWeightsTable">
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th class="num">Weight</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title"><span class="panel-title-icon">📜</span> Backtest Logs</div>
+            <div class="panel-subtitle">Rolling optimization and progress updates</div>
+          </div>
+          <div id="backtestLogBox" style="max-height:220px;overflow:auto;font-size:11px;font-family:var(--mono);line-height:1.7;color:var(--muted);padding:4px 0;"></div>
         </div>
       </section>
 

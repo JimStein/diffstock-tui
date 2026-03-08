@@ -1,0 +1,8 @@
+D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_featurecheck\debug\deps\num_complex-7b0b36dac15bb8c3.d: C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\num-complex-0.4.6\src\lib.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\num-complex-0.4.6\src\cast.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\num-complex-0.4.6\src\pow.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\num-complex-0.4.6\src\complex_float.rs
+
+D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_featurecheck\debug\deps\libnum_complex-7b0b36dac15bb8c3.rmeta: C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\num-complex-0.4.6\src\lib.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\num-complex-0.4.6\src\cast.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\num-complex-0.4.6\src\pow.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\num-complex-0.4.6\src\complex_float.rs
+
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\num-complex-0.4.6\src\lib.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\num-complex-0.4.6\src\cast.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\num-complex-0.4.6\src\pow.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\num-complex-0.4.6\src\complex_float.rs:

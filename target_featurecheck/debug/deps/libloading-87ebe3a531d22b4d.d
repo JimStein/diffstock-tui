@@ -1,0 +1,11 @@
+D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_featurecheck\debug\deps\libloading-87ebe3a531d22b4d.d: C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libloading-0.8.9\src\lib.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libloading-0.8.9\src\changelog.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libloading-0.8.9\src\error.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libloading-0.8.9\src\os\mod.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libloading-0.8.9\src\os\windows\mod.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libloading-0.8.9\src\safe.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libloading-0.8.9\src\util.rs
+
+D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_featurecheck\debug\deps\liblibloading-87ebe3a531d22b4d.rmeta: C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libloading-0.8.9\src\lib.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libloading-0.8.9\src\changelog.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libloading-0.8.9\src\error.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libloading-0.8.9\src\os\mod.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libloading-0.8.9\src\os\windows\mod.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libloading-0.8.9\src\safe.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libloading-0.8.9\src\util.rs
+
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libloading-0.8.9\src\lib.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libloading-0.8.9\src\changelog.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libloading-0.8.9\src\error.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libloading-0.8.9\src\os\mod.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libloading-0.8.9\src\os\windows\mod.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libloading-0.8.9\src\safe.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libloading-0.8.9\src\util.rs:

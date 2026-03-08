@@ -6,7 +6,7 @@ use axum::response::{Html, IntoResponse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -21,6 +21,7 @@ const APP_JS: &str = include_str!("../web/app.js");
 struct WebState {
     backend_default: config::ComputeBackend,
     train: Arc<Mutex<TrainRuntimeState>>,
+    backtest: Arc<Mutex<BacktestRuntimeState>>,
     paper: Arc<Mutex<PaperRuntimeState>>,
     futu: Arc<Mutex<FutuRuntimeState>>,
     forecast: Arc<Mutex<ForecastRuntimeState>>,
@@ -59,6 +60,26 @@ struct TrainRuntimeState {
     finished_at: Option<String>,
     last_message: Option<String>,
     last_error: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct BacktestRuntimeState {
+    running: bool,
+    started_at: Option<String>,
+    finished_at: Option<String>,
+    runtime_file: Option<String>,
+    candidate_symbols: Vec<String>,
+    initial_capital_usd: f64,
+    period_days: usize,
+    rebalance_every_days: usize,
+    progress_current_day: usize,
+    progress_total_days: usize,
+    last_message: Option<String>,
+    last_error: Option<String>,
+    latest_snapshot: Option<paper_trading::MinutePortfolioSnapshot>,
+    snapshots: Vec<paper_trading::MinutePortfolioSnapshot>,
+    latest_weights: Vec<PaperTargetState>,
+    logs: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
@@ -124,6 +145,7 @@ struct FullUiState {
     forecast: ForecastRuntimeState,
     portfolio: PortfolioRuntimeState,
     train: TrainRuntimeState,
+    backtest: BacktestRuntimeState,
     paper: PaperRuntimeState,
     futu: FutuRuntimeState,
     data_live_source: String,
@@ -140,6 +162,29 @@ impl Default for TrainRuntimeState {
             finished_at: None,
             last_message: None,
             last_error: None,
+        }
+    }
+}
+
+impl Default for BacktestRuntimeState {
+    fn default() -> Self {
+        Self {
+            running: false,
+            started_at: None,
+            finished_at: None,
+            runtime_file: None,
+            candidate_symbols: Vec::new(),
+            initial_capital_usd: paper_trading::DEFAULT_INITIAL_CAPITAL_USD,
+            period_days: 252,
+            rebalance_every_days: 1,
+            progress_current_day: 0,
+            progress_total_days: 0,
+            last_message: None,
+            last_error: None,
+            latest_snapshot: None,
+            snapshots: Vec::new(),
+            latest_weights: Vec::new(),
+            logs: Vec::new(),
         }
     }
 }
@@ -435,6 +480,16 @@ struct TrainStartRequest {
 }
 
 #[derive(Debug, Deserialize)]
+struct BacktestStartRequest {
+    symbols: Vec<String>,
+    initial_capital: Option<f64>,
+    period_days: Option<usize>,
+    rebalance_every_days: Option<usize>,
+    use_cuda: Option<bool>,
+    compute_backend: Option<ApiComputeBackend>,
+}
+
+#[derive(Debug, Deserialize)]
 struct PaperTarget {
     symbol: String,
 }
@@ -528,6 +583,7 @@ pub async fn run_webui_server(port: u16, backend_default: config::ComputeBackend
     let state = WebState {
         backend_default,
         train: Arc::new(Mutex::new(TrainRuntimeState::default())),
+        backtest: Arc::new(Mutex::new(BacktestRuntimeState::default())),
         paper: Arc::new(Mutex::new(PaperRuntimeState::default())),
         futu: Arc::new(Mutex::new(FutuRuntimeState::default())),
         forecast: Arc::new(Mutex::new(forecast_state)),
@@ -557,6 +613,8 @@ pub async fn run_webui_server(port: u16, backend_default: config::ComputeBackend
         .route("/api/quotes", post(quotes))
         .route("/api/train/start", post(start_train))
         .route("/api/train/status", get(train_status))
+        .route("/api/backtest/start", post(start_backtest))
+        .route("/api/backtest/status", get(backtest_status))
         .route("/api/paper/start", post(start_paper))
         .route("/api/paper/load", post(load_paper))
         .route("/api/paper/status", get(paper_status))
@@ -916,6 +974,7 @@ async fn full_state(
         forecast: state.forecast.lock().await.clone(),
         portfolio: state.portfolio.lock().await.clone(),
         train: state.train.lock().await.clone(),
+        backtest: state.backtest.lock().await.clone(),
         paper,
         futu,
         data_live_source,
@@ -3159,6 +3218,479 @@ async fn train_status(
     Ok(Json(state.train.lock().await.clone()))
 }
 
+fn normalize_backtest_symbols(symbols: &[String]) -> Vec<String> {
+    let mut out = symbols
+        .iter()
+        .map(|s| s.trim().to_uppercase())
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>();
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn normalize_allocation_weights(weights: Vec<(String, f64)>) -> Vec<PaperTargetState> {
+    let mut out = weights
+        .into_iter()
+        .filter_map(|(symbol, weight)| {
+            let clipped = weight.clamp(0.0, 1.0);
+            if clipped > 0.0 {
+                Some(PaperTargetState {
+                    symbol: symbol.trim().to_uppercase(),
+                    weight: clipped,
+                })
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let total: f64 = out.iter().map(|x| x.weight).sum();
+    if total > 1.0 {
+        for item in &mut out {
+            item.weight /= total;
+        }
+    }
+    out.sort_by(|a, b| b.weight.partial_cmp(&a.weight).unwrap_or(std::cmp::Ordering::Equal));
+    out
+}
+
+fn trim_runtime_logs(logs: &mut Vec<String>, limit: usize) {
+    if logs.len() > limit {
+        let keep_from = logs.len().saturating_sub(limit);
+        *logs = logs.split_off(keep_from);
+    }
+}
+
+async fn backtest_status(
+    State(state): State<WebState>,
+) -> Result<Json<BacktestRuntimeState>, (StatusCode, Json<ApiError>)> {
+    Ok(Json(state.backtest.lock().await.clone()))
+}
+
+async fn start_backtest(
+    State(state): State<WebState>,
+    Json(req): Json<BacktestStartRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ApiError>)> {
+    let symbols = normalize_backtest_symbols(&req.symbols);
+    if symbols.is_empty() {
+        return Err(api_err(StatusCode::BAD_REQUEST, "symbols cannot be empty"));
+    }
+
+    let initial_capital = req
+        .initial_capital
+        .unwrap_or(paper_trading::DEFAULT_INITIAL_CAPITAL_USD);
+    if !initial_capital.is_finite() || initial_capital <= 0.0 {
+        return Err(api_err(StatusCode::BAD_REQUEST, "initial_capital must be > 0"));
+    }
+
+    let period_days = req.period_days.unwrap_or(252).clamp(30, 1500);
+    let rebalance_every_days = req.rebalance_every_days.unwrap_or(1).clamp(1, 30);
+    let runtime_path = create_backtest_output_path().map_err(internal_err)?;
+    let runtime_path_text = runtime_path.display().to_string();
+
+    {
+        let mut bt = state.backtest.lock().await;
+        if bt.running {
+            return Err(api_err(StatusCode::CONFLICT, "backtest is already running"));
+        }
+        bt.running = true;
+        bt.started_at = Some(chrono::Local::now().to_rfc3339());
+        bt.finished_at = None;
+        bt.runtime_file = Some(runtime_path_text.clone());
+        bt.candidate_symbols = symbols.clone();
+        bt.initial_capital_usd = initial_capital;
+        bt.period_days = period_days;
+        bt.rebalance_every_days = rebalance_every_days;
+        bt.progress_current_day = 0;
+        bt.progress_total_days = 0;
+        bt.last_message = Some("Backtest queued".to_string());
+        bt.last_error = None;
+        bt.latest_snapshot = None;
+        bt.snapshots.clear();
+        bt.latest_weights.clear();
+        bt.logs.clear();
+        push_backtest_log(&mut bt, Some(runtime_path.as_path()), format!(
+            "Backtest started => symbols={}, initial_capital={:.2}, period_days={}, rebalance_every_days={}, runtime_file={}",
+            symbols.join(","),
+            initial_capital,
+            period_days,
+            rebalance_every_days,
+            runtime_path_text
+        ));
+    }
+
+    let backtest_state = state.backtest.clone();
+    let backtest_runtime_path = runtime_path.clone();
+    let requested_backend = match req.use_cuda {
+        Some(true) => config::ComputeBackend::Cuda,
+        Some(false) => config::ComputeBackend::Cpu,
+        None => req.compute_backend.map(Into::into).unwrap_or(state.backend_default),
+    };
+    let backend = config::resolve_compute_backend(requested_backend, "webui-backtest");
+
+    tokio::spawn(async move {
+        let benchmark_symbol = paper_trading::BENCHMARK_SYMBOL.to_string();
+        let mut fetch_symbols = symbols.clone();
+        if !fetch_symbols.iter().any(|s| s == &benchmark_symbol) {
+            fetch_symbols.push(benchmark_symbol.clone());
+        }
+
+        let result: Result<()> = async {
+            {
+                let mut bt = backtest_state.lock().await;
+                bt.last_message = Some("Fetching historical data".to_string());
+                push_backtest_log(&mut bt, Some(backtest_runtime_path.as_path()), format!(
+                    "Fetching historical data for {} symbols (benchmark={})",
+                    fetch_symbols.len(),
+                    benchmark_symbol
+                ));
+            }
+
+            let histories = data::fetch_ranges_prefetch(&fetch_symbols, config::DATA_RANGE).await?;
+            let benchmark = histories
+                .get(&benchmark_symbol)
+                .ok_or_else(|| anyhow::anyhow!("Missing benchmark history for {}", benchmark_symbol))?;
+
+            let mut common_dates: Option<HashSet<chrono::NaiveDate>> = None;
+            let mut index_maps: HashMap<String, HashMap<chrono::NaiveDate, usize>> = HashMap::new();
+
+            for symbol in fetch_symbols.iter() {
+                let data = histories
+                    .get(symbol)
+                    .ok_or_else(|| anyhow::anyhow!("Missing history for {}", symbol))?;
+                let dates = data
+                    .history
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, candle)| (candle.date.date_naive(), idx))
+                    .collect::<HashMap<_, _>>();
+                let date_set = dates.keys().copied().collect::<HashSet<_>>();
+                index_maps.insert(symbol.clone(), dates);
+                common_dates = Some(match common_dates {
+                    None => date_set,
+                    Some(prev) => prev.intersection(&date_set).copied().collect(),
+                });
+            }
+
+            let mut calendar = common_dates.unwrap_or_default().into_iter().collect::<Vec<_>>();
+            calendar.sort();
+
+            let max_steps = calendar.len().saturating_sub(config::LOOKBACK + 1);
+            if max_steps == 0 {
+                return Err(anyhow::anyhow!(
+                    "Not enough overlapping history across symbols for backtest"
+                ));
+            }
+            let total_steps = period_days.min(max_steps);
+            let start_idx = calendar.len().saturating_sub(total_steps + 1);
+            let eval_dates = calendar[start_idx..].to_vec();
+            if eval_dates.len() < 2 {
+                return Err(anyhow::anyhow!("Backtest calendar is too short"));
+            }
+
+            {
+                let mut bt = backtest_state.lock().await;
+                bt.progress_total_days = eval_dates.len().saturating_sub(1);
+                bt.last_message = Some("Running rolling daily backtest".to_string());
+                let progress_total_days = bt.progress_total_days;
+                push_backtest_log(&mut bt, Some(backtest_runtime_path.as_path()), format!(
+                    "Backtest calendar prepared => common_days={}, evaluated_days={}",
+                    calendar.len(),
+                    progress_total_days
+                ));
+            }
+
+            let benchmark_start_idx = *index_maps
+                .get(&benchmark_symbol)
+                .and_then(|m| m.get(&eval_dates[0]))
+                .ok_or_else(|| anyhow::anyhow!("Benchmark start date missing in index map"))?;
+            let benchmark_initial_price = benchmark.history[benchmark_start_idx].close;
+            if !benchmark_initial_price.is_finite() || benchmark_initial_price <= 0.0 {
+                return Err(anyhow::anyhow!("Invalid benchmark initial price"));
+            }
+
+            let mut portfolio_value = initial_capital;
+            let mut previous_portfolio_value = initial_capital;
+            let mut current_weights: Vec<PaperTargetState> = Vec::new();
+
+            let initial_snapshot = paper_trading::MinutePortfolioSnapshot {
+                timestamp: benchmark.history[benchmark_start_idx].date.to_rfc3339(),
+                total_value: initial_capital,
+                cash_usd: initial_capital,
+                pnl_usd: 0.0,
+                pnl_pct: 0.0,
+                benchmark_return_pct: 0.0,
+                symbols: Vec::new(),
+                holdings: Vec::new(),
+                holdings_symbols: Vec::new(),
+            };
+            {
+                let mut bt = backtest_state.lock().await;
+                bt.latest_snapshot = Some(initial_snapshot.clone());
+                bt.snapshots.push(initial_snapshot);
+            }
+            if let Err(err) = append_backtest_snapshot(
+                Some(backtest_runtime_path.as_path()),
+                &paper_trading::MinutePortfolioSnapshot {
+                    timestamp: benchmark.history[benchmark_start_idx].date.to_rfc3339(),
+                    total_value: initial_capital,
+                    cash_usd: initial_capital,
+                    pnl_usd: 0.0,
+                    pnl_pct: 0.0,
+                    benchmark_return_pct: 0.0,
+                    symbols: Vec::new(),
+                    holdings: Vec::new(),
+                    holdings_symbols: Vec::new(),
+                },
+                0,
+                eval_dates.len().saturating_sub(1),
+                &[],
+            ) {
+                let mut bt = backtest_state.lock().await;
+                bt.logs.push(runtime_log_with_ts(format!(
+                    "WARNING: failed to append initial backtest snapshot: {}",
+                    err
+                )));
+                trim_runtime_logs(&mut bt.logs, 400);
+            }
+
+            for step in 0..(eval_dates.len() - 1) {
+                let current_date = eval_dates[step];
+                let next_date = eval_dates[step + 1];
+
+                if current_weights.is_empty() || step % rebalance_every_days == 0 {
+                    let mut sliced_histories = HashMap::new();
+                    for symbol in &symbols {
+                        let idx = *index_maps
+                            .get(symbol)
+                            .and_then(|m| m.get(&current_date))
+                            .ok_or_else(|| anyhow::anyhow!("Missing current date for {}", symbol))?;
+                        let history = histories
+                            .get(symbol)
+                            .ok_or_else(|| anyhow::anyhow!("Missing prefetched history for {}", symbol))?
+                            .history[..=idx]
+                            .to_vec();
+                        sliced_histories.insert(
+                            symbol.clone(),
+                            data::StockData {
+                                symbol: symbol.clone(),
+                                history,
+                            },
+                        );
+                    }
+
+                    current_weights = if symbols.len() == 1 {
+                        vec![PaperTargetState {
+                            symbol: symbols[0].clone(),
+                            weight: 1.0,
+                        }]
+                    } else {
+                        let forecasts = portfolio::generate_multi_asset_forecasts_from_history_map(
+                            &sliced_histories,
+                            &symbols,
+                            portfolio::PORTFOLIO_HORIZON,
+                            portfolio::PORTFOLIO_MC_PATHS,
+                            backend,
+                        )
+                        .await?;
+                        let allocation = portfolio::optimize_portfolio(&forecasts)?;
+                        normalize_allocation_weights(allocation.weights)
+                    };
+
+                    let mut bt = backtest_state.lock().await;
+                    bt.latest_weights = current_weights.clone();
+                    push_backtest_log(&mut bt, Some(backtest_runtime_path.as_path()), format!(
+                        "Rebalance {} => {}",
+                        current_date,
+                        current_weights
+                            .iter()
+                            .map(|w| format!("{}:{:.1}%", w.symbol, w.weight * 100.0))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
+
+                let total_weight: f64 = current_weights.iter().map(|w| w.weight).sum();
+                let cash_weight = (1.0 - total_weight).max(0.0);
+                let cash_usd = portfolio_value * cash_weight;
+
+                let mut holdings = Vec::new();
+                let mut symbols_snapshot = Vec::new();
+                let mut invested_value = 0.0;
+
+                for weight in &current_weights {
+                    let current_idx = *index_maps
+                        .get(&weight.symbol)
+                        .and_then(|m| m.get(&current_date))
+                        .ok_or_else(|| anyhow::anyhow!("Missing current index for {}", weight.symbol))?;
+                    let next_idx = *index_maps
+                        .get(&weight.symbol)
+                        .and_then(|m| m.get(&next_date))
+                        .ok_or_else(|| anyhow::anyhow!("Missing next index for {}", weight.symbol))?;
+
+                    let current_candle = histories
+                        .get(&weight.symbol)
+                        .and_then(|d| d.history.get(current_idx))
+                        .ok_or_else(|| anyhow::anyhow!("Missing current candle for {}", weight.symbol))?;
+                    let next_candle = histories
+                        .get(&weight.symbol)
+                        .and_then(|d| d.history.get(next_idx))
+                        .ok_or_else(|| anyhow::anyhow!("Missing next candle for {}", weight.symbol))?;
+
+                    let current_price = current_candle.close;
+                    let next_price = next_candle.close;
+                    if !current_price.is_finite() || !next_price.is_finite() || current_price <= 0.0 {
+                        continue;
+                    }
+
+                    let current_value = portfolio_value * weight.weight;
+                    let quantity = current_value / current_price;
+                    let next_value = quantity * next_price;
+                    invested_value += next_value;
+
+                    holdings.push(paper_trading::MinuteHoldingSnapshot {
+                        symbol: weight.symbol.clone(),
+                        quantity,
+                        price: next_price,
+                        asset_value: next_value,
+                        avg_cost: current_price,
+                    });
+                    let change = next_price - current_price;
+                    let change_pct = if current_price > 0.0 {
+                        (change / current_price) * 100.0
+                    } else {
+                        0.0
+                    };
+                    symbols_snapshot.push(paper_trading::MinuteSymbolSnapshot {
+                        symbol: weight.symbol.clone(),
+                        price: next_price,
+                        change_1m: change,
+                        change_1m_pct: change_pct,
+                    });
+                }
+
+                portfolio_value = cash_usd + invested_value;
+                let benchmark_next_idx = *index_maps
+                    .get(&benchmark_symbol)
+                    .and_then(|m| m.get(&next_date))
+                    .ok_or_else(|| anyhow::anyhow!("Missing next benchmark date"))?;
+                let benchmark_price = benchmark.history[benchmark_next_idx].close;
+                let benchmark_return_pct = ((benchmark_price / benchmark_initial_price) - 1.0) * 100.0;
+                let pnl_usd = portfolio_value - initial_capital;
+                let pnl_pct = (pnl_usd / initial_capital) * 100.0;
+                let daily_return_pct = if previous_portfolio_value > 0.0 {
+                    ((portfolio_value / previous_portfolio_value) - 1.0) * 100.0
+                } else {
+                    0.0
+                };
+                holdings.sort_by(|a, b| a.symbol.cmp(&b.symbol));
+                symbols_snapshot.sort_by(|a, b| a.symbol.cmp(&b.symbol));
+                let holdings_symbols = holdings.iter().map(|h| h.symbol.clone()).collect::<Vec<_>>();
+
+                let snapshot = paper_trading::MinutePortfolioSnapshot {
+                    timestamp: benchmark.history[benchmark_next_idx].date.to_rfc3339(),
+                    total_value: portfolio_value,
+                    cash_usd,
+                    pnl_usd,
+                    pnl_pct,
+                    benchmark_return_pct,
+                    symbols: symbols_snapshot,
+                    holdings,
+                    holdings_symbols,
+                };
+
+                {
+                    let mut bt = backtest_state.lock().await;
+                    bt.progress_current_day = step + 1;
+                    let progress_current_day = bt.progress_current_day;
+                    let progress_total_days = bt.progress_total_days.max(1);
+                    bt.last_message = Some(format!(
+                        "Processed {}/{} trading days",
+                        progress_current_day,
+                        progress_total_days
+                    ));
+                    bt.latest_snapshot = Some(snapshot.clone());
+                    bt.snapshots.push(snapshot.clone());
+                    if bt.snapshots.len() > 6000 {
+                        let keep_from = bt.snapshots.len().saturating_sub(6000);
+                        bt.snapshots = bt.snapshots.split_off(keep_from);
+                    }
+                    let progress_total_days_exact = bt.progress_total_days;
+                    let cash_weight_pct = if portfolio_value > 0.0 {
+                        (cash_usd / portfolio_value) * 100.0
+                    } else {
+                        0.0
+                    };
+                    let top_weights = current_weights
+                        .iter()
+                        .take(3)
+                        .map(|w| format!("{}:{:.1}%", w.symbol, w.weight * 100.0))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    push_backtest_log(&mut bt, Some(backtest_runtime_path.as_path()), format!(
+                        "Day {}/{} => date={}, nav={:.2}, pnl={:+.2}%, day={:+.2}%, qqq={:+.2}%, cash={:.1}%, top={}",
+                        progress_current_day,
+                        progress_total_days_exact,
+                        next_date,
+                        portfolio_value,
+                        pnl_pct,
+                        daily_return_pct,
+                        benchmark_return_pct,
+                        cash_weight_pct,
+                        if top_weights.is_empty() { "--".to_string() } else { top_weights }
+                    ));
+                }
+
+                if let Err(err) = append_backtest_snapshot(
+                    Some(backtest_runtime_path.as_path()),
+                    &snapshot,
+                    step + 1,
+                    eval_dates.len().saturating_sub(1),
+                    &current_weights,
+                ) {
+                    let mut bt = backtest_state.lock().await;
+                    bt.logs.push(runtime_log_with_ts(format!(
+                        "WARNING: failed to append backtest snapshot: {}",
+                        err
+                    )));
+                    trim_runtime_logs(&mut bt.logs, 400);
+                }
+
+                previous_portfolio_value = portfolio_value;
+
+                tokio::task::yield_now().await;
+            }
+
+            Ok(())
+        }
+        .await;
+
+        let mut bt = backtest_state.lock().await;
+        bt.running = false;
+        bt.finished_at = Some(chrono::Local::now().to_rfc3339());
+        match result {
+            Ok(()) => {
+                bt.last_error = None;
+                bt.last_message = Some("Backtest completed".to_string());
+                push_backtest_log(&mut bt, Some(backtest_runtime_path.as_path()), "Backtest completed");
+            }
+            Err(err) => {
+                bt.last_error = Some(err.to_string());
+                bt.last_message = Some("Backtest failed".to_string());
+                push_backtest_log(
+                    &mut bt,
+                    Some(backtest_runtime_path.as_path()),
+                    format!("ERROR: backtest failed: {}", err),
+                );
+            }
+        }
+        trim_runtime_logs(&mut bt.logs, 400);
+    });
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
 async fn start_paper(
     State(state): State<WebState>,
     Json(req): Json<PaperStartRequest>,
@@ -3834,6 +4366,63 @@ fn create_futu_output_paths() -> Result<(PathBuf, PathBuf)> {
     let strategy_path = log_dir.join(format!("futu_sim_strategy_{}.json", suffix));
     let runtime_path = log_dir.join(format!("futu_sim_runtime_{}.jsonl", suffix));
     Ok((strategy_path, runtime_path))
+}
+
+fn create_backtest_output_path() -> Result<PathBuf> {
+    let log_dir = config::project_root_path().join("log");
+    if !log_dir.exists() {
+        std::fs::create_dir_all(&log_dir)?;
+    }
+
+    let suffix = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
+    Ok(log_dir.join(format!("backtest_runtime_{}.jsonl", suffix)))
+}
+
+fn push_backtest_log(
+    state: &mut BacktestRuntimeState,
+    runtime_path: Option<&Path>,
+    message: impl Into<String>,
+) {
+    let message = message.into();
+    state.logs.push(runtime_log_with_ts(&message));
+    trim_runtime_logs(&mut state.logs, 400);
+
+    if let Some(path) = runtime_path {
+        let payload = serde_json::json!({
+            "timestamp": chrono::Local::now().to_rfc3339(),
+            "kind": "log",
+            "message": message,
+        });
+        if let Err(err) = append_jsonl_line(path, &payload) {
+            state.logs.push(runtime_log_with_ts(format!(
+                "WARNING: failed to append backtest runtime log: {}",
+                err
+            )));
+            trim_runtime_logs(&mut state.logs, 400);
+        }
+    }
+}
+
+fn append_backtest_snapshot(
+    runtime_path: Option<&Path>,
+    snapshot: &paper_trading::MinutePortfolioSnapshot,
+    current_day: usize,
+    total_days: usize,
+    weights: &[PaperTargetState],
+) -> Result<()> {
+    let Some(path) = runtime_path else {
+        return Ok(());
+    };
+
+    let payload = serde_json::json!({
+        "timestamp": chrono::Local::now().to_rfc3339(),
+        "kind": "snapshot",
+        "current_day": current_day,
+        "total_days": total_days,
+        "weights": weights,
+        "snapshot": snapshot,
+    });
+    append_jsonl_line(path, &payload)
 }
 
 fn append_jsonl_line<T: Serialize>(path: &Path, value: &T) -> Result<()> {

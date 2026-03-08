@@ -1,0 +1,5 @@
+D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_featurecheck\debug\deps\futures_sink-5ba79746f4d7cfeb.d: C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-sink-0.3.32\src\lib.rs
+
+D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_featurecheck\debug\deps\libfutures_sink-5ba79746f4d7cfeb.rmeta: C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-sink-0.3.32\src\lib.rs
+
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\futures-sink-0.3.32\src\lib.rs:

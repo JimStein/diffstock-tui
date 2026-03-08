@@ -1,0 +1,11 @@
+D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_featurecheck\debug\deps\bitflags-a8d73902caf1e314.d: C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitflags-2.10.0\src\lib.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitflags-2.10.0\src\iter.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitflags-2.10.0\src\parser.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitflags-2.10.0\src\traits.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitflags-2.10.0\src\public.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitflags-2.10.0\src\internal.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitflags-2.10.0\src\external.rs
+
+D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_featurecheck\debug\deps\libbitflags-a8d73902caf1e314.rmeta: C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitflags-2.10.0\src\lib.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitflags-2.10.0\src\iter.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitflags-2.10.0\src\parser.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitflags-2.10.0\src\traits.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitflags-2.10.0\src\public.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitflags-2.10.0\src\internal.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitflags-2.10.0\src\external.rs
+
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitflags-2.10.0\src\lib.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitflags-2.10.0\src\iter.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitflags-2.10.0\src\parser.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitflags-2.10.0\src\traits.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitflags-2.10.0\src\public.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitflags-2.10.0\src\internal.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bitflags-2.10.0\src\external.rs:

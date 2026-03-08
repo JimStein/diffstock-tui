@@ -1,6 +1,7 @@
 mod app;
 mod config;
 mod data;
+mod features;
 mod diffusion;
 mod inference;
 mod models;

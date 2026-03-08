@@ -1,6 +1,7 @@
 use crate::config::{get_device, AUGMENTATION_COPIES, AUGMENTATION_NOISE, BATCH_SIZE, CUDA_BATCH_SIZE, DATA_RANGE, DIFF_STEPS, DROPOUT_RATE, EPOCHS, FORECAST, HIDDEN_DIM, INPUT_DIM, LEARNING_RATE, LOOKBACK, LSTM_LAYERS, NUM_LAYERS, PATIENCE, TRAIN_LOG_INTERVAL_BATCHES, TRAINING_SYMBOLS, WEIGHT_DECAY};
 use crate::data::TrainingDataset;
 use crate::diffusion::GaussianDiffusion;
+use crate::features::{build_training_dataset_bundle, configured_feature_benchmark_symbol, FeatureEngineConfig, FeatureManifest, FeatureSelectionConfig};
 use crate::model_artifacts::save_best_model_artifacts;
 use crate::models::time_grad::{EpsilonTheta, RNNEncoder};
 use crate::gui::TrainMessage;
@@ -10,6 +11,7 @@ use candle_nn::{VarBuilder, VarMap, Optimizer};
 use chrono::Utc;
 use rand::seq::SliceRandom;
 use serde::Serialize;
+use std::collections::HashMap;
 use tracing::{info, error, warn};
 use tokio::sync::mpsc;
 use rayon::prelude::*;
@@ -111,6 +113,18 @@ fn persist_training_log(run_log: &TrainingRunLog) -> Result<std::path::PathBuf> 
     Ok(file_path)
 }
 
+fn legacy_feature_manifest() -> FeatureManifest {
+    FeatureManifest {
+        version: 1,
+        feature_names: vec!["close_return".to_string(), "overnight_return".to_string()],
+        target_feature: "log_return_1d".to_string(),
+        benchmark_symbol: None,
+        lookback: LOOKBACK,
+        forecast: FORECAST,
+        input_dim: INPUT_DIM,
+    }
+}
+
 pub async fn train_model(
     epochs: Option<usize>,
     batch_size: Option<usize>,
@@ -126,13 +140,22 @@ pub async fn train_model(
         learning_rate.unwrap_or(LEARNING_RATE)
     );
 
-    let (train_data, val_data) = fetch_training_data().await?;
+    let (train_data, val_data, feature_manifest) = fetch_training_data().await?;
 
     if train_data.features.is_empty() {
         return Err(anyhow::anyhow!("No training data available."));
     }
 
-    train_model_with_data(train_data, val_data, epochs, batch_size, learning_rate, patience, use_cuda).await
+    train_model_with_data_and_manifest(
+        train_data,
+        val_data,
+        feature_manifest,
+        epochs,
+        batch_size,
+        learning_rate,
+        patience,
+        use_cuda,
+    ).await
 }
 
 /// Training entry point with GUI progress channel.
@@ -146,7 +169,7 @@ pub async fn train_model_with_progress(
 ) -> Result<()> {
     let _ = tx.send(TrainMessage::Log("Fetching training data...".to_string())).await;
 
-    let (train_data, val_data) = fetch_training_data().await?;
+    let (train_data, val_data, feature_manifest) = fetch_training_data().await?;
 
     if train_data.features.is_empty() {
         return Err(anyhow::anyhow!("No training data available."));
@@ -158,13 +181,24 @@ pub async fn train_model_with_progress(
         val_data.features.len()
     ))).await;
 
-    train_loop_with_progress(train_data, val_data, epochs, batch_size, learning_rate, patience, use_cuda, tx).await
+    train_loop_with_progress(
+        train_data,
+        val_data,
+        feature_manifest,
+        epochs,
+        batch_size,
+        learning_rate,
+        patience,
+        use_cuda,
+        tx,
+    ).await
 }
 
 /// Core training loop that sends per-epoch progress to the GUI.
 async fn train_loop_with_progress(
     train_data: TrainingDataset,
     val_data: TrainingDataset,
+    feature_manifest: FeatureManifest,
     epochs: Option<usize>,
     batch_size: Option<usize>,
     learning_rate: Option<f64>,
@@ -193,12 +227,13 @@ async fn train_loop_with_progress(
     let default_batch_size = if use_cuda { CUDA_BATCH_SIZE } else { BATCH_SIZE };
     let batch_size = batch_size.unwrap_or(default_batch_size);
     let learning_rate = learning_rate.unwrap_or(LEARNING_RATE);
+    let input_dim = feature_manifest.input_dim;
 
     let varmap = VarMap::new();
     let vb = VarBuilder::from_varmap(&varmap, DType::F32, &device);
     let num_assets = TRAINING_SYMBOLS.len();
 
-    let encoder = RNNEncoder::new(INPUT_DIM, HIDDEN_DIM, LSTM_LAYERS, DROPOUT_RATE, vb.pp("encoder"))?;
+    let encoder = RNNEncoder::new(input_dim, HIDDEN_DIM, LSTM_LAYERS, DROPOUT_RATE, vb.pp("encoder"))?;
     let model = EpsilonTheta::new(1, HIDDEN_DIM, HIDDEN_DIM, NUM_LAYERS, num_assets, DROPOUT_RATE, vb.pp("model"))?;
     let diffusion = GaussianDiffusion::new(DIFF_STEPS, &device)?;
 
@@ -242,7 +277,7 @@ async fn train_loop_with_progress(
             let mut batch_asset_ids = Vec::with_capacity(batch_size);
 
             for &idx in batch_indices {
-                batch_features.push(Tensor::from_slice(&train_data.features[idx], (LOOKBACK, 2), &device)?.to_dtype(DType::F32)?);
+                batch_features.push(Tensor::from_slice(&train_data.features[idx], (LOOKBACK, input_dim), &device)?.to_dtype(DType::F32)?);
                 batch_targets.push(Tensor::from_slice(&train_data.targets[idx], (FORECAST, 1), &device)?.to_dtype(DType::F32)?);
                 batch_asset_ids.push(train_data.asset_ids[idx] as u32);
             }
@@ -304,7 +339,7 @@ async fn train_loop_with_progress(
                 let mut batch_asset_ids = Vec::with_capacity(batch_size);
 
                 for idx in start..end {
-                    batch_features.push(Tensor::from_slice(&val_data.features[idx], (LOOKBACK, 2), &device)?.to_dtype(DType::F32)?);
+                    batch_features.push(Tensor::from_slice(&val_data.features[idx], (LOOKBACK, input_dim), &device)?.to_dtype(DType::F32)?);
                     batch_targets.push(Tensor::from_slice(&val_data.targets[idx], (FORECAST, 1), &device)?.to_dtype(DType::F32)?);
                     batch_asset_ids.push(val_data.asset_ids[idx] as u32);
                 }
@@ -407,7 +442,7 @@ async fn train_loop_with_progress(
                 "Epoch {}: New best model! Val loss: {:.6}. Saving weights...",
                 epoch + 1, best_val_loss
             ))).await;
-            save_best_model_artifacts(&varmap, use_cuda)?;
+            save_best_model_artifacts(&varmap, use_cuda, &feature_manifest)?;
         } else {
             epochs_without_improvement += 1;
             if epochs_without_improvement >= patience {
@@ -494,6 +529,28 @@ pub async fn train_model_with_data(
     patience: Option<usize>,
     use_cuda: bool,
 ) -> Result<()> {
+    train_model_with_data_and_manifest(
+        train_data,
+        val_data,
+        legacy_feature_manifest(),
+        epochs,
+        batch_size,
+        learning_rate,
+        patience,
+        use_cuda,
+    ).await
+}
+
+pub async fn train_model_with_data_and_manifest(
+    train_data: TrainingDataset,
+    val_data: TrainingDataset,
+    feature_manifest: FeatureManifest,
+    epochs: Option<usize>,
+    batch_size: Option<usize>,
+    learning_rate: Option<f64>,
+    patience: Option<usize>,
+    use_cuda: bool,
+) -> Result<()> {
     let started_at = Utc::now();
     let live_log_path = create_realtime_log_file("cli").ok();
     if let Some(path) = &live_log_path {
@@ -516,6 +573,7 @@ pub async fn train_model_with_data(
     let default_batch_size = if use_cuda { CUDA_BATCH_SIZE } else { BATCH_SIZE };
     let batch_size = batch_size.unwrap_or(default_batch_size);
     let learning_rate = learning_rate.unwrap_or(LEARNING_RATE);
+    let input_dim = feature_manifest.input_dim;
 
     info!("Training Set: {} samples", train_data.features.len());
     info!("Validation Set: {} samples", val_data.features.len());
@@ -526,7 +584,7 @@ pub async fn train_model_with_data(
 
     let num_assets = TRAINING_SYMBOLS.len();
 
-    let encoder = RNNEncoder::new(INPUT_DIM, HIDDEN_DIM, LSTM_LAYERS, DROPOUT_RATE, vb.pp("encoder"))?;
+    let encoder = RNNEncoder::new(input_dim, HIDDEN_DIM, LSTM_LAYERS, DROPOUT_RATE, vb.pp("encoder"))?;
     let model = EpsilonTheta::new(1, HIDDEN_DIM, HIDDEN_DIM, NUM_LAYERS, num_assets, DROPOUT_RATE, vb.pp("model"))?;
     let diffusion = GaussianDiffusion::new(DIFF_STEPS, &device)?;
 
@@ -584,7 +642,7 @@ pub async fn train_model_with_data(
             let mut batch_asset_ids = Vec::with_capacity(batch_size);
 
             for &idx in batch_indices {
-                batch_features.push(Tensor::from_slice(&train_data.features[idx], (LOOKBACK, 2), &device)?.to_dtype(DType::F32)?);
+                batch_features.push(Tensor::from_slice(&train_data.features[idx], (LOOKBACK, input_dim), &device)?.to_dtype(DType::F32)?);
                 batch_targets.push(Tensor::from_slice(&train_data.targets[idx], (FORECAST, 1), &device)?.to_dtype(DType::F32)?);
                 batch_asset_ids.push(train_data.asset_ids[idx] as u32);
             }
@@ -656,7 +714,7 @@ pub async fn train_model_with_data(
                 let mut batch_asset_ids = Vec::with_capacity(batch_size);
 
                 for idx in start..end {
-                    batch_features.push(Tensor::from_slice(&val_data.features[idx], (LOOKBACK, 2), &device)?.to_dtype(DType::F32)?);
+                    batch_features.push(Tensor::from_slice(&val_data.features[idx], (LOOKBACK, input_dim), &device)?.to_dtype(DType::F32)?);
                     batch_targets.push(Tensor::from_slice(&val_data.targets[idx], (FORECAST, 1), &device)?.to_dtype(DType::F32)?);
                     batch_asset_ids.push(val_data.asset_ids[idx] as u32);
                 }
@@ -754,7 +812,7 @@ pub async fn train_model_with_data(
             best_val_loss = avg_val_loss;
             epochs_without_improvement = 0;
             info!("New best model found! Saving weights...");
-            save_best_model_artifacts(&varmap, use_cuda)?;
+            save_best_model_artifacts(&varmap, use_cuda, &feature_manifest)?;
         } else {
             epochs_without_improvement += 1;
             if epochs_without_improvement >= patience {
@@ -815,10 +873,22 @@ pub async fn train_model_with_data(
     Ok(())
 }
 
-async fn fetch_training_data() -> Result<(TrainingDataset, TrainingDataset)> {
-    let symbols = TRAINING_SYMBOLS.to_vec();
+async fn fetch_training_data() -> Result<(TrainingDataset, TrainingDataset, FeatureManifest)> {
+    let mut symbols: Vec<String> = TRAINING_SYMBOLS.iter().map(|s| s.to_string()).collect();
+    let benchmark_symbol = configured_feature_benchmark_symbol();
+    if let Some(benchmark) = &benchmark_symbol {
+        if !symbols.iter().any(|symbol| symbol.eq_ignore_ascii_case(benchmark)) {
+            symbols.push(benchmark.clone());
+        }
+    }
     let provider_mode = crate::data::configured_data_provider_mode();
     info!("Training data provider mode: {}", provider_mode.as_str());
+    let selection = FeatureSelectionConfig::from_env();
+    let engine_config = FeatureEngineConfig::default();
+    let mut asset_id_map = HashMap::new();
+    for (id, symbol) in TRAINING_SYMBOLS.iter().enumerate() {
+        asset_id_map.insert(symbol.to_string(), id);
+    }
     
     // Parallel data fetching — download all symbols concurrently
     info!("Fetching {} symbols in parallel...", symbols.len());
@@ -830,17 +900,14 @@ async fn fetch_training_data() -> Result<(TrainingDataset, TrainingDataset)> {
             match crate::data::fetch_range_with_source(&sym, DATA_RANGE).await {
                 Ok((data, source)) => {
                     info!("{} fetched via {}", sym, source);
-                    let dataset = data.prepare_training_data(LOOKBACK, FORECAST, id);
-                    Ok((id, sym, source, dataset))
+                    Ok((id, sym, source, data))
                 }
                 Err(e) => Err((sym, e))
             }
         }));
     }
 
-    let mut all_features = Vec::new();
-    let mut all_targets = Vec::new();
-    let mut all_asset_ids = Vec::new();
+    let mut histories = HashMap::new();
 
     // Collect results
     let mut results: Vec<_> = Vec::with_capacity(handles.len());
@@ -856,11 +923,9 @@ async fn fetch_training_data() -> Result<(TrainingDataset, TrainingDataset)> {
     let mut failures: Vec<(String, String)> = Vec::new();
     for result in results {
         match result {
-            Ok((_id, sym, source, dataset)) => {
-                info!("{}: {} samples (source: {})", sym, dataset.features.len(), source);
-                all_features.extend(dataset.features);
-                all_targets.extend(dataset.targets);
-                all_asset_ids.extend(dataset.asset_ids);
+            Ok((_id, sym, source, data)) => {
+                info!("{} fetched for feature build (source: {})", sym, source);
+                histories.insert(sym.to_uppercase(), data);
             }
             Err((sym, e)) => {
                 error!("Failed to fetch {}: {}", sym, e);
@@ -881,10 +946,26 @@ async fn fetch_training_data() -> Result<(TrainingDataset, TrainingDataset)> {
         ));
     }
 
-    info!("Original samples: {}", all_features.len());
+    let (mut full_dataset, feature_manifest) = build_training_dataset_bundle(
+        &histories,
+        &selection,
+        &engine_config,
+        benchmark_symbol.as_deref(),
+        LOOKBACK,
+        FORECAST,
+        &asset_id_map,
+    )?;
+
+    info!(
+        "Original samples: {} (input_dim={}, target={}, benchmark={:?})",
+        full_dataset.features.len(),
+        feature_manifest.input_dim,
+        feature_manifest.target_feature,
+        feature_manifest.benchmark_symbol
+    );
 
     // Data augmentation: add Gaussian noise copies (parallelized with rayon)
-    let original_len = all_features.len();
+    let original_len = full_dataset.features.len();
     let augmented: Vec<(Vec<f64>, Vec<f64>, usize)> = (0..AUGMENTATION_COPIES)
         .into_par_iter()
         .flat_map(|_| {
@@ -892,36 +973,31 @@ async fn fetch_training_data() -> Result<(TrainingDataset, TrainingDataset)> {
             let mut rng = rand::thread_rng();
             let mut batch = Vec::with_capacity(original_len);
             for i in 0..original_len {
-                let aug_features: Vec<f64> = all_features[i]
+                let aug_features: Vec<f64> = full_dataset.features[i]
                     .iter()
                     .map(|&v| v + rng.gen_range(-AUGMENTATION_NOISE..AUGMENTATION_NOISE))
                     .collect();
-                let aug_targets: Vec<f64> = all_targets[i]
+                let aug_targets: Vec<f64> = full_dataset.targets[i]
                     .iter()
                     .map(|&v| v + rng.gen_range(-AUGMENTATION_NOISE * 0.5..AUGMENTATION_NOISE * 0.5))
                     .collect();
-                batch.push((aug_features, aug_targets, all_asset_ids[i]));
+                batch.push((aug_features, aug_targets, full_dataset.asset_ids[i]));
             }
             batch
         })
         .collect();
 
     for (feat, tgt, aid) in augmented {
-        all_features.push(feat);
-        all_targets.push(tgt);
-        all_asset_ids.push(aid);
+        full_dataset.features.push(feat);
+        full_dataset.targets.push(tgt);
+        full_dataset.asset_ids.push(aid);
     }
 
-    info!("After augmentation ({}x): {} samples", AUGMENTATION_COPIES + 1, all_features.len());
-    
-    let full_dataset = TrainingDataset {
-        features: all_features,
-        targets: all_targets,
-        asset_ids: all_asset_ids,
-    };
+    info!("After augmentation ({}x): {} samples", AUGMENTATION_COPIES + 1, full_dataset.features.len());
 
     // Split 80% Train, 20% Validation
-    Ok(full_dataset.split(0.8))
+    let (train_data, val_data) = full_dataset.split(0.8);
+    Ok((train_data, val_data, feature_manifest))
 }
 
 #[cfg(test)]
