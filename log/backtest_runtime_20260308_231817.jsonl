@@ -1,0 +1,5 @@
+{"kind":"log","message":"Backtest started => symbols=COPX,ETN,IAU,MSFT,NVDA,TLT,URA, initial_capital=80000.00, period_days=252, rebalance_every_days=1, runtime_file=E:\\DiffusionPolicy\\diffstock-tui\\log\\backtest_runtime_20260308_231817.jsonl","timestamp":"2026-03-08T23:18:17.650035600+08:00"}
+{"kind":"log","message":"Fetching historical data for 8 symbols (benchmark=QQQ)","timestamp":"2026-03-08T23:18:17.650565600+08:00"}
+{"kind":"log","message":"Backtest calendar prepared => common_days=1256, evaluated_days=252","timestamp":"2026-03-08T23:18:20.202944800+08:00"}
+{"current_day":0,"kind":"snapshot","snapshot":{"benchmark_return_pct":0.0,"cash_usd":80000.0,"holdings":[],"holdings_symbols":[],"pnl_pct":0.0,"pnl_usd":0.0,"symbols":[],"timestamp":"2025-03-05T05:00:00+00:00","total_value":80000.0},"timestamp":"2026-03-08T23:18:20.203204600+08:00","total_days":252,"weights":[]}
+{"kind":"log","message":"ERROR: backtest failed: benchmark symbol QQQ not found in asset map","timestamp":"2026-03-08T23:18:20.483191100+08:00"}

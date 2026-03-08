@@ -3480,6 +3480,25 @@ async fn start_backtest(
                         );
                     }
 
+                    if !sliced_histories.contains_key(&benchmark_symbol) {
+                        let idx = *index_maps
+                            .get(&benchmark_symbol)
+                            .and_then(|m| m.get(&current_date))
+                            .ok_or_else(|| anyhow::anyhow!("Missing current date for benchmark {}", benchmark_symbol))?;
+                        let history = histories
+                            .get(&benchmark_symbol)
+                            .ok_or_else(|| anyhow::anyhow!("Missing prefetched history for benchmark {}", benchmark_symbol))?
+                            .history[..=idx]
+                            .to_vec();
+                        sliced_histories.insert(
+                            benchmark_symbol.clone(),
+                            data::StockData {
+                                symbol: benchmark_symbol.clone(),
+                                history,
+                            },
+                        );
+                    }
+
                     current_weights = if symbols.len() == 1 {
                         vec![PaperTargetState {
                             symbol: symbols[0].clone(),
