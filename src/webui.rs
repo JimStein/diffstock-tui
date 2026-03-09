@@ -3345,7 +3345,7 @@ async fn start_backtest(
         return Err(api_err(StatusCode::BAD_REQUEST, "initial_capital must be > 0"));
     }
 
-    let period_days = req.period_days.unwrap_or(252).clamp(30, 1500);
+    let period_days = req.period_days.unwrap_or(252).clamp(10, 1500);
     let rebalance_every_days = req.rebalance_every_days.unwrap_or(1).clamp(1, 30);
     let (runtime_path, summary_path) = create_backtest_output_paths().map_err(internal_err)?;
     let runtime_path_text = runtime_path.display().to_string();

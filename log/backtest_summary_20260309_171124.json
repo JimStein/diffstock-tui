@@ -1,0 +1,120 @@
+{
+  "candidate_symbols": [
+    "COPX",
+    "ETN",
+    "IAU",
+    "MSFT",
+    "NVDA",
+    "TLT",
+    "URA"
+  ],
+  "finished_at": "2026-03-09T18:12:23.785487100+08:00",
+  "initial_capital_usd": 80000.0,
+  "last_error": null,
+  "last_message": "Processed 30/30 trading days",
+  "latest_snapshot": {
+    "benchmark_return_pct": -3.3845608608802147,
+    "cash_usd": 6374.177743440529,
+    "holdings": [
+      {
+        "asset_value": 24550.39074515906,
+        "avg_cost": 82.3,
+        "price": 79.95,
+        "quantity": 307.0718041921083,
+        "symbol": "COPX"
+      },
+      {
+        "asset_value": 32896.26157197782,
+        "avg_cost": 95.52,
+        "price": 96.98,
+        "quantity": 339.2066567537412,
+        "symbol": "IAU"
+      },
+      {
+        "asset_value": 22672.319215567768,
+        "avg_cost": 183.34,
+        "price": 177.82,
+        "quantity": 127.50151397799893,
+        "symbol": "NVDA"
+      }
+    ],
+    "holdings_symbols": [
+      "COPX",
+      "IAU",
+      "NVDA"
+    ],
+    "pnl_pct": 8.116436595181458,
+    "pnl_usd": 6493.149276145166,
+    "symbols": [
+      {
+        "change_1m": -2.3499999999999943,
+        "change_1m_pct": -2.8554070473875997,
+        "price": 79.95,
+        "symbol": "COPX"
+      },
+      {
+        "change_1m": 1.460000000000008,
+        "change_1m_pct": 1.5284757118928058,
+        "price": 96.98,
+        "symbol": "IAU"
+      },
+      {
+        "change_1m": -5.52000000000001,
+        "change_1m_pct": -3.010799607287013,
+        "price": 177.82,
+        "symbol": "NVDA"
+      }
+    ],
+    "timestamp": "2026-03-06T05:00:00+00:00",
+    "total_value": 86493.14927614517
+  },
+  "latest_weights": [
+    {
+      "symbol": "IAU",
+      "weight": 0.37062209970877197
+    },
+    {
+      "symbol": "COPX",
+      "weight": 0.289076247033423
+    },
+    {
+      "symbol": "NVDA",
+      "weight": 0.2673900242442646
+    }
+  ],
+  "latest_weights_as_of": "2026-03-06",
+  "period_days": 30,
+  "progress_current_day": 30,
+  "progress_total_days": 30,
+  "rebalance_every_days": 1,
+  "runtime_file": "D:\\Users\\mrleo\\Documents\\GitHub\\diffstock-tui\\log\\backtest_runtime_20260309_171124.jsonl",
+  "saved_at": "2026-03-09T18:12:23.786006800+08:00",
+  "started_at": "2026-03-09T17:11:24.040158600+08:00",
+  "status": "completed",
+  "summary": {
+    "alpha_pct": 11.500997456061679,
+    "alpha_usd": 9200.797964849335,
+    "annualized_alpha_pct": 92.6299084670682,
+    "benchmark_annual_vol_pct": 17.13220378156078,
+    "benchmark_cagr_pct": -25.115683469181484,
+    "benchmark_calmar": -4.3945159122285435,
+    "benchmark_max_drawdown_pct": -5.715233252266194,
+    "benchmark_sharpe": -1.8891486334203704,
+    "benchmark_sortino": -3.3846600113723544,
+    "benchmark_total_pnl_usd": -2707.6486887041683,
+    "benchmark_total_return_pct": -3.3845608608802147,
+    "beta_vs_benchmark": 0.8788944846801784,
+    "information_ratio": 4.390472356540965,
+    "strategy_annual_vol_pct": 26.570866908893663,
+    "strategy_cagr_pct": 92.61516466711397,
+    "strategy_calmar": 17.515755413488,
+    "strategy_max_drawdown_pct": -5.2875347069413685,
+    "strategy_sharpe": 2.4155870849552175,
+    "strategy_sortino": 3.4659190006442446,
+    "strategy_total_pnl_usd": 6493.149276145166,
+    "strategy_total_return_pct": 8.116436595181465,
+    "strategy_win_rate_pct": 66.66666666666666,
+    "trading_days": 30
+  },
+  "summary_file": "D:\\Users\\mrleo\\Documents\\GitHub\\diffstock-tui\\log\\backtest_summary_20260309_171124.json"
+}

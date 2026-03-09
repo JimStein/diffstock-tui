@@ -448,6 +448,27 @@
       border-color: transparent;
       box-shadow: none;
     }
+    .backtest-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .backtest-start-btn {
+      min-height: 42px;
+      padding: 11px 20px;
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: .02em;
+      box-shadow: 0 10px 24px rgba(59,130,246,.30), 0 0 0 1px rgba(255,255,255,.08) inset;
+    }
+    .backtest-start-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 14px 28px rgba(59,130,246,.38), 0 0 0 1px rgba(255,255,255,.10) inset;
+    }
+    .backtest-start-btn:disabled {
+      transform: none;
+      box-shadow: none;
+    }
     button.danger {
       color: var(--down);
       border-color: rgba(255,71,87,.2);
@@ -3288,7 +3309,7 @@
             </div>
             <div class="field">
               <label class="field-label">Backtest Days</label>
-              <input id="backtestDays" type="number" value="252" min="30" max="1500" step="1" style="width:110px" />
+              <input id="backtestDays" type="number" value="252" min="10" max="1500" step="1" style="width:110px" />
             </div>
             <div class="field">
               <label class="field-label">Rebalance Every (days)</label>
@@ -3296,13 +3317,13 @@
             </div>
             <div class="field">
               <label class="field-label">&nbsp;</label>
-              <div style="display:flex;gap:8px;align-items:center;">
-                <button class="primary" id="backtestStart">▶ Run Backtest</button>
+              <div class="backtest-actions">
+                <button class="primary backtest-start-btn" id="backtestStart">▶ Run Backtest</button>
                 <button id="backtestStop" disabled>Stop Backtest</button>
               </div>
             </div>
           </div>
-          <div class="small" style="margin-top:10px;">回测逻辑：对候选池每个交易日用截至当日的历史重新预测，生成组合目标权重，然后持有到下一个交易日收盘；基准固定为 QQQ。</div>
+          <div class="small" style="margin-top:10px;">回测逻辑：对候选池每个交易日用截至当日的历史重新预测，生成组合目标权重，然后持有到下一个交易日收盘；基准固定为 QQQ。最短支持 10 个交易日。</div>
         </div>
 
         <div class="panel">

@@ -1,5 +1,5 @@
 {
-  "created_at": "2026-03-09T17:41:01.596542100+08:00",
+  "created_at": "2026-03-09T19:10:43.596634300+08:00",
   "started_at": "2026-03-09T17:09:10.143500400+08:00",
   "conn_host": "127.0.0.1",
   "conn_port": 11111,
@@ -10,12 +10,12 @@
   "selected_market": "US",
   "runtime_file": "D:\\Users\\mrleo\\Documents\\GitHub\\diffstock-tui\\log\\futu_sim_runtime_20260309_170922.jsonl",
   "latest_snapshot": {
-    "timestamp": "2026-03-09T17:40:55.731351800+08:00",
+    "timestamp": "2026-03-09T19:10:39.066446600+08:00",
     "total_value": 1013716.846,
     "cash_usd": 51071.316,
     "pnl_usd": 0.0,
     "pnl_pct": 0.0,
-    "benchmark_return_pct": 0.3465999391336627,
+    "benchmark_return_pct": 0.258681905792435,
     "symbols": [
       {
         "symbol": "US.COPX",
