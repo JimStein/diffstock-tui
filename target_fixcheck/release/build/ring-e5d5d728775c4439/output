@@ -12,7 +12,7 @@ cargo:rerun-if-env-changed=CARGO_CFG_TARGET_OS
 cargo:rerun-if-env-changed=CARGO_CFG_TARGET_ENV
 cargo:rerun-if-env-changed=CARGO_CFG_TARGET_ENDIAN
 OPT_LEVEL = Some(3)
-OUT_DIR = Some(D:\DiffStock\diffstock-tui\target_fixcheck\release\build\ring-e5d5d728775c4439\out)
+OUT_DIR = Some(D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_fixcheck\release\build\ring-e5d5d728775c4439\out)
 TARGET = Some(x86_64-pc-windows-msvc)
 CARGO_ENCODED_RUSTFLAGS = Some()
 cargo:rerun-if-env-changed=VCINSTALLDIR
@@ -29,7 +29,7 @@ cargo:rerun-if-env-changed=WindowsSDKVersion
 WindowsSDKVersion = None
 cargo:rerun-if-env-changed=LIB
 LIB = None
-PATH = Some(D:\DiffStock\diffstock-tui\target_fixcheck\release;D:\DiffStock\diffstock-tui\target_fixcheck\release\deps;C:\Users\JimComp\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\x86_64-pc-windows-msvc\lib;c:\Users\JimComp\AppData\Roaming\Code\User\globalStorage\github.copilot-chat\debugCommand;c:\Users\JimComp\AppData\Roaming\Code\User\globalStorage\github.copilot-chat\copilotCli;C:\WINDOWS\system32;C:\WINDOWS;C:\WINDOWS\System32\Wbem;C:\WINDOWS\System32\WindowsPowerShell\v1.0\;C:\WINDOWS\System32\OpenSSH\;C:\Program Files\dotnet\;C:\JTDX64\159\bin;C:\Program Files\AMD\ROCm\6.2\bin;C:\Program Files\Docker\Docker\resources\bin;C:\Program Files\nodejs\;C:\Program Files\Git\cmd;C:\Users\JimComp\.cargo\bin;C:\Users\JimComp\AppData\Local\Programs\Python\Python311\Scripts\;C:\Users\JimComp\AppData\Local\Programs\Python\Python311\;C:\Users\JimComp\AppData\Local\Microsoft\WindowsApps;C:\Users\JimComp\AppData\Local\Programs\Ollama;C:\Users\JimComp\.lmstudio\bin;D:\Users\JimComp\AppData\Local\Programs\Microsoft VS Code\bin;C:\Users\JimComp\AppData\Roaming\npm;C:\Users\JimComp\AppData\Local\GitHubDesktop\bin;c:\Users\JimComp\.vscode\extensions\ms-python.debugpy-2025.18.0-win32-x64\bundled\scripts\noConfigScripts;C:\Users\JimComp\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin)
+PATH = Some(D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_fixcheck\release;D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_fixcheck\release\deps;C:\Users\mrleo\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\x86_64-pc-windows-msvc\lib;c:\Users\mrleo\AppData\Roaming\Code\User\globalStorage\github.copilot-chat\debugCommand;c:\Users\mrleo\AppData\Roaming\Code\User\globalStorage\github.copilot-chat\copilotCli;D:\Users\mrleo\AppData\Local\Programs\Microsoft VS Code;C:\Windows\system32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0\;C:\Windows\System32\OpenSSH\;C:\Program Files\Git\cmd;C:\Users\mrleo\AppData\Local\Programs\Python\Python312\Scripts\;C:\Users\mrleo\AppData\Local\Programs\Python\Python312\;C:\Users\mrleo\AppData\Local\Programs\Python\Launcher\;C:\Users\mrleo\.cargo\bin;C:\Users\mrleo\AppData\Local\Microsoft\WindowsApps;D:\Users\mrleo\AppData\Local\Programs\Microsoft VS Code\bin;C:\Users\mrleo\AppData\Local\GitHubDesktop\bin;C:\Users\mrleo\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin)
 cargo:rerun-if-env-changed=INCLUDE
 INCLUDE = None
 HOST = Some(x86_64-pc-windows-msvc)
@@ -54,18 +54,18 @@ CFLAGS_x86_64_pc_windows_msvc = None
 cargo:rerun-if-env-changed=CFLAGS_x86_64-pc-windows-msvc
 CFLAGS_x86_64-pc-windows-msvc = None
 curve25519.c
-C:\Users\JimComp\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ring-0.17.14\crypto\curve25519\./curve25519_tables.h(1): warning C4819: The file contains a character that cannot be represented in the current code page (936). Save the file in Unicode format to prevent data loss
-C:\Users\JimComp\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ring-0.17.14\crypto\curve25519\../../third_party/fiat/curve25519_64_msvc.h(1): warning C4819: The file contains a character that cannot be represented in the current code page (936). Save the file in Unicode format to prevent data loss
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ring-0.17.14\crypto\curve25519\./curve25519_tables.h(1): warning C4819: 该文件包含不能在当前代码页(936)中表示的字符。请将该文件保存为 Unicode 格式以防止数据丢失
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ring-0.17.14\crypto\curve25519\../../third_party/fiat/curve25519_64_msvc.h(1): warning C4819: 该文件包含不能在当前代码页(936)中表示的字符。请将该文件保存为 Unicode 格式以防止数据丢失
 aes_nohw.c
 montgomery.c
 montgomery_inv.c
 ecp_nistz.c
-C:\Users\JimComp\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ring-0.17.14\crypto\fipsmodule\ec\ecp_nistz.h(1): warning C4819: The file contains a character that cannot be represented in the current code page (936). Save the file in Unicode format to prevent data loss
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ring-0.17.14\crypto\fipsmodule\ec\ecp_nistz.h(1): warning C4819: 该文件包含不能在当前代码页(936)中表示的字符。请将该文件保存为 Unicode 格式以防止数据丢失
 gfp_p256.c
 gfp_p384.c
-C:\Users\JimComp\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ring-0.17.14\crypto\fipsmodule\ec\ecp_nistz.h(1): warning C4819: The file contains a character that cannot be represented in the current code page (936). Save the file in Unicode format to prevent data loss
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ring-0.17.14\crypto\fipsmodule\ec\ecp_nistz.h(1): warning C4819: 该文件包含不能在当前代码页(936)中表示的字符。请将该文件保存为 Unicode 格式以防止数据丢失
 p256.c
-C:\Users\JimComp\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ring-0.17.14\crypto\fipsmodule\ec\./util.h(1): warning C4819: The file contains a character that cannot be represented in the current code page (936). Save the file in Unicode format to prevent data loss
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ring-0.17.14\crypto\fipsmodule\ec\./util.h(1): warning C4819: 该文件包含不能在当前代码页(936)中表示的字符。请将该文件保存为 Unicode 格式以防止数据丢失
 limbs.c
 mem.c
 poly1305.c
@@ -75,7 +75,7 @@ curve25519_64_adx.c
 p256-nistz.c
 cargo:rustc-link-lib=static=ring_core_0_17_14_
 OPT_LEVEL = Some(3)
-OUT_DIR = Some(D:\DiffStock\diffstock-tui\target_fixcheck\release\build\ring-e5d5d728775c4439\out)
+OUT_DIR = Some(D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_fixcheck\release\build\ring-e5d5d728775c4439\out)
 TARGET = Some(x86_64-pc-windows-msvc)
 CARGO_ENCODED_RUSTFLAGS = Some()
 cargo:rerun-if-env-changed=VCINSTALLDIR
@@ -92,7 +92,7 @@ cargo:rerun-if-env-changed=WindowsSDKVersion
 WindowsSDKVersion = None
 cargo:rerun-if-env-changed=LIB
 LIB = None
-PATH = Some(D:\DiffStock\diffstock-tui\target_fixcheck\release;D:\DiffStock\diffstock-tui\target_fixcheck\release\deps;C:\Users\JimComp\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\x86_64-pc-windows-msvc\lib;c:\Users\JimComp\AppData\Roaming\Code\User\globalStorage\github.copilot-chat\debugCommand;c:\Users\JimComp\AppData\Roaming\Code\User\globalStorage\github.copilot-chat\copilotCli;C:\WINDOWS\system32;C:\WINDOWS;C:\WINDOWS\System32\Wbem;C:\WINDOWS\System32\WindowsPowerShell\v1.0\;C:\WINDOWS\System32\OpenSSH\;C:\Program Files\dotnet\;C:\JTDX64\159\bin;C:\Program Files\AMD\ROCm\6.2\bin;C:\Program Files\Docker\Docker\resources\bin;C:\Program Files\nodejs\;C:\Program Files\Git\cmd;C:\Users\JimComp\.cargo\bin;C:\Users\JimComp\AppData\Local\Programs\Python\Python311\Scripts\;C:\Users\JimComp\AppData\Local\Programs\Python\Python311\;C:\Users\JimComp\AppData\Local\Microsoft\WindowsApps;C:\Users\JimComp\AppData\Local\Programs\Ollama;C:\Users\JimComp\.lmstudio\bin;D:\Users\JimComp\AppData\Local\Programs\Microsoft VS Code\bin;C:\Users\JimComp\AppData\Roaming\npm;C:\Users\JimComp\AppData\Local\GitHubDesktop\bin;c:\Users\JimComp\.vscode\extensions\ms-python.debugpy-2025.18.0-win32-x64\bundled\scripts\noConfigScripts;C:\Users\JimComp\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin)
+PATH = Some(D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_fixcheck\release;D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_fixcheck\release\deps;C:\Users\mrleo\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\x86_64-pc-windows-msvc\lib;c:\Users\mrleo\AppData\Roaming\Code\User\globalStorage\github.copilot-chat\debugCommand;c:\Users\mrleo\AppData\Roaming\Code\User\globalStorage\github.copilot-chat\copilotCli;D:\Users\mrleo\AppData\Local\Programs\Microsoft VS Code;C:\Windows\system32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0\;C:\Windows\System32\OpenSSH\;C:\Program Files\Git\cmd;C:\Users\mrleo\AppData\Local\Programs\Python\Python312\Scripts\;C:\Users\mrleo\AppData\Local\Programs\Python\Python312\;C:\Users\mrleo\AppData\Local\Programs\Python\Launcher\;C:\Users\mrleo\.cargo\bin;C:\Users\mrleo\AppData\Local\Microsoft\WindowsApps;D:\Users\mrleo\AppData\Local\Programs\Microsoft VS Code\bin;C:\Users\mrleo\AppData\Local\GitHubDesktop\bin;C:\Users\mrleo\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin)
 cargo:rerun-if-env-changed=INCLUDE
 INCLUDE = None
 HOST = Some(x86_64-pc-windows-msvc)
@@ -118,7 +118,7 @@ cargo:rerun-if-env-changed=CFLAGS_x86_64-pc-windows-msvc
 CFLAGS_x86_64-pc-windows-msvc = None
 constant_time_test.c
 cargo:rustc-link-lib=static=ring_core_0_17_14__test
-cargo:rustc-link-search=native=D:\DiffStock\diffstock-tui\target_fixcheck\release\build\ring-e5d5d728775c4439\out
+cargo:rustc-link-search=native=D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_fixcheck\release\build\ring-e5d5d728775c4439\out
 cargo:rerun-if-changed=crypto\chacha\asm\chacha-armv4.pl
 cargo:rerun-if-changed=crypto\chacha\asm\chacha-armv8.pl
 cargo:rerun-if-changed=crypto\chacha\asm\chacha-x86.pl

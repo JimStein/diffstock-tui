@@ -1,0 +1,14 @@
+D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_webui\release\deps\serde-575edea7f91d1808.d: C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_webui\release\build\serde-817624efa677dc92\out/private.rs
+
+D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_webui\release\deps\libserde-575edea7f91d1808.rlib: C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_webui\release\build\serde-817624efa677dc92\out/private.rs
+
+D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_webui\release\deps\libserde-575edea7f91d1808.rmeta: C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_webui\release\build\serde-817624efa677dc92\out/private.rs
+
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs:
+D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_webui\release\build\serde-817624efa677dc92\out/private.rs:
+
+# env-dep:OUT_DIR=D:\\Users\\mrleo\\Documents\\GitHub\\diffstock-tui\\target_webui\\release\\build\\serde-817624efa677dc92\\out

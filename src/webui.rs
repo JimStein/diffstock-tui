@@ -107,6 +107,7 @@ struct BacktestRuntimeState {
     snapshots: Vec<paper_trading::MinutePortfolioSnapshot>,
     summary: Option<BacktestPerformanceSummary>,
     latest_weights: Vec<PaperTargetState>,
+    latest_weights_as_of: Option<String>,
     logs: Vec<String>,
 }
 
@@ -213,6 +214,7 @@ impl Default for BacktestRuntimeState {
             snapshots: Vec::new(),
             summary: None,
             latest_weights: Vec::new(),
+            latest_weights_as_of: None,
             logs: Vec::new(),
         }
     }
@@ -3339,6 +3341,7 @@ async fn start_backtest(
         bt.snapshots.clear();
         bt.summary = None;
         bt.latest_weights.clear();
+        bt.latest_weights_as_of = None;
         bt.logs.clear();
         push_backtest_log(&mut bt, Some(runtime_path.as_path()), format!(
             "Backtest started => symbols={}, initial_capital={:.2}, period_days={}, rebalance_every_days={}, runtime_file={}",
@@ -3549,6 +3552,7 @@ async fn start_backtest(
 
                     let mut bt = backtest_state.lock().await;
                     bt.latest_weights = current_weights.clone();
+                    bt.latest_weights_as_of = Some(current_date.to_string());
                     push_backtest_log(&mut bt, Some(backtest_runtime_path.as_path()), format!(
                         "Rebalance {} => {}",
                         current_date,
@@ -3659,6 +3663,8 @@ async fn start_backtest(
                         progress_current_day,
                         progress_total_days
                     ));
+                    bt.latest_weights = current_weights.clone();
+                    bt.latest_weights_as_of = Some(next_date.to_string());
                     bt.latest_snapshot = Some(snapshot.clone());
                     bt.snapshots.push(snapshot.clone());
                     if bt.snapshots.len() > 6000 {

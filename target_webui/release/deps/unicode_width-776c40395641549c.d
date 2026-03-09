@@ -1,0 +1,8 @@
+D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_webui\release\deps\unicode_width-776c40395641549c.d: C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\unicode-width-0.1.14\src\lib.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\unicode-width-0.1.14\src\tables.rs
+
+D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_webui\release\deps\libunicode_width-776c40395641549c.rlib: C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\unicode-width-0.1.14\src\lib.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\unicode-width-0.1.14\src\tables.rs
+
+D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_webui\release\deps\libunicode_width-776c40395641549c.rmeta: C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\unicode-width-0.1.14\src\lib.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\unicode-width-0.1.14\src\tables.rs
+
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\unicode-width-0.1.14\src\lib.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\unicode-width-0.1.14\src\tables.rs:

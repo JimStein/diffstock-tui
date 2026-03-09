@@ -1811,6 +1811,7 @@ const computeBacktestPerformance = (ctx) => {
   const portfolioReturnMap = buildReturnMapFromSeries(portfolioSeries);
   const benchmarkReturnMap = buildReturnMapFromSeries(benchmarkSeries);
   const portfolioReturns = Array.from(portfolioReturnMap.values()).filter((value) => Number.isFinite(value));
+  const benchmarkReturns = Array.from(benchmarkReturnMap.values()).filter((value) => Number.isFinite(value));
 
   const alignedPortfolioReturns = [];
   const alignedBenchmarkReturns = [];
@@ -1837,25 +1838,39 @@ const computeBacktestPerformance = (ctx) => {
 
   const dailyRf = Math.pow(1 + BACKTEST_RISK_FREE_RATE, 1 / BACKTEST_TRADING_DAYS_PER_YEAR) - 1;
   const portfolioStd = computeSampleStd(portfolioReturns);
+  const benchmarkStd = computeSampleStd(alignedBenchmarkReturns.length > 1 ? alignedBenchmarkReturns : benchmarkReturns);
   const annualVol = Number.isFinite(portfolioStd)
     ? portfolioStd * Math.sqrt(BACKTEST_TRADING_DAYS_PER_YEAR)
     : NaN;
   const sharpe = Number.isFinite(portfolioStd) && portfolioStd > 1e-12
     ? ((computeMean(portfolioReturns) - dailyRf) / portfolioStd) * Math.sqrt(BACKTEST_TRADING_DAYS_PER_YEAR)
     : NaN;
+  const benchmarkSharpe = Number.isFinite(benchmarkStd) && benchmarkStd > 1e-12
+    ? ((computeMean(alignedBenchmarkReturns.length > 0 ? alignedBenchmarkReturns : benchmarkReturns) - dailyRf) / benchmarkStd) * Math.sqrt(BACKTEST_TRADING_DAYS_PER_YEAR)
+    : NaN;
 
   const downsideReturns = portfolioReturns
     .map((value) => value - dailyRf)
     .filter((value) => Number.isFinite(value) && value < 0);
+  const benchmarkDownsideReturns = (alignedBenchmarkReturns.length > 0 ? alignedBenchmarkReturns : benchmarkReturns)
+    .map((value) => value - dailyRf)
+    .filter((value) => Number.isFinite(value) && value < 0);
   const downsideStd = computeSampleStd(downsideReturns);
+  const benchmarkDownsideStd = computeSampleStd(benchmarkDownsideReturns);
   const sortino = Number.isFinite(downsideStd) && downsideStd > 1e-12
     ? ((computeMean(portfolioReturns) - dailyRf) / downsideStd) * Math.sqrt(BACKTEST_TRADING_DAYS_PER_YEAR)
+    : NaN;
+  const benchmarkSortino = Number.isFinite(benchmarkDownsideStd) && benchmarkDownsideStd > 1e-12
+    ? ((computeMean(alignedBenchmarkReturns.length > 0 ? alignedBenchmarkReturns : benchmarkReturns) - dailyRf) / benchmarkDownsideStd) * Math.sqrt(BACKTEST_TRADING_DAYS_PER_YEAR)
     : NaN;
 
   const maxDrawdownPct = computeMaxDrawdownPct(portfolioSeries);
   const benchmarkMaxDrawdownPct = computeMaxDrawdownPct(benchmarkSeries);
   const calmar = Number.isFinite(cagr) && Number.isFinite(maxDrawdownPct) && maxDrawdownPct < 0
     ? cagr / Math.abs(maxDrawdownPct / 100)
+    : NaN;
+  const benchmarkCalmar = Number.isFinite(benchmarkCagr) && Number.isFinite(benchmarkMaxDrawdownPct) && benchmarkMaxDrawdownPct < 0
+    ? benchmarkCagr / Math.abs(benchmarkMaxDrawdownPct / 100)
     : NaN;
 
   const activeReturns = alignedPortfolioReturns.map((value, idx) => value - alignedBenchmarkReturns[idx]);
@@ -1903,6 +1918,35 @@ const computeBacktestPerformance = (ctx) => {
     informationRatio,
     winRate,
     tradingDays,
+  };
+};
+
+const normalizeBacktestSummary = (summary) => {
+  if (!summary || typeof summary !== 'object') return null;
+  return {
+    totalReturnPct: Number(summary.strategy_total_return_pct),
+    totalPnlUsd: Number(summary.strategy_total_pnl_usd),
+    benchmarkTotalReturnPct: Number(summary.benchmark_total_return_pct),
+    benchmarkPnlUsd: Number(summary.benchmark_total_pnl_usd),
+    alphaPct: Number(summary.alpha_pct),
+    alphaUsd: Number(summary.alpha_usd),
+    cagrPct: Number(summary.strategy_cagr_pct),
+    benchmarkCagrPct: Number(summary.benchmark_cagr_pct),
+    annualVolPct: Number(summary.strategy_annual_vol_pct),
+    benchmarkAnnualVolPct: Number(summary.benchmark_annual_vol_pct),
+    maxDrawdownPct: Number(summary.strategy_max_drawdown_pct),
+    benchmarkMaxDrawdownPct: Number(summary.benchmark_max_drawdown_pct),
+    sharpe: Number(summary.strategy_sharpe),
+    benchmarkSharpe: Number(summary.benchmark_sharpe),
+    sortino: Number(summary.strategy_sortino),
+    benchmarkSortino: Number(summary.benchmark_sortino),
+    calmar: Number(summary.strategy_calmar),
+    benchmarkCalmar: Number(summary.benchmark_calmar),
+    beta: Number(summary.beta_vs_benchmark),
+    alphaAnnualPct: Number(summary.annualized_alpha_pct),
+    informationRatio: Number(summary.information_ratio),
+    winRate: Number(summary.strategy_win_rate_pct),
+    tradingDays: Number(summary.trading_days),
   };
 };
 
@@ -5391,10 +5435,17 @@ setInterval(refreshTrain, 5000);
 
 const renderBacktestWeightsTable = (st) => {
   const tbody = document.querySelector('#backtestWeightsTable tbody');
+  const subtitle = document.getElementById('backtestWeightsSubtitle');
   if (!tbody) return;
   const rows = Array.isArray(st?.latest_weights) ? st.latest_weights : [];
+  const asOfText = st?.latest_weights_as_of || st?.latest_snapshot?.timestamp || null;
+  if (subtitle) {
+    subtitle.textContent = asOfText
+      ? `Weights currently used by the backtest engine as of ${asOfText}`
+      : 'Weights currently used by the backtest engine';
+  }
   if (rows.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="2" class="flat">No rebalance weights yet.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="2" class="flat">No target weights yet. Start a backtest to populate daily allocations.</td></tr>`;
     return;
   }
   tbody.innerHTML = rows.map((row) => `
@@ -5405,14 +5456,48 @@ const renderBacktestWeightsTable = (st) => {
   `).join('');
 };
 
+const renderIdleBacktestKpis = (st) => {
+  const grid = document.getElementById('backtestKpiGrid');
+  if (!grid) return;
+  const asOfText = st?.last_message || 'No backtest run yet';
+  const placeholder = '--';
+  grid.innerHTML = `
+    <div class="kpi-card kpi-neutral">
+      <div class="kpi-label">Final NAV</div>
+      <div class="kpi-value">${placeholder}</div>
+      <div class="kpi-sub">${asOfText}</div>
+    </div>
+    <div class="kpi-card kpi-neutral"><div class="kpi-label">Range Return</div><div class="kpi-value">${placeholder}</div><div class="kpi-sub">Awaiting backtest data</div></div>
+    <div class="kpi-card kpi-neutral"><div class="kpi-label">QQQ Return</div><div class="kpi-value">${placeholder}</div><div class="kpi-sub">Awaiting benchmark data</div></div>
+    <div class="kpi-card kpi-neutral"><div class="kpi-label">Alpha vs QQQ</div><div class="kpi-value">${placeholder}</div><div class="kpi-sub">No observations yet</div></div>
+    <div class="kpi-card kpi-neutral"><div class="kpi-label">Sharpe Ratio</div><div class="kpi-value">${placeholder}</div><div class="kpi-sub">Run backtest to compute</div></div>
+    <div class="kpi-card kpi-neutral"><div class="kpi-label">QQQ Sharpe</div><div class="kpi-value">${placeholder}</div><div class="kpi-sub">Run backtest to compute</div></div>
+    <div class="kpi-card kpi-neutral"><div class="kpi-label">Sortino Ratio</div><div class="kpi-value">${placeholder}</div><div class="kpi-sub">Run backtest to compute</div></div>
+    <div class="kpi-card kpi-neutral"><div class="kpi-label">QQQ Sortino</div><div class="kpi-value">${placeholder}</div><div class="kpi-sub">Run backtest to compute</div></div>
+    <div class="kpi-card kpi-neutral"><div class="kpi-label">Max Drawdown</div><div class="kpi-value">${placeholder}</div><div class="kpi-sub">Run backtest to compute</div></div>
+    <div class="kpi-card kpi-neutral"><div class="kpi-label">QQQ Max Drawdown</div><div class="kpi-value">${placeholder}</div><div class="kpi-sub">Run backtest to compute</div></div>
+    <div class="kpi-card kpi-neutral"><div class="kpi-label">Ann. Volatility</div><div class="kpi-value">${placeholder}</div><div class="kpi-sub">252d annualized</div></div>
+    <div class="kpi-card kpi-neutral"><div class="kpi-label">QQQ Ann. Vol</div><div class="kpi-value">${placeholder}</div><div class="kpi-sub">252d annualized</div></div>
+    <div class="kpi-card kpi-neutral"><div class="kpi-label">Calmar Ratio</div><div class="kpi-value">${placeholder}</div><div class="kpi-sub">CAGR / MaxDD</div></div>
+    <div class="kpi-card kpi-neutral"><div class="kpi-label">QQQ Calmar</div><div class="kpi-value">${placeholder}</div><div class="kpi-sub">CAGR / MaxDD</div></div>
+    <div class="kpi-card kpi-neutral"><div class="kpi-label">Annualized Alpha</div><div class="kpi-value">${placeholder}</div><div class="kpi-sub">Jensen alpha</div></div>
+    <div class="kpi-card kpi-neutral"><div class="kpi-label">Beta vs QQQ</div><div class="kpi-value">${placeholder}</div><div class="kpi-sub">Market sensitivity</div></div>
+    <div class="kpi-card kpi-neutral"><div class="kpi-label">Information Ratio</div><div class="kpi-value">${placeholder}</div><div class="kpi-sub">Active return / TE</div></div>
+    <div class="kpi-card kpi-neutral"><div class="kpi-label">Win Rate</div><div class="kpi-value">${placeholder}</div><div class="kpi-sub">Positive days</div></div>
+    <div class="kpi-card kpi-neutral"><div class="kpi-label">CAGR</div><div class="kpi-value">${placeholder}</div><div class="kpi-sub">Run backtest to compute</div></div>
+    <div class="kpi-card kpi-neutral"><div class="kpi-label">QQQ CAGR</div><div class="kpi-value">${placeholder}</div><div class="kpi-sub">Run backtest to compute</div></div>
+    <div class="kpi-card kpi-neutral"><div class="kpi-label">Observed Days</div><div class="kpi-value">0</div><div class="kpi-sub">Return observations</div></div>
+  `;
+};
+
 const renderBacktestKpis = (st) => {
   const grid = document.getElementById('backtestKpiGrid');
   if (!grid) return;
   const filtered = filterPaperContextByRangeDays(backtestFullContext, selectedBacktestRangeDays);
   const latest = filtered?.latest || backtestFullContext?.latest;
-  const perf = computeBacktestPerformance(filtered) || st?.summary || null;
+  const perf = computeBacktestPerformance(filtered) || normalizeBacktestSummary(st?.summary) || null;
   if (!latest || !perf) {
-    grid.innerHTML = '';
+    renderIdleBacktestKpis(st);
     return;
   }
   const asOfText = latest?.updatedText || latest?.timestamp || st?.last_message || '--';
