@@ -1889,11 +1889,15 @@ const computeBacktestPerformance = (ctx) => {
     cagrPct: cagr * 100,
     benchmarkCagrPct: benchmarkCagr * 100,
     annualVolPct: annualVol * 100,
+    benchmarkAnnualVolPct: (benchmarkStd * Math.sqrt(BACKTEST_TRADING_DAYS_PER_YEAR)) * 100,
     maxDrawdownPct,
     benchmarkMaxDrawdownPct,
     sharpe,
+    benchmarkSharpe,
     sortino,
+    benchmarkSortino,
     calmar,
+    benchmarkCalmar,
     beta,
     alphaAnnualPct: alphaAnnual * 100,
     informationRatio,
@@ -5449,25 +5453,50 @@ const renderBacktestKpis = (st) => {
       <div class="kpi-value">${Number.isFinite(perf.sharpe) ? perf.sharpe.toFixed(2) : '--'}</div>
       <div class="kpi-sub">rf ${(BACKTEST_RISK_FREE_RATE * 100).toFixed(1)}%</div>
     </div>
+    <div class="kpi-card ${Number.isFinite(perf.benchmarkSharpe) ? (perf.benchmarkSharpe >= 1 ? 'kpi-positive' : (perf.benchmarkSharpe < 0 ? 'kpi-negative' : 'kpi-neutral')) : 'kpi-neutral'}">
+      <div class="kpi-label">QQQ Sharpe</div>
+      <div class="kpi-value">${Number.isFinite(perf.benchmarkSharpe) ? perf.benchmarkSharpe.toFixed(2) : '--'}</div>
+      <div class="kpi-sub">benchmark</div>
+    </div>
     <div class="kpi-card ${sortinoMood}">
       <div class="kpi-label">Sortino Ratio</div>
       <div class="kpi-value">${Number.isFinite(perf.sortino) ? perf.sortino.toFixed(2) : '--'}</div>
       <div class="kpi-sub">downside-adjusted</div>
+    </div>
+    <div class="kpi-card ${Number.isFinite(perf.benchmarkSortino) ? (perf.benchmarkSortino >= 1 ? 'kpi-positive' : (perf.benchmarkSortino < 0 ? 'kpi-negative' : 'kpi-neutral')) : 'kpi-neutral'}">
+      <div class="kpi-label">QQQ Sortino</div>
+      <div class="kpi-value">${Number.isFinite(perf.benchmarkSortino) ? perf.benchmarkSortino.toFixed(2) : '--'}</div>
+      <div class="kpi-sub">benchmark</div>
     </div>
     <div class="kpi-card ${ddMood}">
       <div class="kpi-label">Max Drawdown</div>
       <div class="kpi-value ${Number.isFinite(perf.maxDrawdownPct) && perf.maxDrawdownPct < 0 ? 'down' : ''}">${Number.isFinite(perf.maxDrawdownPct) ? `${perf.maxDrawdownPct.toFixed(2)}%` : '--'}</div>
       <div class="kpi-sub">QQQ ${Number.isFinite(perf.benchmarkMaxDrawdownPct) ? `${perf.benchmarkMaxDrawdownPct.toFixed(2)}%` : '--'}</div>
     </div>
+    <div class="kpi-card ${Number.isFinite(perf.benchmarkMaxDrawdownPct) ? (perf.benchmarkMaxDrawdownPct <= -10 ? 'kpi-negative' : 'kpi-neutral') : 'kpi-neutral'}">
+      <div class="kpi-label">QQQ Max Drawdown</div>
+      <div class="kpi-value ${Number.isFinite(perf.benchmarkMaxDrawdownPct) && perf.benchmarkMaxDrawdownPct < 0 ? 'down' : ''}">${Number.isFinite(perf.benchmarkMaxDrawdownPct) ? `${perf.benchmarkMaxDrawdownPct.toFixed(2)}%` : '--'}</div>
+      <div class="kpi-sub">benchmark</div>
+    </div>
     <div class="kpi-card ${volMood}">
       <div class="kpi-label">Ann. Volatility</div>
       <div class="kpi-value">${Number.isFinite(perf.annualVolPct) ? `${perf.annualVolPct.toFixed(2)}%` : '--'}</div>
       <div class="kpi-sub">252d annualized</div>
     </div>
+    <div class="kpi-card ${Number.isFinite(perf.benchmarkAnnualVolPct) ? (perf.benchmarkAnnualVolPct > 30 ? 'kpi-warn' : 'kpi-neutral') : 'kpi-neutral'}">
+      <div class="kpi-label">QQQ Ann. Vol</div>
+      <div class="kpi-value">${Number.isFinite(perf.benchmarkAnnualVolPct) ? `${perf.benchmarkAnnualVolPct.toFixed(2)}%` : '--'}</div>
+      <div class="kpi-sub">benchmark</div>
+    </div>
     <div class="kpi-card ${calmarMood}">
       <div class="kpi-label">Calmar Ratio</div>
       <div class="kpi-value">${Number.isFinite(perf.calmar) ? perf.calmar.toFixed(2) : '--'}</div>
       <div class="kpi-sub">CAGR / MaxDD</div>
+    </div>
+    <div class="kpi-card ${Number.isFinite(perf.benchmarkCalmar) ? (perf.benchmarkCalmar >= 1 ? 'kpi-positive' : (perf.benchmarkCalmar < 0 ? 'kpi-negative' : 'kpi-neutral')) : 'kpi-neutral'}">
+      <div class="kpi-label">QQQ Calmar</div>
+      <div class="kpi-value">${Number.isFinite(perf.benchmarkCalmar) ? perf.benchmarkCalmar.toFixed(2) : '--'}</div>
+      <div class="kpi-sub">benchmark</div>
     </div>
     <div class="kpi-card ${alphaMood}">
       <div class="kpi-label">Annualized Alpha</div>
@@ -5493,6 +5522,11 @@ const renderBacktestKpis = (st) => {
       <div class="kpi-label">CAGR</div>
       <div class="kpi-value">${Number.isFinite(perf.cagrPct) ? `${perf.cagrPct >= 0 ? '+' : ''}${perf.cagrPct.toFixed(2)}%` : '--'}</div>
       <div class="kpi-sub">QQQ ${Number.isFinite(perf.benchmarkCagrPct) ? `${perf.benchmarkCagrPct >= 0 ? '+' : ''}${perf.benchmarkCagrPct.toFixed(2)}%` : '--'}</div>
+    </div>
+    <div class="kpi-card ${Number.isFinite(perf.benchmarkCagrPct) && perf.benchmarkCagrPct >= 0 ? 'kpi-positive' : 'kpi-negative'}">
+      <div class="kpi-label">QQQ CAGR</div>
+      <div class="kpi-value">${Number.isFinite(perf.benchmarkCagrPct) ? `${perf.benchmarkCagrPct >= 0 ? '+' : ''}${perf.benchmarkCagrPct.toFixed(2)}%` : '--'}</div>
+      <div class="kpi-sub">benchmark</div>
     </div>
     <div class="kpi-card kpi-neutral">
       <div class="kpi-label">Observed Days</div>

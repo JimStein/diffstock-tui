@@ -62,6 +62,33 @@ struct TrainRuntimeState {
     last_error: Option<String>,
 }
 
+#[derive(Clone, Debug, Serialize, Default)]
+struct BacktestPerformanceSummary {
+    trading_days: usize,
+    strategy_total_return_pct: f64,
+    benchmark_total_return_pct: f64,
+    alpha_pct: f64,
+    strategy_total_pnl_usd: f64,
+    benchmark_total_pnl_usd: f64,
+    alpha_usd: f64,
+    strategy_cagr_pct: f64,
+    benchmark_cagr_pct: f64,
+    strategy_annual_vol_pct: f64,
+    benchmark_annual_vol_pct: f64,
+    strategy_max_drawdown_pct: f64,
+    benchmark_max_drawdown_pct: f64,
+    strategy_sharpe: f64,
+    benchmark_sharpe: f64,
+    strategy_sortino: f64,
+    benchmark_sortino: f64,
+    strategy_calmar: f64,
+    benchmark_calmar: f64,
+    beta_vs_benchmark: f64,
+    annualized_alpha_pct: f64,
+    information_ratio: f64,
+    strategy_win_rate_pct: f64,
+}
+
 #[derive(Clone, Debug, Serialize)]
 struct BacktestRuntimeState {
     running: bool,
@@ -78,6 +105,7 @@ struct BacktestRuntimeState {
     last_error: Option<String>,
     latest_snapshot: Option<paper_trading::MinutePortfolioSnapshot>,
     snapshots: Vec<paper_trading::MinutePortfolioSnapshot>,
+    summary: Option<BacktestPerformanceSummary>,
     latest_weights: Vec<PaperTargetState>,
     logs: Vec<String>,
 }
@@ -183,6 +211,7 @@ impl Default for BacktestRuntimeState {
             last_error: None,
             latest_snapshot: None,
             snapshots: Vec::new(),
+            summary: None,
             latest_weights: Vec::new(),
             logs: Vec::new(),
         }
@@ -3308,6 +3337,7 @@ async fn start_backtest(
         bt.last_error = None;
         bt.latest_snapshot = None;
         bt.snapshots.clear();
+        bt.summary = None;
         bt.latest_weights.clear();
         bt.logs.clear();
         push_backtest_log(&mut bt, Some(runtime_path.as_path()), format!(
@@ -3691,10 +3721,36 @@ async fn start_backtest(
         match result {
             Ok(()) => {
                 bt.last_error = None;
+                bt.summary = compute_backtest_summary(&bt.snapshots);
+                if let Some(summary) = bt.summary.clone() {
+                    if let Err(err) = append_backtest_summary(Some(backtest_runtime_path.as_path()), &summary) {
+                        bt.logs.push(runtime_log_with_ts(format!(
+                            "WARNING: failed to append backtest summary: {}",
+                            err
+                        )));
+                    }
+                    push_backtest_log(
+                        &mut bt,
+                        Some(backtest_runtime_path.as_path()),
+                        format!(
+                            "Summary => strat_ret={:+.2}%, qqq_ret={:+.2}%, alpha={:+.2}%, strat_sharpe={:.2}, qqq_sharpe={:.2}, strat_maxdd={:.2}%, qqq_maxdd={:.2}%, beta={:.2}, info_ratio={:.2}",
+                            summary.strategy_total_return_pct,
+                            summary.benchmark_total_return_pct,
+                            summary.alpha_pct,
+                            summary.strategy_sharpe,
+                            summary.benchmark_sharpe,
+                            summary.strategy_max_drawdown_pct,
+                            summary.benchmark_max_drawdown_pct,
+                            summary.beta_vs_benchmark,
+                            summary.information_ratio,
+                        ),
+                    );
+                }
                 bt.last_message = Some("Backtest completed".to_string());
                 push_backtest_log(&mut bt, Some(backtest_runtime_path.as_path()), "Backtest completed");
             }
             Err(err) => {
+                bt.summary = None;
                 bt.last_error = Some(err.to_string());
                 bt.last_message = Some("Backtest failed".to_string());
                 push_backtest_log(
@@ -4442,6 +4498,250 @@ fn append_backtest_snapshot(
         "snapshot": snapshot,
     });
     append_jsonl_line(path, &payload)
+}
+
+fn append_backtest_summary(
+    runtime_path: Option<&Path>,
+    summary: &BacktestPerformanceSummary,
+) -> Result<()> {
+    let Some(path) = runtime_path else {
+        return Ok(());
+    };
+
+    let payload = serde_json::json!({
+        "timestamp": chrono::Local::now().to_rfc3339(),
+        "kind": "summary",
+        "summary": summary,
+    });
+    append_jsonl_line(path, &payload)
+}
+
+const BACKTEST_TRADING_DAYS_PER_YEAR: f64 = 252.0;
+const BACKTEST_RISK_FREE_RATE: f64 = 0.05;
+
+fn compute_mean(values: &[f64]) -> f64 {
+    if values.is_empty() {
+        return f64::NAN;
+    }
+    values.iter().sum::<f64>() / values.len() as f64
+}
+
+fn compute_sample_std(values: &[f64]) -> f64 {
+    if values.len() < 2 {
+        return f64::NAN;
+    }
+    let mean = compute_mean(values);
+    let variance = values
+        .iter()
+        .map(|value| (value - mean).powi(2))
+        .sum::<f64>()
+        / (values.len() as f64 - 1.0);
+    variance.max(0.0).sqrt()
+}
+
+fn compute_covariance(lhs: &[f64], rhs: &[f64]) -> f64 {
+    if lhs.len() < 2 || lhs.len() != rhs.len() {
+        return f64::NAN;
+    }
+    let mean_lhs = compute_mean(lhs);
+    let mean_rhs = compute_mean(rhs);
+    let mut sum = 0.0;
+    for idx in 0..lhs.len() {
+        sum += (lhs[idx] - mean_lhs) * (rhs[idx] - mean_rhs);
+    }
+    sum / (lhs.len() as f64 - 1.0)
+}
+
+fn compute_max_drawdown_pct(values: &[f64]) -> f64 {
+    let mut peak = f64::NEG_INFINITY;
+    let mut max_drawdown = 0.0;
+    for &value in values {
+        if !value.is_finite() || value <= 0.0 {
+            continue;
+        }
+        if value > peak {
+            peak = value;
+        }
+        if peak.is_finite() && peak > 0.0 {
+            let drawdown = ((value - peak) / peak) * 100.0;
+            if drawdown < max_drawdown {
+                max_drawdown = drawdown;
+            }
+        }
+    }
+    max_drawdown
+}
+
+fn compute_backtest_summary(
+    snapshots: &[paper_trading::MinutePortfolioSnapshot],
+) -> Option<BacktestPerformanceSummary> {
+    if snapshots.len() < 2 {
+        return None;
+    }
+
+    let initial_capital = snapshots.first()?.total_value - snapshots.first()?.pnl_usd;
+    if !initial_capital.is_finite() || initial_capital <= 0.0 {
+        return None;
+    }
+
+    let strategy_values = snapshots
+        .iter()
+        .map(|snapshot| snapshot.total_value)
+        .collect::<Vec<_>>();
+    let benchmark_values = snapshots
+        .iter()
+        .map(|snapshot| initial_capital * (1.0 + snapshot.benchmark_return_pct / 100.0))
+        .collect::<Vec<_>>();
+
+    let final_strategy = *strategy_values.last()?;
+    let final_benchmark = *benchmark_values.last()?;
+    if !final_strategy.is_finite() || !final_benchmark.is_finite() || final_strategy <= 0.0 || final_benchmark <= 0.0 {
+        return None;
+    }
+
+    let mut strategy_returns = Vec::with_capacity(strategy_values.len().saturating_sub(1));
+    let mut benchmark_returns = Vec::with_capacity(benchmark_values.len().saturating_sub(1));
+    for idx in 1..strategy_values.len() {
+        let prev_strategy = strategy_values[idx - 1];
+        let prev_benchmark = benchmark_values[idx - 1];
+        let curr_strategy = strategy_values[idx];
+        let curr_benchmark = benchmark_values[idx];
+        if prev_strategy.is_finite() && curr_strategy.is_finite() && prev_strategy > 0.0 {
+            strategy_returns.push((curr_strategy / prev_strategy) - 1.0);
+        }
+        if prev_benchmark.is_finite() && curr_benchmark.is_finite() && prev_benchmark > 0.0 {
+            benchmark_returns.push((curr_benchmark / prev_benchmark) - 1.0);
+        }
+    }
+
+    if strategy_returns.is_empty() || strategy_returns.len() != benchmark_returns.len() {
+        return None;
+    }
+
+    let trading_days = strategy_returns.len();
+    let years = trading_days as f64 / BACKTEST_TRADING_DAYS_PER_YEAR;
+    let daily_rf = (1.0 + BACKTEST_RISK_FREE_RATE).powf(1.0 / BACKTEST_TRADING_DAYS_PER_YEAR) - 1.0;
+
+    let strategy_total_return = final_strategy / initial_capital - 1.0;
+    let benchmark_total_return = final_benchmark / initial_capital - 1.0;
+    let strategy_cagr = if years > 0.0 {
+        (final_strategy / initial_capital).powf(1.0 / years) - 1.0
+    } else {
+        f64::NAN
+    };
+    let benchmark_cagr = if years > 0.0 {
+        (final_benchmark / initial_capital).powf(1.0 / years) - 1.0
+    } else {
+        f64::NAN
+    };
+
+    let strategy_std = compute_sample_std(&strategy_returns);
+    let benchmark_std = compute_sample_std(&benchmark_returns);
+    let strategy_annual_vol = strategy_std * BACKTEST_TRADING_DAYS_PER_YEAR.sqrt();
+    let benchmark_annual_vol = benchmark_std * BACKTEST_TRADING_DAYS_PER_YEAR.sqrt();
+
+    let strategy_sharpe = if strategy_std.is_finite() && strategy_std > 1e-12 {
+        ((compute_mean(&strategy_returns) - daily_rf) / strategy_std) * BACKTEST_TRADING_DAYS_PER_YEAR.sqrt()
+    } else {
+        f64::NAN
+    };
+    let benchmark_sharpe = if benchmark_std.is_finite() && benchmark_std > 1e-12 {
+        ((compute_mean(&benchmark_returns) - daily_rf) / benchmark_std) * BACKTEST_TRADING_DAYS_PER_YEAR.sqrt()
+    } else {
+        f64::NAN
+    };
+
+    let strategy_downside = strategy_returns
+        .iter()
+        .map(|value| value - daily_rf)
+        .filter(|value| value.is_finite() && *value < 0.0)
+        .collect::<Vec<_>>();
+    let benchmark_downside = benchmark_returns
+        .iter()
+        .map(|value| value - daily_rf)
+        .filter(|value| value.is_finite() && *value < 0.0)
+        .collect::<Vec<_>>();
+    let strategy_downside_std = compute_sample_std(&strategy_downside);
+    let benchmark_downside_std = compute_sample_std(&benchmark_downside);
+
+    let strategy_sortino = if strategy_downside_std.is_finite() && strategy_downside_std > 1e-12 {
+        ((compute_mean(&strategy_returns) - daily_rf) / strategy_downside_std) * BACKTEST_TRADING_DAYS_PER_YEAR.sqrt()
+    } else {
+        f64::NAN
+    };
+    let benchmark_sortino = if benchmark_downside_std.is_finite() && benchmark_downside_std > 1e-12 {
+        ((compute_mean(&benchmark_returns) - daily_rf) / benchmark_downside_std) * BACKTEST_TRADING_DAYS_PER_YEAR.sqrt()
+    } else {
+        f64::NAN
+    };
+
+    let strategy_max_drawdown = compute_max_drawdown_pct(&strategy_values);
+    let benchmark_max_drawdown = compute_max_drawdown_pct(&benchmark_values);
+    let strategy_calmar = if strategy_cagr.is_finite() && strategy_max_drawdown < 0.0 {
+        strategy_cagr / (strategy_max_drawdown.abs() / 100.0)
+    } else {
+        f64::NAN
+    };
+    let benchmark_calmar = if benchmark_cagr.is_finite() && benchmark_max_drawdown < 0.0 {
+        benchmark_cagr / (benchmark_max_drawdown.abs() / 100.0)
+    } else {
+        f64::NAN
+    };
+
+    let active_returns = strategy_returns
+        .iter()
+        .zip(benchmark_returns.iter())
+        .map(|(strategy, benchmark)| strategy - benchmark)
+        .collect::<Vec<_>>();
+    let tracking_error = compute_sample_std(&active_returns);
+    let information_ratio = if tracking_error.is_finite() && tracking_error > 1e-12 {
+        (compute_mean(&active_returns) / tracking_error) * BACKTEST_TRADING_DAYS_PER_YEAR.sqrt()
+    } else {
+        f64::NAN
+    };
+
+    let benchmark_variance = compute_covariance(&benchmark_returns, &benchmark_returns);
+    let covariance = compute_covariance(&strategy_returns, &benchmark_returns);
+    let beta = if benchmark_variance.is_finite() && benchmark_variance > 1e-12 && covariance.is_finite() {
+        covariance / benchmark_variance
+    } else {
+        f64::NAN
+    };
+    let annualized_alpha = if beta.is_finite() {
+        ((compute_mean(&strategy_returns) - daily_rf) - beta * (compute_mean(&benchmark_returns) - daily_rf))
+            * BACKTEST_TRADING_DAYS_PER_YEAR
+    } else {
+        f64::NAN
+    };
+
+    let wins = strategy_returns.iter().filter(|value| value.is_finite() && **value > 0.0).count();
+    let win_rate = wins as f64 / trading_days as f64;
+
+    Some(BacktestPerformanceSummary {
+        trading_days,
+        strategy_total_return_pct: strategy_total_return * 100.0,
+        benchmark_total_return_pct: benchmark_total_return * 100.0,
+        alpha_pct: (strategy_total_return - benchmark_total_return) * 100.0,
+        strategy_total_pnl_usd: final_strategy - initial_capital,
+        benchmark_total_pnl_usd: final_benchmark - initial_capital,
+        alpha_usd: final_strategy - final_benchmark,
+        strategy_cagr_pct: strategy_cagr * 100.0,
+        benchmark_cagr_pct: benchmark_cagr * 100.0,
+        strategy_annual_vol_pct: strategy_annual_vol * 100.0,
+        benchmark_annual_vol_pct: benchmark_annual_vol * 100.0,
+        strategy_max_drawdown_pct: strategy_max_drawdown,
+        benchmark_max_drawdown_pct: benchmark_max_drawdown,
+        strategy_sharpe,
+        benchmark_sharpe,
+        strategy_sortino,
+        benchmark_sortino,
+        strategy_calmar,
+        benchmark_calmar,
+        beta_vs_benchmark: beta,
+        annualized_alpha_pct: annualized_alpha * 100.0,
+        information_ratio,
+        strategy_win_rate_pct: win_rate * 100.0,
+    })
 }
 
 fn append_jsonl_line<T: Serialize>(path: &Path, value: &T) -> Result<()> {
