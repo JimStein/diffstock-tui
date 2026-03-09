@@ -1753,6 +1753,155 @@ const computeMaxDrawdownPct = (series = []) => {
   return maxDrawdown;
 };
 
+const BACKTEST_TRADING_DAYS_PER_YEAR = 252;
+const BACKTEST_RISK_FREE_RATE = 0.05;
+
+const computeMean = (values = []) => {
+  if (!Array.isArray(values) || values.length === 0) return NaN;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+};
+
+const computeSampleStd = (values = []) => {
+  if (!Array.isArray(values) || values.length < 2) return NaN;
+  const mean = computeMean(values);
+  const variance = values.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / (values.length - 1);
+  return Math.sqrt(Math.max(variance, 0));
+};
+
+const computeCovariance = (lhs = [], rhs = []) => {
+  if (!Array.isArray(lhs) || !Array.isArray(rhs) || lhs.length < 2 || lhs.length !== rhs.length) return NaN;
+  const meanLhs = computeMean(lhs);
+  const meanRhs = computeMean(rhs);
+  let sum = 0;
+  for (let idx = 0; idx < lhs.length; idx += 1) {
+    sum += (lhs[idx] - meanLhs) * (rhs[idx] - meanRhs);
+  }
+  return sum / (lhs.length - 1);
+};
+
+const buildReturnMapFromSeries = (series = []) => {
+  const out = new Map();
+  if (!Array.isArray(series) || series.length < 2) return out;
+  let prev = null;
+  for (const point of series) {
+    const time = Number(point?.time);
+    const value = Number(point?.value);
+    if (!Number.isFinite(time) || !Number.isFinite(value) || value <= 0) continue;
+    if (prev && prev.value > 0) {
+      out.set(time, (value / prev.value) - 1);
+    }
+    prev = { time, value };
+  }
+  return out;
+};
+
+const computeBacktestPerformance = (ctx) => {
+  const portfolioSeries = Array.isArray(ctx?.portfolioSeries) ? ctx.portfolioSeries : [];
+  const benchmarkSeries = Array.isArray(ctx?.benchmarkSeries) ? ctx.benchmarkSeries : [];
+  if (portfolioSeries.length < 2) return null;
+
+  const startValue = Number(portfolioSeries[0]?.value);
+  const finalValue = Number(portfolioSeries[portfolioSeries.length - 1]?.value);
+  if (!Number.isFinite(startValue) || !Number.isFinite(finalValue) || startValue <= 0 || finalValue <= 0) {
+    return null;
+  }
+
+  const benchmarkStartValue = Number(benchmarkSeries[0]?.value);
+  const benchmarkFinalValue = Number(benchmarkSeries[benchmarkSeries.length - 1]?.value);
+  const portfolioReturnMap = buildReturnMapFromSeries(portfolioSeries);
+  const benchmarkReturnMap = buildReturnMapFromSeries(benchmarkSeries);
+  const portfolioReturns = Array.from(portfolioReturnMap.values()).filter((value) => Number.isFinite(value));
+
+  const alignedPortfolioReturns = [];
+  const alignedBenchmarkReturns = [];
+  for (const [time, portRet] of portfolioReturnMap.entries()) {
+    const benchRet = benchmarkReturnMap.get(time);
+    if (Number.isFinite(portRet) && Number.isFinite(benchRet)) {
+      alignedPortfolioReturns.push(portRet);
+      alignedBenchmarkReturns.push(benchRet);
+    }
+  }
+
+  const totalReturn = (finalValue / startValue) - 1;
+  const benchmarkTotalReturn = Number.isFinite(benchmarkStartValue) && Number.isFinite(benchmarkFinalValue) && benchmarkStartValue > 0
+    ? (benchmarkFinalValue / benchmarkStartValue) - 1
+    : NaN;
+  const tradingDays = portfolioReturns.length;
+  const years = tradingDays > 0 ? tradingDays / BACKTEST_TRADING_DAYS_PER_YEAR : NaN;
+  const cagr = Number.isFinite(years) && years > 0
+    ? Math.pow(finalValue / startValue, 1 / years) - 1
+    : NaN;
+  const benchmarkCagr = Number.isFinite(benchmarkTotalReturn) && Number.isFinite(years) && years > 0
+    ? Math.pow(1 + benchmarkTotalReturn, 1 / years) - 1
+    : NaN;
+
+  const dailyRf = Math.pow(1 + BACKTEST_RISK_FREE_RATE, 1 / BACKTEST_TRADING_DAYS_PER_YEAR) - 1;
+  const portfolioStd = computeSampleStd(portfolioReturns);
+  const annualVol = Number.isFinite(portfolioStd)
+    ? portfolioStd * Math.sqrt(BACKTEST_TRADING_DAYS_PER_YEAR)
+    : NaN;
+  const sharpe = Number.isFinite(portfolioStd) && portfolioStd > 1e-12
+    ? ((computeMean(portfolioReturns) - dailyRf) / portfolioStd) * Math.sqrt(BACKTEST_TRADING_DAYS_PER_YEAR)
+    : NaN;
+
+  const downsideReturns = portfolioReturns
+    .map((value) => value - dailyRf)
+    .filter((value) => Number.isFinite(value) && value < 0);
+  const downsideStd = computeSampleStd(downsideReturns);
+  const sortino = Number.isFinite(downsideStd) && downsideStd > 1e-12
+    ? ((computeMean(portfolioReturns) - dailyRf) / downsideStd) * Math.sqrt(BACKTEST_TRADING_DAYS_PER_YEAR)
+    : NaN;
+
+  const maxDrawdownPct = computeMaxDrawdownPct(portfolioSeries);
+  const benchmarkMaxDrawdownPct = computeMaxDrawdownPct(benchmarkSeries);
+  const calmar = Number.isFinite(cagr) && Number.isFinite(maxDrawdownPct) && maxDrawdownPct < 0
+    ? cagr / Math.abs(maxDrawdownPct / 100)
+    : NaN;
+
+  const activeReturns = alignedPortfolioReturns.map((value, idx) => value - alignedBenchmarkReturns[idx]);
+  const trackingError = computeSampleStd(activeReturns);
+  const informationRatio = Number.isFinite(trackingError) && trackingError > 1e-12
+    ? (computeMean(activeReturns) / trackingError) * Math.sqrt(BACKTEST_TRADING_DAYS_PER_YEAR)
+    : NaN;
+
+  const benchmarkVariance = computeCovariance(alignedBenchmarkReturns, alignedBenchmarkReturns);
+  const covariance = computeCovariance(alignedPortfolioReturns, alignedBenchmarkReturns);
+  const beta = Number.isFinite(benchmarkVariance) && benchmarkVariance > 1e-12 && Number.isFinite(covariance)
+    ? covariance / benchmarkVariance
+    : NaN;
+  const alphaAnnual = Number.isFinite(beta)
+    ? (((computeMean(alignedPortfolioReturns) - dailyRf) - beta * (computeMean(alignedBenchmarkReturns) - dailyRf)) * BACKTEST_TRADING_DAYS_PER_YEAR)
+    : NaN;
+
+  const positiveDays = portfolioReturns.filter((value) => Number.isFinite(value) && value > 0).length;
+  const winRate = tradingDays > 0 ? (positiveDays / tradingDays) * 100 : NaN;
+
+  return {
+    startValue,
+    finalValue,
+    totalReturnPct: totalReturn * 100,
+    totalPnlUsd: finalValue - startValue,
+    benchmarkFinalValue,
+    benchmarkTotalReturnPct: benchmarkTotalReturn * 100,
+    benchmarkPnlUsd: Number.isFinite(benchmarkFinalValue) ? benchmarkFinalValue - benchmarkStartValue : NaN,
+    alphaPct: (totalReturn - benchmarkTotalReturn) * 100,
+    alphaUsd: Number.isFinite(benchmarkFinalValue) ? finalValue - benchmarkFinalValue : NaN,
+    cagrPct: cagr * 100,
+    benchmarkCagrPct: benchmarkCagr * 100,
+    annualVolPct: annualVol * 100,
+    maxDrawdownPct,
+    benchmarkMaxDrawdownPct,
+    sharpe,
+    sortino,
+    calmar,
+    beta,
+    alphaAnnualPct: alphaAnnual * 100,
+    informationRatio,
+    winRate,
+    tradingDays,
+  };
+};
+
 const renderPaperKpis = (paperStatus) => {
   const grid = document.getElementById('paperKpiGrid');
   if (!grid) return;
@@ -4230,6 +4379,7 @@ for (const btn of backtestRangeButtons) {
     if (!Number.isFinite(days) || days < 0) return;
     selectedBacktestRangeDays = days;
     renderBacktestChartFromCurrentContext();
+    renderBacktestKpis(latestBacktestStatus);
   });
 }
 
@@ -5254,32 +5404,100 @@ const renderBacktestWeightsTable = (st) => {
 const renderBacktestKpis = (st) => {
   const grid = document.getElementById('backtestKpiGrid');
   if (!grid) return;
-  const latest = backtestFullContext?.latest;
-  const initialCapital = Number(st?.initial_capital_usd || 0);
-  if (!latest || !Number.isFinite(initialCapital) || initialCapital <= 0) {
+  const filtered = filterPaperContextByRangeDays(backtestFullContext, selectedBacktestRangeDays);
+  const latest = filtered?.latest || backtestFullContext?.latest;
+  const perf = computeBacktestPerformance(filtered);
+  if (!latest || !perf) {
     grid.innerHTML = '';
     return;
   }
+
+  const returnMood = Number.isFinite(perf.totalReturnPct) ? (perf.totalReturnPct >= 0 ? 'kpi-positive' : 'kpi-negative') : 'kpi-neutral';
+  const benchmarkMood = Number.isFinite(perf.benchmarkTotalReturnPct) ? (perf.benchmarkTotalReturnPct >= 0 ? 'kpi-positive' : 'kpi-negative') : 'kpi-neutral';
+  const alphaMood = Number.isFinite(perf.alphaPct) ? (perf.alphaPct >= 0 ? 'kpi-positive' : 'kpi-negative') : 'kpi-neutral';
+  const ddMood = Number.isFinite(perf.maxDrawdownPct) ? (perf.maxDrawdownPct <= -10 ? 'kpi-negative' : 'kpi-neutral') : 'kpi-neutral';
+  const sharpeMood = Number.isFinite(perf.sharpe) ? (perf.sharpe >= 1 ? 'kpi-positive' : (perf.sharpe < 0 ? 'kpi-negative' : 'kpi-neutral')) : 'kpi-neutral';
+  const sortinoMood = Number.isFinite(perf.sortino) ? (perf.sortino >= 1 ? 'kpi-positive' : (perf.sortino < 0 ? 'kpi-negative' : 'kpi-neutral')) : 'kpi-neutral';
+  const calmarMood = Number.isFinite(perf.calmar) ? (perf.calmar >= 1 ? 'kpi-positive' : (perf.calmar < 0 ? 'kpi-negative' : 'kpi-neutral')) : 'kpi-neutral';
+  const infoMood = Number.isFinite(perf.informationRatio) ? (perf.informationRatio >= 0 ? 'kpi-positive' : 'kpi-negative') : 'kpi-neutral';
+  const betaMood = Number.isFinite(perf.beta) ? (Math.abs(perf.beta - 1) < 0.25 ? 'kpi-neutral' : (perf.beta > 1.25 ? 'kpi-warn' : 'kpi-positive')) : 'kpi-neutral';
+  const volMood = Number.isFinite(perf.annualVolPct) ? (perf.annualVolPct > 30 ? 'kpi-warn' : 'kpi-neutral') : 'kpi-neutral';
+  const winMood = Number.isFinite(perf.winRate) ? (perf.winRate >= 50 ? 'kpi-positive' : 'kpi-negative') : 'kpi-neutral';
 
   grid.innerHTML = `
     <div class="kpi-card">
       <div class="kpi-label">Final NAV</div>
       <div class="kpi-value">${formatMoney(latest.portfolioValue)}</div>
     </div>
-    <div class="kpi-card ${latest.portfolioPnlUsd >= 0 ? 'kpi-positive' : 'kpi-negative'}">
-      <div class="kpi-label">Strategy Return</div>
-      <div class="kpi-value">${latest.portfolioPnlPct >= 0 ? '+' : ''}${latest.portfolioPnlPct.toFixed(2)}%</div>
-      <div class="kpi-sub">${latest.portfolioPnlUsd >= 0 ? '+' : ''}${formatMoney(latest.portfolioPnlUsd)}</div>
+    <div class="kpi-card ${returnMood}">
+      <div class="kpi-label">Range Return</div>
+      <div class="kpi-value">${Number.isFinite(perf.totalReturnPct) ? `${perf.totalReturnPct >= 0 ? '+' : ''}${perf.totalReturnPct.toFixed(2)}%` : '--'}</div>
+      <div class="kpi-sub">${Number.isFinite(perf.totalPnlUsd) ? `${perf.totalPnlUsd >= 0 ? '+' : ''}${formatMoney(perf.totalPnlUsd)}` : '--'}</div>
     </div>
-    <div class="kpi-card ${latest.benchmarkPnlUsd >= 0 ? 'kpi-positive' : 'kpi-negative'}">
+    <div class="kpi-card ${benchmarkMood}">
       <div class="kpi-label">QQQ Return</div>
-      <div class="kpi-value">${latest.benchmarkPnlPct >= 0 ? '+' : ''}${latest.benchmarkPnlPct.toFixed(2)}%</div>
-      <div class="kpi-sub">${latest.benchmarkPnlUsd >= 0 ? '+' : ''}${formatMoney(latest.benchmarkPnlUsd)}</div>
+      <div class="kpi-value">${Number.isFinite(perf.benchmarkTotalReturnPct) ? `${perf.benchmarkTotalReturnPct >= 0 ? '+' : ''}${perf.benchmarkTotalReturnPct.toFixed(2)}%` : '--'}</div>
+      <div class="kpi-sub">${Number.isFinite(perf.benchmarkPnlUsd) ? `${perf.benchmarkPnlUsd >= 0 ? '+' : ''}${formatMoney(perf.benchmarkPnlUsd)}` : '--'}</div>
     </div>
-    <div class="kpi-card ${latest.spreadUsd >= 0 ? 'kpi-positive' : 'kpi-negative'}">
+    <div class="kpi-card ${alphaMood}">
       <div class="kpi-label">Alpha vs QQQ</div>
-      <div class="kpi-value">${latest.spreadPct >= 0 ? '+' : ''}${latest.spreadPct.toFixed(2)}%</div>
-      <div class="kpi-sub">${latest.spreadUsd >= 0 ? '+' : ''}${formatMoney(latest.spreadUsd)}</div>
+      <div class="kpi-value">${Number.isFinite(perf.alphaPct) ? `${perf.alphaPct >= 0 ? '+' : ''}${perf.alphaPct.toFixed(2)}%` : '--'}</div>
+      <div class="kpi-sub">${Number.isFinite(perf.alphaUsd) ? `${perf.alphaUsd >= 0 ? '+' : ''}${formatMoney(perf.alphaUsd)}` : '--'}</div>
+    </div>
+    <div class="kpi-card ${sharpeMood}">
+      <div class="kpi-label">Sharpe Ratio</div>
+      <div class="kpi-value">${Number.isFinite(perf.sharpe) ? perf.sharpe.toFixed(2) : '--'}</div>
+      <div class="kpi-sub">rf ${(BACKTEST_RISK_FREE_RATE * 100).toFixed(1)}%</div>
+    </div>
+    <div class="kpi-card ${sortinoMood}">
+      <div class="kpi-label">Sortino Ratio</div>
+      <div class="kpi-value">${Number.isFinite(perf.sortino) ? perf.sortino.toFixed(2) : '--'}</div>
+      <div class="kpi-sub">downside-adjusted</div>
+    </div>
+    <div class="kpi-card ${ddMood}">
+      <div class="kpi-label">Max Drawdown</div>
+      <div class="kpi-value ${Number.isFinite(perf.maxDrawdownPct) && perf.maxDrawdownPct < 0 ? 'down' : ''}">${Number.isFinite(perf.maxDrawdownPct) ? `${perf.maxDrawdownPct.toFixed(2)}%` : '--'}</div>
+      <div class="kpi-sub">QQQ ${Number.isFinite(perf.benchmarkMaxDrawdownPct) ? `${perf.benchmarkMaxDrawdownPct.toFixed(2)}%` : '--'}</div>
+    </div>
+    <div class="kpi-card ${volMood}">
+      <div class="kpi-label">Ann. Volatility</div>
+      <div class="kpi-value">${Number.isFinite(perf.annualVolPct) ? `${perf.annualVolPct.toFixed(2)}%` : '--'}</div>
+      <div class="kpi-sub">252d annualized</div>
+    </div>
+    <div class="kpi-card ${calmarMood}">
+      <div class="kpi-label">Calmar Ratio</div>
+      <div class="kpi-value">${Number.isFinite(perf.calmar) ? perf.calmar.toFixed(2) : '--'}</div>
+      <div class="kpi-sub">CAGR / MaxDD</div>
+    </div>
+    <div class="kpi-card ${alphaMood}">
+      <div class="kpi-label">Annualized Alpha</div>
+      <div class="kpi-value">${Number.isFinite(perf.alphaAnnualPct) ? `${perf.alphaAnnualPct >= 0 ? '+' : ''}${perf.alphaAnnualPct.toFixed(2)}%` : '--'}</div>
+      <div class="kpi-sub">Jensen alpha</div>
+    </div>
+    <div class="kpi-card ${betaMood}">
+      <div class="kpi-label">Beta vs QQQ</div>
+      <div class="kpi-value">${Number.isFinite(perf.beta) ? perf.beta.toFixed(2) : '--'}</div>
+      <div class="kpi-sub">market sensitivity</div>
+    </div>
+    <div class="kpi-card ${infoMood}">
+      <div class="kpi-label">Information Ratio</div>
+      <div class="kpi-value">${Number.isFinite(perf.informationRatio) ? perf.informationRatio.toFixed(2) : '--'}</div>
+      <div class="kpi-sub">active return / TE</div>
+    </div>
+    <div class="kpi-card ${winMood}">
+      <div class="kpi-label">Win Rate</div>
+      <div class="kpi-value">${Number.isFinite(perf.winRate) ? `${perf.winRate.toFixed(1)}%` : '--'}</div>
+      <div class="kpi-sub">positive days</div>
+    </div>
+    <div class="kpi-card ${Number.isFinite(perf.cagrPct) && perf.cagrPct >= 0 ? 'kpi-positive' : 'kpi-negative'}">
+      <div class="kpi-label">CAGR</div>
+      <div class="kpi-value">${Number.isFinite(perf.cagrPct) ? `${perf.cagrPct >= 0 ? '+' : ''}${perf.cagrPct.toFixed(2)}%` : '--'}</div>
+      <div class="kpi-sub">QQQ ${Number.isFinite(perf.benchmarkCagrPct) ? `${perf.benchmarkCagrPct >= 0 ? '+' : ''}${perf.benchmarkCagrPct.toFixed(2)}%` : '--'}</div>
+    </div>
+    <div class="kpi-card kpi-neutral">
+      <div class="kpi-label">Observed Days</div>
+      <div class="kpi-value">${Number.isFinite(perf.tradingDays) ? perf.tradingDays : '--'}</div>
+      <div class="kpi-sub">return observations</div>
     </div>
   `;
 };
