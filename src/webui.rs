@@ -3665,6 +3665,7 @@ async fn start_backtest(
                         let keep_from = bt.snapshots.len().saturating_sub(6000);
                         bt.snapshots = bt.snapshots.split_off(keep_from);
                     }
+                    bt.summary = compute_backtest_summary(&bt.snapshots);
                     let progress_total_days_exact = bt.progress_total_days;
                     let cash_weight_pct = if portfolio_value > 0.0 {
                         (cash_usd / portfolio_value) * 100.0
@@ -3677,8 +3678,20 @@ async fn start_backtest(
                         .map(|w| format!("{}:{:.1}%", w.symbol, w.weight * 100.0))
                         .collect::<Vec<_>>()
                         .join(", ");
+                    let summary_suffix = bt
+                        .summary
+                        .as_ref()
+                        .map(|summary| {
+                            format!(
+                                ", sharpe={:.2}, alpha={:+.2}%, maxdd={:.2}%",
+                                summary.strategy_sharpe,
+                                summary.alpha_pct,
+                                summary.strategy_max_drawdown_pct,
+                            )
+                        })
+                        .unwrap_or_default();
                     push_backtest_log(&mut bt, Some(backtest_runtime_path.as_path()), format!(
-                        "Day {}/{} => date={}, nav={:.2}, pnl={:+.2}%, day={:+.2}%, qqq={:+.2}%, cash={:.1}%, top={}",
+                        "Day {}/{} => date={}, nav={:.2}, pnl={:+.2}%, day={:+.2}%, qqq={:+.2}%, cash={:.1}%, top={}{}",
                         progress_current_day,
                         progress_total_days_exact,
                         next_date,
@@ -3687,7 +3700,8 @@ async fn start_backtest(
                         daily_return_pct,
                         benchmark_return_pct,
                         cash_weight_pct,
-                        if top_weights.is_empty() { "--".to_string() } else { top_weights }
+                        if top_weights.is_empty() { "--".to_string() } else { top_weights },
+                        summary_suffix,
                     ));
                 }
 

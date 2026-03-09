@@ -5410,11 +5410,12 @@ const renderBacktestKpis = (st) => {
   if (!grid) return;
   const filtered = filterPaperContextByRangeDays(backtestFullContext, selectedBacktestRangeDays);
   const latest = filtered?.latest || backtestFullContext?.latest;
-  const perf = computeBacktestPerformance(filtered);
+  const perf = computeBacktestPerformance(filtered) || st?.summary || null;
   if (!latest || !perf) {
     grid.innerHTML = '';
     return;
   }
+  const asOfText = latest?.updatedText || latest?.timestamp || st?.last_message || '--';
 
   const returnMood = Number.isFinite(perf.totalReturnPct) ? (perf.totalReturnPct >= 0 ? 'kpi-positive' : 'kpi-negative') : 'kpi-neutral';
   const benchmarkMood = Number.isFinite(perf.benchmarkTotalReturnPct) ? (perf.benchmarkTotalReturnPct >= 0 ? 'kpi-positive' : 'kpi-negative') : 'kpi-neutral';
@@ -5432,6 +5433,7 @@ const renderBacktestKpis = (st) => {
     <div class="kpi-card">
       <div class="kpi-label">Final NAV</div>
       <div class="kpi-value">${formatMoney(latest.portfolioValue)}</div>
+      <div class="kpi-sub">As Of ${asOfText}</div>
     </div>
     <div class="kpi-card ${returnMood}">
       <div class="kpi-label">Range Return</div>
