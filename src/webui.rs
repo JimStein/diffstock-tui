@@ -92,9 +92,12 @@ struct BacktestPerformanceSummary {
 #[derive(Clone, Debug, Serialize)]
 struct BacktestRuntimeState {
     running: bool,
+    stop_requested: bool,
     started_at: Option<String>,
     finished_at: Option<String>,
     runtime_file: Option<String>,
+    summary_file: Option<String>,
+    completion_status: Option<String>,
     candidate_symbols: Vec<String>,
     initial_capital_usd: f64,
     period_days: usize,
@@ -199,9 +202,12 @@ impl Default for BacktestRuntimeState {
     fn default() -> Self {
         Self {
             running: false,
+            stop_requested: false,
             started_at: None,
             finished_at: None,
             runtime_file: None,
+            summary_file: None,
+            completion_status: None,
             candidate_symbols: Vec::new(),
             initial_capital_usd: paper_trading::DEFAULT_INITIAL_CAPITAL_USD,
             period_days: 252,
@@ -645,6 +651,7 @@ pub async fn run_webui_server(port: u16, backend_default: config::ComputeBackend
         .route("/api/train/start", post(start_train))
         .route("/api/train/status", get(train_status))
         .route("/api/backtest/start", post(start_backtest))
+        .route("/api/backtest/stop", post(stop_backtest))
         .route("/api/backtest/status", get(backtest_status))
         .route("/api/paper/start", post(start_paper))
         .route("/api/paper/load", post(load_paper))
@@ -3299,6 +3306,29 @@ async fn backtest_status(
     Ok(Json(state.backtest.lock().await.clone()))
 }
 
+async fn stop_backtest(
+    State(state): State<WebState>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ApiError>)> {
+    let runtime_path = {
+        let mut bt = state.backtest.lock().await;
+        if !bt.running {
+            return Ok(Json(serde_json::json!({ "ok": true, "running": false })));
+        }
+        bt.stop_requested = true;
+        bt.last_error = None;
+        bt.last_message = Some("Stopping backtest...".to_string());
+        bt.runtime_file.clone().map(PathBuf::from)
+    };
+
+    let mut bt = state.backtest.lock().await;
+    push_backtest_log(
+        &mut bt,
+        runtime_path.as_deref(),
+        "Stop requested for backtest run",
+    );
+    Ok(Json(serde_json::json!({ "ok": true, "running": true, "stop_requested": true })))
+}
+
 async fn start_backtest(
     State(state): State<WebState>,
     Json(req): Json<BacktestStartRequest>,
@@ -3317,8 +3347,9 @@ async fn start_backtest(
 
     let period_days = req.period_days.unwrap_or(252).clamp(30, 1500);
     let rebalance_every_days = req.rebalance_every_days.unwrap_or(1).clamp(1, 30);
-    let runtime_path = create_backtest_output_path().map_err(internal_err)?;
+    let (runtime_path, summary_path) = create_backtest_output_paths().map_err(internal_err)?;
     let runtime_path_text = runtime_path.display().to_string();
+    let summary_path_text = summary_path.display().to_string();
 
     {
         let mut bt = state.backtest.lock().await;
@@ -3326,9 +3357,12 @@ async fn start_backtest(
             return Err(api_err(StatusCode::CONFLICT, "backtest is already running"));
         }
         bt.running = true;
+        bt.stop_requested = false;
         bt.started_at = Some(chrono::Local::now().to_rfc3339());
         bt.finished_at = None;
         bt.runtime_file = Some(runtime_path_text.clone());
+        bt.summary_file = Some(summary_path_text.clone());
+        bt.completion_status = None;
         bt.candidate_symbols = symbols.clone();
         bt.initial_capital_usd = initial_capital;
         bt.period_days = period_days;
@@ -3355,6 +3389,7 @@ async fn start_backtest(
 
     let backtest_state = state.backtest.clone();
     let backtest_runtime_path = runtime_path.clone();
+    let backtest_summary_path = summary_path.clone();
     let requested_backend = match req.use_cuda {
         Some(true) => config::ComputeBackend::Cuda,
         Some(false) => config::ComputeBackend::Cpu,
@@ -3489,6 +3524,13 @@ async fn start_backtest(
             }
 
             for step in 0..(eval_dates.len() - 1) {
+                {
+                    let bt = backtest_state.lock().await;
+                    if bt.stop_requested {
+                        return Err(anyhow::anyhow!(BACKTEST_STOP_SIGNAL));
+                    }
+                }
+
                 let current_date = eval_dates[step];
                 let next_date = eval_dates[step + 1];
 
@@ -3737,10 +3779,12 @@ async fn start_backtest(
 
         let mut bt = backtest_state.lock().await;
         bt.running = false;
+        bt.stop_requested = false;
         bt.finished_at = Some(chrono::Local::now().to_rfc3339());
         match result {
             Ok(()) => {
                 bt.last_error = None;
+                bt.completion_status = Some("completed".to_string());
                 bt.summary = compute_backtest_summary(&bt.snapshots);
                 if let Some(summary) = bt.summary.clone() {
                     if let Err(err) = append_backtest_summary(Some(backtest_runtime_path.as_path()), &summary) {
@@ -3766,18 +3810,55 @@ async fn start_backtest(
                         ),
                     );
                 }
+                if let Err(err) = save_backtest_summary_file(
+                    Some(backtest_summary_path.as_path()),
+                    "completed",
+                    &bt,
+                ) {
+                    bt.logs.push(runtime_log_with_ts(format!(
+                        "WARNING: failed to save backtest summary file: {}",
+                        err
+                    )));
+                }
                 bt.last_message = Some("Backtest completed".to_string());
                 push_backtest_log(&mut bt, Some(backtest_runtime_path.as_path()), "Backtest completed");
             }
             Err(err) => {
-                bt.summary = None;
-                bt.last_error = Some(err.to_string());
-                bt.last_message = Some("Backtest failed".to_string());
-                push_backtest_log(
-                    &mut bt,
-                    Some(backtest_runtime_path.as_path()),
-                    format!("ERROR: backtest failed: {}", err),
-                );
+                if err.to_string() == BACKTEST_STOP_SIGNAL {
+                    bt.last_error = None;
+                    bt.completion_status = Some("stopped".to_string());
+                    bt.summary = compute_backtest_summary(&bt.snapshots);
+                    if let Some(summary) = bt.summary.clone() {
+                        if let Err(save_err) = append_backtest_summary(Some(backtest_runtime_path.as_path()), &summary) {
+                            bt.logs.push(runtime_log_with_ts(format!(
+                                "WARNING: failed to append stopped backtest summary: {}",
+                                save_err
+                            )));
+                        }
+                    }
+                    if let Err(save_err) = save_backtest_summary_file(
+                        Some(backtest_summary_path.as_path()),
+                        "stopped",
+                        &bt,
+                    ) {
+                        bt.logs.push(runtime_log_with_ts(format!(
+                            "WARNING: failed to save stopped backtest summary file: {}",
+                            save_err
+                        )));
+                    }
+                    bt.last_message = Some("Backtest stopped".to_string());
+                    push_backtest_log(&mut bt, Some(backtest_runtime_path.as_path()), "Backtest stopped by user request");
+                } else {
+                    bt.completion_status = Some("failed".to_string());
+                    bt.summary = None;
+                    bt.last_error = Some(err.to_string());
+                    bt.last_message = Some("Backtest failed".to_string());
+                    push_backtest_log(
+                        &mut bt,
+                        Some(backtest_runtime_path.as_path()),
+                        format!("ERROR: backtest failed: {}", err),
+                    );
+                }
             }
         }
         trim_runtime_logs(&mut bt.logs, 400);
@@ -4473,6 +4554,18 @@ fn create_backtest_output_path() -> Result<PathBuf> {
     Ok(log_dir.join(format!("backtest_runtime_{}.jsonl", suffix)))
 }
 
+fn create_backtest_output_paths() -> Result<(PathBuf, PathBuf)> {
+    let log_dir = config::project_root_path().join("log");
+    if !log_dir.exists() {
+        std::fs::create_dir_all(&log_dir)?;
+    }
+
+    let suffix = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
+    let runtime_path = log_dir.join(format!("backtest_runtime_{}.jsonl", suffix));
+    let summary_path = log_dir.join(format!("backtest_summary_{}.json", suffix));
+    Ok((runtime_path, summary_path))
+}
+
 fn push_backtest_log(
     state: &mut BacktestRuntimeState,
     runtime_path: Option<&Path>,
@@ -4536,8 +4629,41 @@ fn append_backtest_summary(
     append_jsonl_line(path, &payload)
 }
 
+fn save_backtest_summary_file(
+    summary_path: Option<&Path>,
+    status: &str,
+    state: &BacktestRuntimeState,
+) -> Result<()> {
+    let Some(path) = summary_path else {
+        return Ok(());
+    };
+
+    let payload = serde_json::json!({
+        "saved_at": chrono::Local::now().to_rfc3339(),
+        "status": status,
+        "started_at": state.started_at,
+        "finished_at": state.finished_at,
+        "runtime_file": state.runtime_file,
+        "summary_file": state.summary_file,
+        "candidate_symbols": state.candidate_symbols,
+        "initial_capital_usd": state.initial_capital_usd,
+        "period_days": state.period_days,
+        "rebalance_every_days": state.rebalance_every_days,
+        "progress_current_day": state.progress_current_day,
+        "progress_total_days": state.progress_total_days,
+        "latest_snapshot": state.latest_snapshot,
+        "latest_weights": state.latest_weights,
+        "latest_weights_as_of": state.latest_weights_as_of,
+        "summary": state.summary,
+        "last_message": state.last_message,
+        "last_error": state.last_error,
+    });
+    write_json_pretty(path, &payload)
+}
+
 const BACKTEST_TRADING_DAYS_PER_YEAR: f64 = 252.0;
 const BACKTEST_RISK_FREE_RATE: f64 = 0.05;
+const BACKTEST_STOP_SIGNAL: &str = "BACKTEST_STOP_REQUESTED";
 
 fn compute_mean(values: &[f64]) -> f64 {
     if values.is_empty() {

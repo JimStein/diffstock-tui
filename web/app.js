@@ -81,10 +81,12 @@ const getLatestQuoteDelta = (symbol) => {
 const actionStatus = document.getElementById('actionStatus');
 const quotesAsOf = document.getElementById('quotesAsOf');
 const backtestStartBtn = document.getElementById('backtestStart');
+const backtestStopBtn = document.getElementById('backtestStop');
 const backtestSymbolsInput = document.getElementById('backtestSymbols');
 const backtestCapitalInput = document.getElementById('backtestCapital');
 const backtestDaysInput = document.getElementById('backtestDays');
 const backtestRebalanceDaysInput = document.getElementById('backtestRebalanceDays');
+const backtestSummaryMeta = document.getElementById('backtestSummaryMeta');
 const paperStartBtn = document.getElementById('paperStart');
 const paperLoadBtn = document.getElementById('paperLoad');
 const paperFilePicker = document.getElementById('paperFilePicker');
@@ -2467,6 +2469,50 @@ const syncPaperButtons = (status) => {
 const setPaperStartOptimizing = (optimizing) => {
   paperStartOptimizing = !!optimizing;
   syncPaperButtons(null);
+};
+
+const syncBacktestButtons = (status) => {
+  if (!backtestStartBtn || !backtestStopBtn) return;
+  const running = !!status?.running;
+  const stopping = !!status?.stop_requested;
+
+  if (running && stopping) {
+    backtestStartBtn.textContent = 'Running';
+    backtestStartBtn.disabled = true;
+    backtestStopBtn.textContent = 'Stopping...';
+    backtestStopBtn.disabled = true;
+    return;
+  }
+
+  if (running) {
+    backtestStartBtn.textContent = 'Running';
+    backtestStartBtn.disabled = true;
+    backtestStopBtn.textContent = 'Stop Backtest';
+    backtestStopBtn.disabled = false;
+    return;
+  }
+
+  backtestStartBtn.textContent = '▶ Run Backtest';
+  backtestStartBtn.disabled = false;
+  backtestStopBtn.textContent = 'Stop Backtest';
+  backtestStopBtn.disabled = true;
+};
+
+const renderBacktestSummaryMeta = (st) => {
+  if (!backtestSummaryMeta) return;
+  const summaryStatus = st?.completion_status ? String(st.completion_status).toUpperCase() : null;
+  const finishedAt = st?.finished_at || '--';
+  const runtimeFile = st?.runtime_file || '--';
+  const summaryFile = st?.summary_file || '--';
+  if (st?.running) {
+    backtestSummaryMeta.textContent = `Status: RUNNING · Runtime ${runtimeFile}`;
+    return;
+  }
+  if (summaryStatus) {
+    backtestSummaryMeta.textContent = `Status: ${summaryStatus} · Finished ${finishedAt} · Summary ${summaryFile} · Runtime ${runtimeFile}`;
+    return;
+  }
+  backtestSummaryMeta.textContent = 'No completed backtest summary yet.';
 };
 
 const syncFutuButtons = (status) => {
@@ -5627,6 +5673,8 @@ const refreshBacktest = async () => {
   try {
     const st = await api('/api/backtest/status');
     latestBacktestStatus = st;
+    syncBacktestButtons(st);
+    renderBacktestSummaryMeta(st);
 
     const rawBox = document.getElementById('backtestRawJson');
     const phaseLabel = document.getElementById('backtestPhaseLabel');
@@ -5715,6 +5763,17 @@ backtestStartBtn?.addEventListener('click', async () => {
           rebalance_every_days: Number(backtestRebalanceDaysInput?.value || 1),
         }),
       });
+      await refreshBacktest();
+    });
+  } catch (e) {
+    alert(e.message);
+  }
+});
+
+backtestStopBtn?.addEventListener('click', async () => {
+  try {
+    await withBusy('backtestStop', 'Stopping...', 'Backtest stop requested', async () => {
+      await api('/api/backtest/stop', { method: 'POST' });
       await refreshBacktest();
     });
   } catch (e) {
@@ -5864,6 +5923,8 @@ const restoreState = async () => {
 
     if (state.backtest) {
       latestBacktestStatus = state.backtest;
+      syncBacktestButtons(state.backtest);
+      renderBacktestSummaryMeta(state.backtest);
       if (backtestSymbolsInput && Array.isArray(state.backtest.candidate_symbols) && state.backtest.candidate_symbols.length > 0) {
         backtestSymbolsInput.value = state.backtest.candidate_symbols.join(',');
       }

@@ -3296,7 +3296,10 @@
             </div>
             <div class="field">
               <label class="field-label">&nbsp;</label>
-              <button class="primary" id="backtestStart">▶ Run Backtest</button>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <button class="primary" id="backtestStart">▶ Run Backtest</button>
+                <button id="backtestStop" disabled>Stop Backtest</button>
+              </div>
             </div>
           </div>
           <div class="small" style="margin-top:10px;">回测逻辑：对候选池每个交易日用截至当日的历史重新预测，生成组合目标权重，然后持有到下一个交易日收盘；基准固定为 QQQ。</div>
@@ -3311,6 +3314,7 @@
             <div class="train-progress-bar"><div class="train-progress-fill" id="backtestProgressFill"></div></div>
             <div class="train-progress-text"><span id="backtestProgressLeft">--</span><span id="backtestProgressRight">--</span></div>
           </div>
+          <div id="backtestSummaryMeta" class="small" style="margin-top:8px;color:var(--muted);">No completed backtest summary yet.</div>
           <div id="backtestKpiGrid" class="paper-kpi-grid" style="margin-top:10px;"></div>
           <details style="margin-top:8px;">
             <summary style="cursor:pointer;font-size:11px;color:var(--muted);user-select:none;">Raw JSON</summary>
