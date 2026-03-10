@@ -20,7 +20,7 @@ if errorlevel 1 (
 
 echo [3/4] Setting runtime environment...
 set "ORT_DYLIB_PATH=%CD%\.runtime\ort_dml_1_24_1\onnxruntime\capi\onnxruntime.dll"
-set "DIFFSTOCK_ORT_MODEL=%CD%\model_weights.onnx"
+echo DirectML ONNX selection is controlled by .env via DIFFSTOCK_ORT_PRECISION / DIFFSTOCK_ORT_MODEL.
 
 for %%P in (8099 8100 8101 8102 8103 8104 8105 8106 8107 8108 8109 8110 8111 8112 8113 8114 8115 8116 8117 8118 8119 8120 8121 8122 8123 8124 8125) do (
   netstat -ano -p tcp | findstr /R /C:":%%P .*LISTENING" >nul

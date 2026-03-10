@@ -1676,6 +1676,43 @@
     #futuConnKpiGrid .paper-kpi-card {
       min-height: 74px;
     }
+    #futuConnKpiGrid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 12px;
+      align-items: start;
+    }
+    .futu-kpi-column {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-width: 0;
+    }
+    .futu-kpi-column-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 2px 2px 0;
+    }
+    .futu-kpi-column-title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .8px;
+      text-transform: uppercase;
+      color: #9ab6da;
+      font-family: var(--mono);
+    }
+    .futu-kpi-column-subtitle {
+      font-size: 10px;
+      color: var(--muted);
+      font-family: var(--mono);
+    }
+    @media (max-width: 900px) {
+      #futuConnKpiGrid {
+        grid-template-columns: 1fr;
+      }
+    }
 
     /* ── Status Banner ── */
     .futu-conn-main-card {
@@ -2385,6 +2422,10 @@
         <span class="chip-dot" id="backendDot"></span>
         <span id="backendChip">Backend: --</span>
       </span>
+      <span class="chip" id="precisionStatusChip" title="Inference precision">
+        <span class="chip-dot" id="precisionDot"></span>
+        <span id="precisionChip">Precision: --</span>
+      </span>
       <span class="chip log" id="dataSourceStatusChip" title="Click to view source switch log">
         <span class="chip-dot" id="dataSourceDot"></span>
         <span id="dataSourceChip">Data: --</span>
@@ -3071,6 +3112,24 @@
                 <th class="num">Target Weight</th>
                 <th class="num">Floating PnL</th>
                 <th>Manual Rebalance</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <div class="panel-header" style="margin-top:14px;">
+            <div class="panel-title"><span class="panel-title-icon">📦</span> Non-Pool Holdings</div>
+            <div class="panel-subtitle" id="futuNonPoolHoldingsBadge">Excluded from FUTU sim metrics</div>
+          </div>
+          <table id="futuNonPoolHoldingsTable">
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Status</th>
+                <th class="num">Quantity</th>
+                <th class="num">Current Price</th>
+                <th class="num">Avg Cost</th>
+                <th class="num">Asset Value</th>
+                <th class="num">Floating PnL</th>
               </tr>
             </thead>
             <tbody></tbody>

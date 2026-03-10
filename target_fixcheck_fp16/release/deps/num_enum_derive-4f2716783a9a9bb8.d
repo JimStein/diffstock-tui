@@ -1,0 +1,9 @@
+D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_fixcheck_fp16\release\deps\num_enum_derive-4f2716783a9a9bb8.d: C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\num_enum_derive-0.7.5\src\lib.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\num_enum_derive-0.7.5\src\enum_attributes.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\num_enum_derive-0.7.5\src\parsing.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\num_enum_derive-0.7.5\src\utils.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\num_enum_derive-0.7.5\src\variant_attributes.rs
+
+D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_fixcheck_fp16\release\deps\num_enum_derive-4f2716783a9a9bb8.dll: C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\num_enum_derive-0.7.5\src\lib.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\num_enum_derive-0.7.5\src\enum_attributes.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\num_enum_derive-0.7.5\src\parsing.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\num_enum_derive-0.7.5\src\utils.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\num_enum_derive-0.7.5\src\variant_attributes.rs
+
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\num_enum_derive-0.7.5\src\lib.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\num_enum_derive-0.7.5\src\enum_attributes.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\num_enum_derive-0.7.5\src\parsing.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\num_enum_derive-0.7.5\src\utils.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\num_enum_derive-0.7.5\src\variant_attributes.rs:

@@ -11,6 +11,63 @@ const api = async (url, options = {}) => {
 const tabs = document.querySelectorAll('.tab-btn');
 const panels = document.querySelectorAll('.tab-panel');
 
+const applyRuntimeChips = (state) => {
+  const backendChip = document.getElementById('backendChip');
+  const backendDot = document.getElementById('backendDot');
+  const precisionChip = document.getElementById('precisionChip');
+  const precisionDot = document.getElementById('precisionDot');
+  const precisionStatusChip = document.getElementById('precisionStatusChip');
+
+  const backend = String(state?.compute_backend || state?.forecast?.last_request?.compute_backend || '').trim();
+  if (backendChip) {
+    if (backend) {
+      const lower = backend.toLowerCase();
+      const label = lower === 'directml'
+        ? 'DirectML'
+        : lower === 'cuda'
+          ? 'CUDA'
+          : lower === 'cpu'
+            ? 'CPU'
+            : (backend.charAt(0).toUpperCase() + backend.slice(1));
+      backendChip.textContent = `Backend: ${label}`;
+      if (backendDot) backendDot.style.background = lower === 'cpu' ? 'var(--muted)' : 'var(--accent)';
+    } else {
+      backendChip.textContent = 'Backend: --';
+      if (backendDot) backendDot.style.background = 'var(--muted-2)';
+    }
+  }
+
+  if (!precisionChip) return;
+  const requested = String(state?.directml_requested_precision || '').trim().toLowerCase();
+  const active = String(state?.directml_active_precision || '').trim().toLowerCase();
+  const modelPath = String(state?.directml_model_path || '').trim();
+
+  if (String(backend || '').toLowerCase() !== 'directml') {
+    precisionChip.textContent = 'Precision: --';
+    if (precisionDot) precisionDot.style.background = 'var(--muted-2)';
+    if (precisionStatusChip) {
+      precisionStatusChip.title = 'Precision status is shown for DirectML ONNX inference.';
+    }
+    return;
+  }
+
+  precisionChip.textContent = `Precision: ${active ? active.toUpperCase() : '--'}`;
+  if (precisionDot) {
+    precisionDot.style.background = active === 'fp16'
+      ? 'var(--up)'
+      : active === 'fp32'
+        ? 'var(--gold)'
+        : 'var(--muted-2)';
+  }
+  if (precisionStatusChip) {
+    const modelName = modelPath ? modelPath.split(/[\\/]/).pop() : '--';
+    const fallbackHint = requested && active && requested !== active
+      ? ` | requested ${requested.toUpperCase()} but loaded ${active.toUpperCase()}`
+      : '';
+    precisionStatusChip.title = `DirectML model: ${modelName}${fallbackHint}${modelPath ? ` | path: ${modelPath}` : ''}`;
+  }
+};
+
 const switchTabByName = (tabName) => {
   for (const b of tabs) b.classList.remove('active');
   const targetBtn = Array.from(tabs).find(b => b.dataset.tab === tabName);
@@ -173,7 +230,7 @@ const FORECAST_BATCH_CACHE_KEY = 'diffstock:forecast-batch:v2';
 const FORECAST_META_CACHE_KEY = 'diffstock:forecast-meta:v1';
 const FUTU_RECENT_LOADS_KEY = 'diffstock:futu-recent-loads:v1';
 const FUTU_RECENT_LOADS_MAX = 8;
-const FUTU_DEFAULT_ACC_ID = '9468130';
+const FUTU_DEFAULT_ACC_ID = '';
 let futuRecentLoads = [];
 let futuAccountListCache = [];
 let futuAccountListInFlight = false;
@@ -1042,7 +1099,46 @@ const buildFallbackPaperContext = (snapshot) => {
   };
 };
 
-const getFutuModeLabel = () => (selectedFutuCurveMode === 'strategy' ? 'Strategy' : 'Account');
+const getFutuModeLabel = () => (selectedFutuCurveMode === 'strategy' ? 'Strategy Sleeve' : 'Account');
+
+const buildFutuCandidateSymbolSet = (futuStatus) => {
+  const set = new Set();
+  const marketPrefix = String(futuStatus?.selected_market || futuStatus?.conn_market || 'US').trim().toUpperCase();
+
+  const addSymbol = (rawSymbol) => {
+    const upper = String(rawSymbol || '').trim().toUpperCase();
+    if (!upper) return;
+    set.add(upper);
+    if (upper.includes('.')) {
+      const stripped = upper.split('.').slice(1).join('.').trim();
+      if (stripped) set.add(stripped);
+    } else if (marketPrefix) {
+      set.add(`${marketPrefix}.${upper}`);
+    }
+  };
+
+  for (const symbol of (Array.isArray(futuStatus?.candidate_symbols) ? futuStatus.candidate_symbols : [])) {
+    addSymbol(symbol);
+  }
+
+  if (set.size === 0) {
+    for (const item of (latestPaperStatus?.target_weights || [])) {
+      addSymbol(item?.symbol);
+    }
+  }
+
+  return set;
+};
+
+const isFutuCandidateSymbol = (symbol, candidateSet, futuStatus) => {
+  const upper = String(symbol || '').trim().toUpperCase();
+  if (!upper || !(candidateSet instanceof Set) || candidateSet.size === 0) return false;
+  if (candidateSet.has(upper)) return true;
+  const stripped = upper.includes('.') ? upper.split('.').slice(1).join('.').trim() : upper;
+  if (stripped && candidateSet.has(stripped)) return true;
+  const marketPrefix = String(futuStatus?.selected_market || futuStatus?.conn_market || 'US').trim().toUpperCase();
+  return !!marketPrefix && candidateSet.has(`${marketPrefix}.${stripped}`);
+};
 
 const syncFutuLegendModeLabels = () => {
   const modeLabel = getFutuModeLabel();
@@ -1053,8 +1149,20 @@ const syncFutuLegendModeLabels = () => {
 
 const computeFutuStrategyRealtimeMetrics = (futuStatus) => {
   const strategySnapshot = futuStatus?.latest_strategy_snapshot;
+  const candidateSet = buildFutuCandidateSymbolSet(futuStatus);
+  if (candidateSet.size === 0 && strategySnapshot) {
+    return {
+      totalValue: Number(strategySnapshot?.total_value),
+      cashUsd: Number(strategySnapshot?.cash_usd),
+      investedValue: Number(strategySnapshot?.invested_value_usd),
+      cashWeightPct: Number(strategySnapshot?.cash_weight_pct),
+      pnlUsd: Number(strategySnapshot?.pnl_usd),
+      pnlPct: Number(strategySnapshot?.pnl_pct),
+      baseCapital: Number(futuStatus?.strategy_start_capital_usd),
+    };
+  }
   const strategyHoldings = Array.isArray(futuStatus?.latest_snapshot?.holdings)
-    ? futuStatus.latest_snapshot.holdings
+    ? futuStatus.latest_snapshot.holdings.filter((holding) => isFutuCandidateSymbol(holding?.symbol, candidateSet, futuStatus))
     : [];
 
   let investedValue = strategyHoldings.reduce((sum, holding) => {
@@ -1988,12 +2096,12 @@ const renderPaperKpis = (paperStatus) => {
 
   grid.innerHTML = `
     <div class='paper-kpi-card kpi-neutral'>
-      <div class='paper-kpi-label'>Total Assets</div>
+      <div class='paper-kpi-label'>Account NAV</div>
       <div class='paper-kpi-value'>${Number.isFinite(totalAssets) ? `$${totalAssets.toFixed(2)}` : '--'}</div>
       <div class='futu-kpi-sub'>USD</div>
     </div>
     <div class='paper-kpi-card ${pnlMood}'>
-      <div class='paper-kpi-label'>Session PnL</div>
+      <div class='paper-kpi-label'>Account PnL</div>
       <div class='paper-kpi-value ${Number.isFinite(pnlUsd) && pnlUsd < 0 ? 'down' : 'up'}'>${Number.isFinite(pnlUsd) ? `${formatSignedMoney(pnlUsd)} (${formatPct(pnlPct)})` : '--'}</div>
       <div class='futu-kpi-sub'>USD</div>
     </div>
@@ -2095,50 +2203,66 @@ const renderFutuConnectionKpis = (futuStatus, futuContext) => {
   const spreadClass = Number.isFinite(spreadPct) && spreadPct < 0 ? 'down' : 'up';
 
   grid.innerHTML = `
-    <div class='paper-kpi-card kpi-neutral'>
-      <div class='paper-kpi-label'>Total Assets</div>
-      <div class='paper-kpi-value'>${Number.isFinite(totalAssets) ? `$${totalAssets.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--'}</div>
-      <div class='futu-kpi-sub'>USD</div>
+    <div class='futu-kpi-column'>
+      <div class='futu-kpi-column-header'>
+        <div class='futu-kpi-column-title'>Account</div>
+        <div class='futu-kpi-column-subtitle'>Broker account view</div>
+      </div>
+      <div class='futu-conn-side-stack'>
+        <div class='paper-kpi-card kpi-neutral'>
+          <div class='paper-kpi-label'>Account NAV</div>
+          <div class='paper-kpi-value'>${Number.isFinite(totalAssets) ? `$${totalAssets.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--'}</div>
+          <div class='futu-kpi-sub'>USD</div>
+        </div>
+        <div class='paper-kpi-card ${pnlMood}'>
+          <div class='paper-kpi-label'>Account PnL</div>
+          <div class='paper-kpi-value ${Number.isFinite(pnlUsd) && pnlUsd < 0 ? 'down' : 'up'}'>${Number.isFinite(pnlUsd) ? `${formatSignedMoney(pnlUsd)} (${formatPct(pnlPct)})` : '--'}</div>
+          <div class='futu-kpi-sub'>USD</div>
+        </div>
+        <div class='paper-kpi-card kpi-neutral'>
+          <div class='paper-kpi-label'>Account Cash</div>
+          <div class='paper-kpi-value' id='futuAccountCash'>${Number.isFinite(cashUsd) ? `$${cashUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--'}</div>
+          <div class='futu-kpi-sub'>USD</div>
+        </div>
+        <div class='paper-kpi-card ${investedMood}'>
+          <div class='paper-kpi-label'>Account Open Risk</div>
+          <div class='paper-kpi-value ${investedClass}'>${Number.isFinite(investedPct) ? `${investedPct.toFixed(1)}%` : '--'}</div>
+          <div class='futu-kpi-sub'>%</div>
+        </div>
+      </div>
     </div>
-    <div class='paper-kpi-card ${pnlMood}'>
-      <div class='paper-kpi-label'>Session PnL</div>
-      <div class='paper-kpi-value ${Number.isFinite(pnlUsd) && pnlUsd < 0 ? 'down' : 'up'}'>${Number.isFinite(pnlUsd) ? `${formatSignedMoney(pnlUsd)} (${formatPct(pnlPct)})` : '--'}</div>
-      <div class='futu-kpi-sub'>USD</div>
-    </div>
-    <div class='paper-kpi-card kpi-neutral'>
-      <div class='paper-kpi-label'>Strategy NAV</div>
-      <div class='paper-kpi-value'>${Number.isFinite(strategyNav) ? `$${strategyNav.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--'}</div>
-      <div class='futu-kpi-sub'>USD</div>
-    </div>
-    <div class='paper-kpi-card ${strategyPnlMood}'>
-      <div class='paper-kpi-label'>Strategy PnL</div>
-      <div class='paper-kpi-value ${Number.isFinite(strategyPnlUsd) && strategyPnlUsd < 0 ? 'down' : 'up'}'>${Number.isFinite(strategyPnlUsd) ? `${formatSignedMoney(strategyPnlUsd)} (${formatPct(strategyPnlPct)})` : '--'}</div>
-      <div class='futu-kpi-sub'>USD</div>
-    </div>
-    <div class='paper-kpi-card ${investedMood}'>
-      <div class='paper-kpi-label'>Open Risk</div>
-      <div class='paper-kpi-value ${investedClass}'>${Number.isFinite(investedPct) ? `${investedPct.toFixed(1)}%` : '--'}</div>
-      <div class='futu-kpi-sub'>%</div>
-    </div>
-    <div class='paper-kpi-card ${ddMood}'>
-      <div class='paper-kpi-label'>Max Drawdown</div>
-      <div class='paper-kpi-value ${Number.isFinite(maxDrawdownPct) && maxDrawdownPct < 0 ? 'down' : ''}'>${Number.isFinite(maxDrawdownPct) ? `${maxDrawdownPct.toFixed(2)}%` : '--'}</div>
-      <div class='futu-kpi-sub'>%</div>
-    </div>
-    <div class='paper-kpi-card ${winMood}'>
-      <div class='paper-kpi-label'>Win Rate (SELL)</div>
-      <div class='paper-kpi-value'>${Number.isFinite(winRate) ? `${winRate.toFixed(1)}%` : '--'}</div>
-      <div class='futu-kpi-sub'>%</div>
-    </div>
-    <div class='paper-kpi-card ${spreadMood}'>
-      <div class='paper-kpi-label'>vs Benchmark</div>
-      <div class='paper-kpi-value ${spreadClass}'>${Number.isFinite(spreadPct) ? `${spreadPct >= 0 ? '+' : ''}${spreadPct.toFixed(2)}%` : '--'}</div>
-      <div class='futu-kpi-sub'>%</div>
-    </div>
-    <div class='paper-kpi-card kpi-neutral'>
-      <div class='paper-kpi-label'>Cash Available</div>
-      <div class='paper-kpi-value' id='futuAccountCash'>${Number.isFinite(cashUsd) ? `$${cashUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--'}</div>
-      <div class='futu-kpi-sub'>USD</div>
+    <div class='futu-kpi-column'>
+      <div class='futu-kpi-column-header'>
+        <div class='futu-kpi-column-title'>Strategy Sleeve</div>
+        <div class='futu-kpi-column-subtitle'>Candidate-pool view</div>
+      </div>
+      <div class='futu-conn-side-stack'>
+        <div class='paper-kpi-card kpi-neutral'>
+          <div class='paper-kpi-label'>Strategy Sleeve NAV</div>
+          <div class='paper-kpi-value'>${Number.isFinite(strategyNav) ? `$${strategyNav.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--'}</div>
+          <div class='futu-kpi-sub'>USD</div>
+        </div>
+        <div class='paper-kpi-card ${strategyPnlMood}'>
+          <div class='paper-kpi-label'>Strategy Sleeve PnL</div>
+          <div class='paper-kpi-value ${Number.isFinite(strategyPnlUsd) && strategyPnlUsd < 0 ? 'down' : 'up'}'>${Number.isFinite(strategyPnlUsd) ? `${formatSignedMoney(strategyPnlUsd)} (${formatPct(strategyPnlPct)})` : '--'}</div>
+          <div class='futu-kpi-sub'>USD</div>
+        </div>
+        <div class='paper-kpi-card ${ddMood}'>
+          <div class='paper-kpi-label'>Sleeve Max Drawdown</div>
+          <div class='paper-kpi-value ${Number.isFinite(maxDrawdownPct) && maxDrawdownPct < 0 ? 'down' : ''}'>${Number.isFinite(maxDrawdownPct) ? `${maxDrawdownPct.toFixed(2)}%` : '--'}</div>
+          <div class='futu-kpi-sub'>%</div>
+        </div>
+        <div class='paper-kpi-card ${winMood}'>
+          <div class='paper-kpi-label'>Sleeve Win Rate</div>
+          <div class='paper-kpi-value'>${Number.isFinite(winRate) ? `${winRate.toFixed(1)}%` : '--'}</div>
+          <div class='futu-kpi-sub'>SELL fills %</div>
+        </div>
+        <div class='paper-kpi-card ${spreadMood}'>
+          <div class='paper-kpi-label'>Sleeve vs Benchmark</div>
+          <div class='paper-kpi-value ${spreadClass}'>${Number.isFinite(spreadPct) ? `${spreadPct >= 0 ? '+' : ''}${spreadPct.toFixed(2)}%` : '--'}</div>
+          <div class='futu-kpi-sub'>%</div>
+        </div>
+      </div>
     </div>
   `;
 
@@ -2546,7 +2670,7 @@ const getFutuAccountId = (row) => {
 };
 
 const buildFutuAccountLabel = (row, fallbackId) => {
-  const accId = getFutuAccountId(row) || String(fallbackId || '').trim() || FUTU_DEFAULT_ACC_ID;
+  const accId = getFutuAccountId(row) || String(fallbackId || '').trim() || '--';
   const env = String(row?.trd_env ?? '--');
   const marketAuth = Array.isArray(row?.trdmarket_auth)
     ? row.trdmarket_auth.map((v) => String(v)).filter(Boolean).join('/')
@@ -2563,12 +2687,12 @@ const getFutuAccountIdSet = () => {
   return set;
 };
 
-const applyFutuAccountOptions = (rows, preferredAccId, selectedAccId) => {
+const applyFutuAccountOptions = (rows) => {
   if (!futuAccountSelect) return;
-  const desired = String(preferredAccId || selectedAccId || FUTU_DEFAULT_ACC_ID || '').trim() || FUTU_DEFAULT_ACC_ID;
+  const currentValue = String(futuAccountSelect.value || '').trim();
   const optionRows = Array.isArray(rows) ? rows : [];
   const seen = new Set();
-  const options = [];
+  const options = ['<option value="">Select FUTU account</option>'];
 
   for (const row of optionRows) {
     const accId = getFutuAccountId(row);
@@ -2577,26 +2701,22 @@ const applyFutuAccountOptions = (rows, preferredAccId, selectedAccId) => {
     options.push(`<option value="${accId}">${buildFutuAccountLabel(row, accId)}</option>`);
   }
 
-  if (options.length === 0) {
-    options.push(`<option value="${FUTU_DEFAULT_ACC_ID}">#${FUTU_DEFAULT_ACC_ID}</option>`);
+  if (seen.size === 0) {
     futuAccountSelect.innerHTML = options.join('');
-    futuAccountSelect.value = FUTU_DEFAULT_ACC_ID;
+    futuAccountSelect.value = '';
     return;
   }
 
   futuAccountSelect.innerHTML = options.join('');
-  const fallback = optionRows
-    .map((row) => getFutuAccountId(row))
-    .find(Boolean) || FUTU_DEFAULT_ACC_ID;
-  futuAccountSelect.value = seen.has(desired) ? desired : fallback;
+  futuAccountSelect.value = seen.has(currentValue) ? currentValue : '';
 };
 
-const refreshFutuAccountList = async ({ preferredAccId, selectedAccId, force = false } = {}) => {
+const refreshFutuAccountList = async ({ force = false } = {}) => {
   if (!futuAccountSelect) return;
   if (futuAccountListInFlight) return;
   const hasCache = Array.isArray(futuAccountListCache) && futuAccountListCache.length > 0;
   if (!force && hasCache) {
-    applyFutuAccountOptions(futuAccountListCache, preferredAccId, selectedAccId);
+    applyFutuAccountOptions(futuAccountListCache);
     return;
   }
 
@@ -2604,10 +2724,10 @@ const refreshFutuAccountList = async ({ preferredAccId, selectedAccId, force = f
   try {
     const payload = await api('/api/futu/account-list');
     futuAccountListCache = normalizeFutuAccountRows(payload);
-    applyFutuAccountOptions(futuAccountListCache, preferredAccId, selectedAccId);
+    applyFutuAccountOptions(futuAccountListCache);
   } catch (e) {
     console.warn(e);
-    applyFutuAccountOptions([], preferredAccId, selectedAccId);
+    applyFutuAccountOptions([]);
   } finally {
     futuAccountListInFlight = false;
   }
@@ -3202,8 +3322,8 @@ const fillCapitalSummaryTable = (paperStatus) => {
 
   const cashTr = document.createElement('tr');
   cashTr.innerHTML = `
-    <td><strong>CASH</strong></td>
-    <td>Balance</td>
+    <td><strong>ACCOUNT CASH</strong></td>
+    <td>Account</td>
     <td class='num'>${safeTotal > 0 ? `${cashWeightPct.toFixed(2)}%` : '--'}</td>
     <td class='num'>${Number.isFinite(cashUsd) ? '$' + cashUsd.toFixed(2) : '--'}</td>
     <td class='num'>${safeTotal > 0 ? `$${investedValue.toFixed(2)} (${investedWeightPct.toFixed(2)}%)` : '--'}</td>
@@ -3233,8 +3353,8 @@ const fillCapitalSummaryTable = (paperStatus) => {
 
   const totalTr = document.createElement('tr');
   totalTr.innerHTML = `
-    <td><strong>TOTAL ASSETS</strong></td>
-    <td>Portfolio</td>
+    <td><strong>ACCOUNT NAV</strong></td>
+    <td>Account</td>
     <td class='num'>${safeTotal > 0 ? `${cashWeightPct.toFixed(2)}% cash` : '--'}</td>
     <td class='num'>${Number.isFinite(cashUsd) ? '$' + cashUsd.toFixed(2) : '--'}</td>
     <td class='num'>${safeTotal > 0 ? `$${investedValue.toFixed(2)} (${investedWeightPct.toFixed(2)}%)` : '--'}</td>
@@ -3272,8 +3392,8 @@ const fillFutuCapitalSummaryTable = (futuStatus) => {
 
   const cashTr = document.createElement('tr');
   cashTr.innerHTML = `
-    <td><strong>CASH</strong></td>
-    <td>Balance</td>
+    <td><strong>ACCOUNT CASH</strong></td>
+    <td>Account</td>
     <td class='num'>${safeTotal > 0 ? `${cashWeightPct.toFixed(2)}%` : '--'}</td>
     <td class='num'>${Number.isFinite(cashUsd) ? '$' + cashUsd.toFixed(2) : '--'}</td>
     <td class='num'>${safeTotal > 0 ? `$${investedValue.toFixed(2)} (${investedWeightPct.toFixed(2)}%)` : '--'}</td>
@@ -3300,8 +3420,8 @@ const fillFutuCapitalSummaryTable = (futuStatus) => {
 
   const totalTr = document.createElement('tr');
   totalTr.innerHTML = `
-    <td><strong>TOTAL ASSETS</strong></td>
-    <td>Portfolio</td>
+    <td><strong>ACCOUNT NAV</strong></td>
+    <td>Account</td>
     <td class='num'>${safeTotal > 0 ? `${cashWeightPct.toFixed(2)}% cash` : '--'}</td>
     <td class='num'>${Number.isFinite(cashUsd) ? '$' + cashUsd.toFixed(2) : '--'}</td>
     <td class='num'>${safeTotal > 0 ? `$${investedValue.toFixed(2)} (${investedWeightPct.toFixed(2)}%)` : '--'}</td>
@@ -3333,8 +3453,8 @@ const fillFutuCapitalSummaryTable = (futuStatus) => {
 
   const strategyTr = document.createElement('tr');
   strategyTr.innerHTML = `
-    <td><strong>STRATEGY SUBACCOUNT FT</strong></td>
-    <td>Futu Snapshot</td>
+    <td><strong>STRATEGY SLEEVE FT</strong></td>
+    <td>Pool Snapshot</td>
     <td class='num'>${Number.isFinite(strategyCashWeightPct) ? `${strategyCashWeightPct.toFixed(2)}%` : '--'}</td>
     <td class='num'>${Number.isFinite(strategyCash) ? '$' + strategyCash.toFixed(2) : '--'}</td>
     <td class='num'>${Number.isFinite(strategyInvested) && Number.isFinite(strategyTotal) && strategyTotal > 0
@@ -3368,8 +3488,8 @@ const fillFutuCapitalSummaryTable = (futuStatus) => {
 
   const strategyRtTr = document.createElement('tr');
   strategyRtTr.innerHTML = `
-    <td><strong>STRATEGY SUBACCOUNT RT</strong></td>
-    <td>Realtime Calc</td>
+    <td><strong>STRATEGY SLEEVE RT</strong></td>
+    <td>Pool Realtime</td>
     <td class='num'>${Number.isFinite(rtCashWeightPct) ? `${rtCashWeightPct.toFixed(2)}%` : '--'}</td>
     <td class='num'>${Number.isFinite(rtCash) ? '$' + rtCash.toFixed(2) : '--'}</td>
     <td class='num'>${Number.isFinite(rtInvested) && Number.isFinite(rtTotal) && rtTotal > 0
@@ -3384,15 +3504,14 @@ const fillFutuCapitalSummaryTable = (futuStatus) => {
   const metaEl = document.getElementById('futuRuntimeMeta');
   if (metaEl) {
     const runtimeFile = futuStatus?.runtime_file ? String(futuStatus.runtime_file) : '--';
-    const snapCount = Array.isArray(futuStatus?.snapshots) ? futuStatus.snapshots.length : 0;
-    metaEl.textContent = `Runtime file: ${runtimeFile} · Snapshots: ${snapCount}`;
+    metaEl.textContent = `Runtime file: ${runtimeFile.split(/[\\/]/).pop() || runtimeFile}`;
   }
 };
 
 const collectTrackedSymbols = () => {
   const typedSymbols = (document.getElementById('pSymbols')?.value || '')
     .split(',')
-    .map((s) => s.trim().toUpperCase())
+    .map((x) => String(x || '').trim().toUpperCase())
     .filter(Boolean);
   const portfolioSymbols = (lastPortfolio?.asset_forecasts || [])
     .map((x) => String(x.symbol || '').toUpperCase())
@@ -3558,15 +3677,19 @@ const renderFutuChartFromCurrentContext = () => {
 
 const fillFutuHoldingsTable = (futuStatus) => {
   const tb = document.querySelector('#futuHoldingsTable tbody');
+  const nonPoolTb = document.querySelector('#futuNonPoolHoldingsTable tbody');
   if (!tb) return;
   const holdingsPoolBadge = document.getElementById('futuHoldingsPoolBadge');
+  const nonPoolBadge = document.getElementById('futuNonPoolHoldingsBadge');
   tb.innerHTML = '';
+  if (nonPoolTb) nonPoolTb.innerHTML = '';
 
   const snapshot = futuStatus?.latest_snapshot;
   const toNum = (value) => {
     const number = Number(value);
     return Number.isFinite(number) ? number : null;
   };
+  const candidateSet = buildFutuCandidateSymbolSet(futuStatus);
   const holdingsSet = new Set(snapshot?.holdings_symbols || []);
   const snapshotMap = new Map((snapshot?.symbols || []).map(x => [x.symbol, x]));
   const holdingsMap = new Map((snapshot?.holdings || []).map(x => [x.symbol, x]));
@@ -3600,12 +3723,12 @@ const fillFutuHoldingsTable = (futuStatus) => {
   );
 
   if (holdingsPoolBadge) {
-    const symbols = Array.from(new Set((snapshot?.symbols || []).map((x) => String(x.symbol || '').toUpperCase()).filter(Boolean)));
+    const symbols = Array.from(candidateSet).filter((symbol) => symbol.includes('.'));
     const holdingCount = holdingsSet.size;
     const poolCount = symbols.length;
-    const inPoolHeldCount = symbols.filter(symbol => holdingsSet.has(symbol)).length;
+    const inPoolHeldCount = Array.from(holdingsSet).filter((symbol) => isFutuCandidateSymbol(symbol, candidateSet, futuStatus)).length;
     const notHeldCount = Math.max(0, poolCount - inPoolHeldCount);
-    holdingsPoolBadge.textContent = `Holding ${holdingCount} · In Pool ${poolCount} · Not Held ${notHeldCount}`;
+    holdingsPoolBadge.textContent = `Holding ${holdingCount} · Pool ${poolCount} · In Pool ${inPoolHeldCount} · Not Held ${notHeldCount}`;
   }
 
   const orderedSymbols = Array.from(holdingsSet).sort();
@@ -3613,8 +3736,16 @@ const fillFutuHoldingsTable = (futuStatus) => {
     const tr = document.createElement('tr');
     tr.innerHTML = `<td colspan='9'><div class='empty-state'><div class='empty-state-icon'>📊</div>No Futu holdings yet.<br>Check Futu API connection and position stream.</div></td>`;
     tb.appendChild(tr);
+    if (nonPoolTb) {
+      const nonPoolTr = document.createElement('tr');
+      nonPoolTr.innerHTML = `<td colspan='7'><div class='empty-state'><div class='empty-state-icon'>📦</div>No non-pool holdings.</div></td>`;
+      nonPoolTb.appendChild(nonPoolTr);
+    }
     return;
   }
+
+  const poolRows = [];
+  const nonPoolRows = [];
 
   for (const sym of orderedSymbols) {
     const row = snapshotMap.get(sym);
@@ -3679,19 +3810,74 @@ const fillFutuHoldingsTable = (futuStatus) => {
       }
     }
 
+    const rowData = {
+      symbol: sym,
+      quantity,
+      currentPrice,
+      validAvgCost,
+      assetValue,
+      targetWeight,
+      unrealizedText,
+      unrealizedClass,
+      isCandidate: isFutuCandidateSymbol(sym, candidateSet, futuStatus),
+    };
+
+    if (rowData.isCandidate) {
+      poolRows.push(rowData);
+    } else {
+      nonPoolRows.push(rowData);
+    }
+  }
+
+  if (nonPoolBadge) {
+    const nonPoolAssetValue = nonPoolRows.reduce((sum, row) => sum + (Number.isFinite(row.assetValue) ? row.assetValue : 0), 0);
+    nonPoolBadge.textContent = nonPoolRows.length > 0
+      ? `Excluded from FUTU sim metrics · ${nonPoolRows.length} symbols · $${nonPoolAssetValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      : 'Excluded from FUTU sim metrics · 0 symbols';
+  }
+
+  if (poolRows.length === 0) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td colspan='9'><div class='empty-state'><div class='empty-state-icon'>🎯</div>No in-pool FUTU holdings.<br>Pool-only strategy metrics will ignore the positions listed below.</div></td>`;
+    tb.appendChild(tr);
+  }
+
+  for (const row of poolRows) {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td style='font-weight:600;letter-spacing:.2px;'>${sym}</td>
-      <td class='up' style='font-weight:600;font-size:11px;font-family:var(--mono);'>Holding</td>
-      <td class='num'>${quantity == null ? '--' : quantity.toFixed(2)}</td>
-      <td class='num'>${currentPrice == null ? '--' : '$' + currentPrice.toFixed(2)}</td>
-      <td class='num'>${validAvgCost == null ? '--' : '$' + validAvgCost.toFixed(2)}</td>
-      <td class='num'>${assetValue == null ? '--' : '$' + assetValue.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</td>
-      <td class='num'>${Number.isFinite(targetWeight) ? `${(targetWeight * 100).toFixed(2)}%` : '--'}</td>
-      <td class='num ${unrealizedClass}' style='font-weight:600;'>${unrealizedText}</td>
-      <td><button class='ghost futu-manual-fill-btn' data-symbol='${sym}' data-price='${currentPrice == null ? '' : currentPrice.toFixed(4)}'>Prefill</button></td>
+      <td style='font-weight:600;letter-spacing:.2px;'>${row.symbol}</td>
+      <td class='up' style='font-weight:600;font-size:11px;font-family:var(--mono);'>Pool</td>
+      <td class='num'>${row.quantity == null ? '--' : row.quantity.toFixed(2)}</td>
+      <td class='num'>${row.currentPrice == null ? '--' : '$' + row.currentPrice.toFixed(2)}</td>
+      <td class='num'>${row.validAvgCost == null ? '--' : '$' + row.validAvgCost.toFixed(2)}</td>
+      <td class='num'>${row.assetValue == null ? '--' : '$' + row.assetValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+      <td class='num'>${Number.isFinite(row.targetWeight) ? `${(row.targetWeight * 100).toFixed(2)}%` : '--'}</td>
+      <td class='num ${row.unrealizedClass}' style='font-weight:600;'>${row.unrealizedText}</td>
+      <td><button class='ghost futu-manual-fill-btn' data-symbol='${row.symbol}' data-price='${row.currentPrice == null ? '' : row.currentPrice.toFixed(4)}'>Prefill</button></td>
     `;
     tb.appendChild(tr);
+  }
+
+  if (nonPoolTb) {
+    if (nonPoolRows.length === 0) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td colspan='7'><div class='empty-state'><div class='empty-state-icon'>📦</div>No non-pool holdings.</div></td>`;
+      nonPoolTb.appendChild(tr);
+    } else {
+      for (const row of nonPoolRows) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td style='font-weight:600;letter-spacing:.2px;'>${row.symbol}</td>
+          <td class='flat' style='font-weight:600;font-size:11px;font-family:var(--mono);'>Excluded</td>
+          <td class='num'>${row.quantity == null ? '--' : row.quantity.toFixed(2)}</td>
+          <td class='num'>${row.currentPrice == null ? '--' : '$' + row.currentPrice.toFixed(2)}</td>
+          <td class='num'>${row.validAvgCost == null ? '--' : '$' + row.validAvgCost.toFixed(2)}</td>
+          <td class='num'>${row.assetValue == null ? '--' : '$' + row.assetValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+          <td class='num ${row.unrealizedClass}' style='font-weight:600;'>${row.unrealizedText}</td>
+        `;
+        nonPoolTb.appendChild(tr);
+      }
+    }
   }
 };
 
@@ -4871,12 +5057,6 @@ const refreshFutu = async () => {
         futuTabBadge.classList.add('running');
       }
     }
-    if (futuStrategyCapitalInput) {
-      const strategyCap = Number(st?.strategy_start_capital_usd);
-      futuStrategyCapitalInput.value = Number.isFinite(strategyCap) && strategyCap > 0
-        ? String(strategyCap.toFixed(2))
-        : '';
-    }
     if (futuStrategyCapitalHint) {
       const strategyCap = Number(st?.strategy_start_capital_usd);
       futuStrategyCapitalHint.textContent = Number.isFinite(strategyCap) && strategyCap > 0
@@ -4887,7 +5067,7 @@ const refreshFutu = async () => {
       const acctNav = Number(st?.latest_snapshot?.total_value);
       const stratNav = Number(st?.latest_strategy_snapshot?.total_value);
       if (Number.isFinite(acctNav) && Number.isFinite(stratNav)) {
-        futuCtrlCapital.textContent = `Acct ${acctNav.toLocaleString(undefined, { maximumFractionDigits: 2 })} · Strat ${stratNav.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+        futuCtrlCapital.textContent = `Account NAV ${acctNav.toLocaleString(undefined, { maximumFractionDigits: 2 })} · Strategy NAV ${stratNav.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
       } else {
         futuCtrlCapital.textContent = Number.isFinite(acctNav) ? acctNav.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '--';
       }
@@ -4895,7 +5075,7 @@ const refreshFutu = async () => {
 
     const selectedAcc = (st?.selected_account && typeof st.selected_account === 'object') ? st.selected_account : null;
     const selectedAccId = st?.selected_acc_id ?? selectedAcc?.acc_id ?? '--';
-    const preferredAccId = String(st?.preferred_acc_id || selectedAccId || FUTU_DEFAULT_ACC_ID || '').trim() || FUTU_DEFAULT_ACC_ID;
+    const preferredAccId = String(st?.preferred_acc_id || selectedAccId || '').trim();
     const selectedEnv = st?.selected_trd_env ?? selectedAcc?.trd_env ?? '--';
     const isRealMode = String(selectedEnv || '').toUpperCase() === 'REAL';
     const selectedMarket = st?.selected_market ?? st?.conn_market ?? '--';
@@ -4925,14 +5105,8 @@ const refreshFutu = async () => {
     if (futuRealSafetyHint) futuRealSafetyHint.style.display = isRealMode ? '' : 'none';
     if (futuAccountApplyHint) futuAccountApplyHint.textContent = `Preferred account: #${preferredAccId} · Active account: #${selectedAccId}`;
     if (futuAccountSelect) {
-      const hasCurrentOption = Array.from(futuAccountSelect.options).some((opt) => opt.value === preferredAccId);
-      if (!hasCurrentOption) {
-        applyFutuAccountOptions(futuAccountListCache, preferredAccId, selectedAccId);
-      } else if (futuAccountSelect.value !== preferredAccId) {
-        futuAccountSelect.value = preferredAccId;
-      }
       if (!futuAccountListCache.length) {
-        await refreshFutuAccountList({ preferredAccId, selectedAccId });
+        await refreshFutuAccountList();
       }
     }
     if (futuCtrlRuntime) futuCtrlRuntime.textContent = st.runtime_file ? String(st.runtime_file).split(/[\\/]/).pop() : '--';
@@ -4945,10 +5119,6 @@ const refreshFutu = async () => {
         futuActivityRangeSelect.value = hasOption ? targetValue : '30';
       }
     }
-    if (futuCapitalCapInput) {
-      const cap = Number(st?.rebalance_capital_limit_usd);
-      futuCapitalCapInput.value = Number.isFinite(cap) && cap > 0 ? String(cap.toFixed(2)) : '';
-    }
     if (futuCapitalCapHint) {
       const cap = Number(st?.rebalance_capital_limit_usd);
       futuCapitalCapHint.textContent = Number.isFinite(cap) && cap > 0
@@ -4959,16 +5129,10 @@ const refreshFutu = async () => {
       const acctNav = Number(st?.latest_snapshot?.total_value);
       const stratNav = Number(st?.latest_strategy_snapshot?.total_value);
       if (Number.isFinite(acctNav) && Number.isFinite(stratNav)) {
-        futuCtrlCapital.textContent = `Acct ${acctNav.toLocaleString(undefined, { maximumFractionDigits: 2 })} · Strat ${stratNav.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+        futuCtrlCapital.textContent = `Account NAV ${acctNav.toLocaleString(undefined, { maximumFractionDigits: 2 })} · Strategy NAV ${stratNav.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
       } else {
         futuCtrlCapital.textContent = Number.isFinite(acctNav) ? acctNav.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '--';
       }
-    }
-    if (futuStrategyCapitalInput) {
-      const strategyCap = Number(st?.strategy_start_capital_usd);
-      futuStrategyCapitalInput.value = Number.isFinite(strategyCap) && strategyCap > 0
-        ? String(strategyCap.toFixed(2))
-        : '';
     }
     if (futuStrategyCapitalHint) {
       const strategyCap = Number(st?.strategy_start_capital_usd);
@@ -4993,7 +5157,7 @@ const refreshFutu = async () => {
       const totalVal = Number(st?.latest_snapshot?.total_value);
       const strategyVal = Number(st?.latest_strategy_snapshot?.total_value);
       if (Number.isFinite(totalVal) && Number.isFinite(strategyVal)) {
-        futuExecCapital.textContent = `A ${totalVal.toLocaleString(undefined, { maximumFractionDigits: 2 })} | S ${strategyVal.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+        futuExecCapital.textContent = `Account ${totalVal.toLocaleString(undefined, { maximumFractionDigits: 2 })} | Strategy ${strategyVal.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
       } else {
         futuExecCapital.textContent = Number.isFinite(totalVal) ? totalVal.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '--';
       }
@@ -5339,7 +5503,7 @@ document.getElementById('futuAccountApply')?.addEventListener('click', async () 
   if (accountSet.size > 0 && !accountSet.has(accId)) {
     const listText = Array.from(accountSet).join(', ');
     alert(`Selected account #${accId} is not in current OpenD account list.\nAvailable: ${listText}`);
-    await refreshFutuAccountList({ preferredAccId: latestFutuStatus?.preferred_acc_id, selectedAccId: latestFutuStatus?.selected_acc_id, force: true });
+    await refreshFutuAccountList({ force: true });
     return;
   }
 
@@ -5351,7 +5515,7 @@ document.getElementById('futuAccountApply')?.addEventListener('click', async () 
   try {
     await futuControl('/api/futu/account-apply', { acc_id: accId });
     if (futuAccountApplyHint) futuAccountApplyHint.textContent = `Preferred account applied: #${accId}`;
-    await refreshFutuAccountList({ preferredAccId: accId, selectedAccId: latestFutuStatus?.selected_acc_id, force: true });
+    await refreshFutuAccountList({ force: true });
   } finally {
     if (futuAccountApplyBtn) {
       futuAccountApplyBtn.disabled = false;
@@ -5946,6 +6110,7 @@ const restoreState = async () => {
       if (rawBox) rawBox.textContent = JSON.stringify(state.backtest, null, 2);
     }
 
+    applyRuntimeChips(state);
     if (restoredFromLocalBatch && forecastBatchResults.size > 1) {
       setStatus('State restored (backend + local multi-symbol cache)', 'ok');
     } else if (restoredByRefetch && forecastBatchResults.size > 1) {
@@ -5967,9 +6132,6 @@ renderTradeHistory();
 
 // Backend chip: detect compute backend from /api/state
 const refreshBackendChip = async () => {
-  const backendChip = document.getElementById('backendChip');
-  const backendDot = document.getElementById('backendDot');
-  if (!backendChip) return;
   try {
     const st = await api('/api/state');
     setDataSourceChip(
@@ -5978,25 +6140,9 @@ const refreshBackendChip = async () => {
       st?.data_ws_diagnostics || st?.paper?.data_ws_diagnostics || null,
       st?.data_live_fetch_diagnostics || st?.paper?.data_live_fetch_diagnostics || null,
     );
-    const backend = st?.forecast?.last_request?.compute_backend || st?.compute_backend || null;
-    if (backend) {
-      const lower = String(backend).toLowerCase();
-      const label = lower === 'directml'
-        ? 'DirectML'
-        : lower === 'cuda'
-          ? 'CUDA'
-          : lower === 'cpu'
-            ? 'CPU'
-            : (backend.charAt(0).toUpperCase() + backend.slice(1));
-      backendChip.textContent = `Backend: ${label}`;
-      if (backendDot) { backendDot.style.background = lower === 'cpu' ? 'var(--muted)' : 'var(--accent)'; }
-    } else {
-      backendChip.textContent = 'Backend: --';
-      if (backendDot) { backendDot.style.background = 'var(--muted-2)'; }
-    }
+    applyRuntimeChips(st);
   } catch {
-    backendChip.textContent = 'Backend: --';
-    if (backendDot) { backendDot.style.background = 'var(--muted-2)'; }
+    applyRuntimeChips({});
   }
 };
 
@@ -6072,4 +6218,4 @@ futuCtrlChevron?.addEventListener('click', toggleFutuCtrl);
 
 futuRecentLoads = loadFutuRecentLoads();
 renderFutuRecentLoads();
-refreshFutuAccountList({ preferredAccId: FUTU_DEFAULT_ACC_ID });
+refreshFutuAccountList();

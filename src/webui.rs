@@ -184,6 +184,10 @@ struct FullUiState {
     data_ws_connected: bool,
     data_ws_diagnostics: data::WsDiagnostics,
     data_live_fetch_diagnostics: data::LiveFetchDiagnostics,
+    compute_backend: String,
+    directml_requested_precision: Option<String>,
+    directml_active_precision: Option<String>,
+    directml_model_path: Option<String>,
 }
 
 impl Default for TrainRuntimeState {
@@ -282,6 +286,7 @@ struct FutuRuntimeState {
     started_at: Option<String>,
     strategy_file: Option<String>,
     runtime_file: Option<String>,
+    candidate_symbols: Vec<String>,
     preferred_acc_id: Option<String>,
     conn_host: String,
     conn_port: u16,
@@ -353,6 +358,8 @@ struct FutuSimRuntimeLine {
     total_value_usd: f64,
     pnl_usd: f64,
     pnl_pct: f64,
+    #[serde(default)]
+    candidate_symbols: Vec<String>,
     positions: Vec<FutuPositionState>,
     snapshot: paper_trading::MinutePortfolioSnapshot,
     #[serde(default)]
@@ -372,12 +379,13 @@ struct FutuSimRuntimeLine {
 impl Default for FutuRuntimeState {
     fn default() -> Self {
         Self {
-            running: true,
+            running: false,
             connected: false,
-            started_at: Some(chrono::Local::now().to_rfc3339()),
+            started_at: None,
             strategy_file: None,
             runtime_file: None,
-            preferred_acc_id: Some("9468130".to_string()),
+            candidate_symbols: Vec::new(),
+            preferred_acc_id: None,
             conn_host: "127.0.0.1".to_string(),
             conn_port: 11111,
             conn_market: "US".to_string(),
@@ -626,16 +634,6 @@ pub async fn run_webui_server(port: u16, backend_default: config::ComputeBackend
         forecast: Arc::new(Mutex::new(forecast_state)),
         portfolio: Arc::new(Mutex::new(PortfolioRuntimeState::default())),
     };
-
-    if std::env::var("FUTU_API_ACC_ID")
-        .ok()
-        .map(|v| v.trim().is_empty())
-        .unwrap_or(true)
-    {
-        unsafe {
-            std::env::set_var("FUTU_API_ACC_ID", "9468130");
-        }
-    }
 
     tokio::spawn(futu_execution_loop(state.futu.clone(), state.paper.clone()));
 
@@ -1007,6 +1005,11 @@ async fn full_state(
     futu.data_ws_connected = data_ws_connected;
     futu.data_ws_diagnostics = data_ws_diagnostics.clone();
     futu.data_live_fetch_diagnostics = data_live_fetch_diagnostics.clone();
+    let directml_selection = if matches!(state.backend_default, config::ComputeBackend::Directml) {
+        config::select_directml_onnx_model()
+    } else {
+        None
+    };
 
     Ok(Json(FullUiState {
         forecast: state.forecast.lock().await.clone(),
@@ -1019,6 +1022,15 @@ async fn full_state(
         data_ws_connected,
         data_ws_diagnostics,
         data_live_fetch_diagnostics,
+        compute_backend: format!("{:?}", state.backend_default).to_ascii_lowercase(),
+        directml_requested_precision: matches!(state.backend_default, config::ComputeBackend::Directml)
+            .then(|| config::configured_directml_precision().as_str().to_string()),
+        directml_active_precision: directml_selection
+            .as_ref()
+            .map(|selection| selection.precision.as_str().to_string()),
+        directml_model_path: directml_selection
+            .as_ref()
+            .map(|selection| selection.path.display().to_string()),
     }))
 }
 
@@ -1519,14 +1531,15 @@ async fn futu_start(
     State(state): State<WebState>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ApiError>)> {
     let mut fs = state.futu.lock().await;
+    let preferred = fs
+        .preferred_acc_id
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "preferred FUTU account is not configured"))?;
     fs.running = true;
     if fs.started_at.is_none() {
         fs.started_at = Some(chrono::Local::now().to_rfc3339());
     }
-    let preferred = fs
-        .preferred_acc_id
-        .clone()
-        .unwrap_or_else(|| "9468130".to_string());
     fs.logs.push(runtime_log_with_ts(format!(
         "Futu simulation started (preferred acc_id={})",
         preferred
@@ -1602,13 +1615,14 @@ async fn futu_load(
         .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "runtime file has no valid snapshots"))?;
 
     let mut fs = state.futu.lock().await;
-    fs.running = true;
+    fs.running = false;
     fs.connected = false;
     fs.started_at = Some(chrono::Local::now().to_rfc3339());
     fs.strategy_file = resolved_strategy_path
         .as_ref()
         .map(|p| p.display().to_string());
     fs.runtime_file = Some(runtime_path.display().to_string());
+    fs.candidate_symbols = last.candidate_symbols.clone();
     fs.conn_host = last.conn_host.clone();
     fs.conn_port = last.conn_port;
     fs.conn_market = last.conn_market.clone();
@@ -1631,9 +1645,6 @@ async fn futu_load(
         .filter_map(|line| line.strategy_snapshot.clone())
         .collect::<Vec<_>>();
     let loaded_snapshot_count = fs.snapshots.len();
-    if fs.preferred_acc_id.is_none() {
-        fs.preferred_acc_id = Some("9468130".to_string());
-    }
     fs.logs.push(runtime_log_with_ts(format!(
         "Futu history loaded => {} snapshots from {}",
         loaded_snapshot_count,
@@ -2114,18 +2125,25 @@ async fn futu_execution_loop(
 
                                 let account_total_assets = payload.cash_usd.max(0.0) + total_holdings_value_all;
 
-                                let base_rebalance_assets =
+                                let candidate_account_assets =
                                     (account_total_assets - non_candidate_holdings_value).max(0.0);
+                                let configured_strategy_assets = strategy_start_capital_usd
+                                    .filter(|value| value.is_finite() && *value > 0.0);
+                                let base_rebalance_assets = configured_strategy_assets
+                                    .unwrap_or(candidate_account_assets);
                                 let capped_rebalance_assets = rebalance_capital_limit_usd
                                     .map(|limit| base_rebalance_assets.min(limit.max(1.0)))
                                     .unwrap_or(base_rebalance_assets);
                                 let executable_rebalance_assets = capped_rebalance_assets * 0.95;
 
                                 rebalance_logs.push(runtime_log_with_ts(format!(
-                                    "Futu SIM rebalance budget => total_assets={:.2}, non_candidate_assets={:.2}, base={:.2}, cap={}, executable(95%)={:.2}",
+                                    "Futu SIM rebalance budget => total_assets={:.2}, non_candidate_assets={:.2}, candidate_assets={:.2}, strategy_base={}, cap={}, executable(95%)={:.2}",
                                     account_total_assets,
                                     non_candidate_holdings_value,
-                                    base_rebalance_assets,
+                                    candidate_account_assets,
+                                    configured_strategy_assets
+                                        .map(|v| format!("{:.2}", v))
+                                        .unwrap_or_else(|| format!("AUTO:{:.2}", base_rebalance_assets)),
                                     rebalance_capital_limit_usd
                                         .map(|v| format!("{:.2}", v))
                                         .unwrap_or_else(|| "UNLIMITED".to_string()),
@@ -2727,6 +2745,9 @@ async fn futu_execution_loop(
                     })
                     .collect::<std::collections::HashSet<_>>();
 
+                let mut candidate_symbols_sorted = candidate_symbol_set.iter().cloned().collect::<Vec<_>>();
+                candidate_symbols_sorted.sort();
+
                 if strategy_needs_seed {
                     strategy_positions_qty.clear();
                     let mut seeded_invested = 0.0;
@@ -2772,17 +2793,15 @@ async fn futu_execution_loop(
                     let configured_start = strategy_start_capital_usd
                         .filter(|v| v.is_finite() && *v > 0.0)
                         .unwrap_or(total_value.max(1.0));
-                    let effective_start = configured_start.max(seeded_invested);
-                    strategy_start_capital = Some(effective_start);
+                    strategy_start_capital = Some(configured_start);
                     strategy_seed_cost_basis_usd = seeded_invested;
-                    strategy_cash_usd = (effective_start - seeded_invested).max(0.0);
+                    strategy_cash_usd = (configured_start - seeded_invested).max(0.0);
                     strategy_needs_seed = false;
 
                     rebalance_logs.push(runtime_log_with_ts(format!(
-                        "Futu strategy sleeve initialized (cost-basis seed) => configured_start={:.2}, existing_candidate_holdings={:.2}, effective_start={:.2}, cash={:.2}, seeded_symbols={}",
+                        "Futu strategy sleeve initialized (strict configured base) => configured_start={:.2}, existing_candidate_holdings={:.2}, cash={:.2}, seeded_symbols={}",
                         configured_start,
                         seeded_invested,
-                        effective_start,
                         strategy_cash_usd,
                         strategy_positions_qty.len(),
                     )));
@@ -2956,11 +2975,9 @@ async fn futu_execution_loop(
                 let mut fs = futu_state.lock().await;
                 let was_connected = fs.connected;
                 fs.connected = true;
+                fs.candidate_symbols = candidate_symbols_sorted;
                 fs.account_cash_usd = payload.cash_usd;
                 fs.account_buying_power_usd = payload.buying_power_usd;
-                if fs.preferred_acc_id.is_none() {
-                    fs.preferred_acc_id = Some("9468130".to_string());
-                }
                 fs.selected_acc_id = payload.selected_acc_id.clone();
                 fs.selected_trd_env = payload.selected_trd_env.clone();
                 fs.selected_market = payload.selected_market.clone();
@@ -3111,6 +3128,7 @@ async fn futu_execution_loop(
                     total_value_usd: fs.latest_snapshot.as_ref().map(|x| x.total_value).unwrap_or(0.0),
                     pnl_usd: fs.latest_snapshot.as_ref().map(|x| x.pnl_usd).unwrap_or(0.0),
                     pnl_pct: fs.latest_snapshot.as_ref().map(|x| x.pnl_pct).unwrap_or(0.0),
+                    candidate_symbols: fs.candidate_symbols.clone(),
                     positions: fs.positions.clone(),
                     snapshot: fs.latest_snapshot.clone().unwrap_or(paper_trading::MinutePortfolioSnapshot {
                         timestamp: timestamp.clone(),
@@ -4976,6 +4994,7 @@ fn load_futu_runtime_lines(path: &Path) -> Result<Vec<FutuSimRuntimeLine>> {
                 total_value_usd: snapshot.total_value,
                 pnl_usd: snapshot.pnl_usd,
                 pnl_pct: snapshot.pnl_pct,
+                candidate_symbols: Vec::new(),
                 positions: Vec::new(),
                 snapshot,
                 strategy_start_capital_usd: None,

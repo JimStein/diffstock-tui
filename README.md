@@ -177,7 +177,7 @@ python tools/export_to_onnx.py --input model_weights.safetensors --output model_
 
 Exporter dependencies (Python):
 ```bash
-pip install torch onnx safetensors numpy
+pip install torch onnx safetensors numpy onnxruntime
 ```
 
 Current exporter behavior:
@@ -205,11 +205,24 @@ Expected outputs:
 - `model_weights.onnx`
 - `model_weights.encoder.onnx`
 
+### Optional FP16 DirectML model
+
+The current DirectML inference path uses `fp32` unless you point it at a converted `fp16` ONNX model. Training stays unchanged: the recommended workflow is to keep `model_weights.safetensors` and `model_weights.onnx` as-is, then generate a separate DirectML-focused model:
+
+```bash
+py tools/convert_onnx_to_fp16.py --input model_weights.onnx --output model_weights.fp16.onnx --keep-io-fp32
+```
+
+Notes:
+- `--keep-io-fp32` is the safest default for this repo because Rust still feeds/reads `f32` tensors while the internal ONNX graph runs in `fp16` where possible.
+- This is an inference-only optimization; it does not change Candle training or the saved safetensors checkpoint.
+- `start_directml_webui.bat` now prefers `model_weights.fp16.onnx` automatically when that file exists.
+
 Recommended DirectML run command (release binary):
 
 ```bash
 set ORT_DYLIB_PATH=d:\DiffStock\diffstock-tui\.runtime\ort_dml_1_24_1\onnxruntime\capi\onnxruntime.dll
-set DIFFSTOCK_ORT_MODEL=d:\DiffStock\diffstock-tui\model_weights.onnx
+set DIFFSTOCK_ORT_MODEL=d:\DiffStock\diffstock-tui\model_weights.fp16.onnx
 cargo run --release --features directml -- --webui --webui-port 8099 --compute-backend directml
 ```
 

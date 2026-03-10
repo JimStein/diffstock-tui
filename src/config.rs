@@ -1,5 +1,6 @@
 use candle_core::Device;
 use rayon::ThreadPoolBuilder;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use tracing::{info, warn};
 
@@ -11,6 +12,28 @@ pub enum ComputeBackend {
     Cuda,
     Directml,
     Cpu,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OrtPrecision {
+    Fp16,
+    Fp32,
+}
+
+impl OrtPrecision {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            OrtPrecision::Fp16 => "fp16",
+            OrtPrecision::Fp32 => "fp32",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct DirectmlModelSelection {
+    pub path: PathBuf,
+    pub precision: OrtPrecision,
+    pub requested_precision: OrtPrecision,
 }
 
 pub fn init_cpu_parallelism() {
@@ -63,14 +86,68 @@ pub fn resolve_compute_backend(requested: ComputeBackend, context: &str) -> Comp
     }
 }
 
-pub fn find_directml_onnx_model_path() -> Option<std::path::PathBuf> {
-    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+pub fn configured_directml_precision() -> OrtPrecision {
+    match std::env::var("DIFFSTOCK_ORT_PRECISION") {
+        Ok(raw) => match raw.trim().to_ascii_lowercase().as_str() {
+            "fp16" | "float16" | "16" | "half" => OrtPrecision::Fp16,
+            "fp32" | "float32" | "32" | "single" => OrtPrecision::Fp32,
+            other => {
+                warn!(
+                    "Unrecognized DIFFSTOCK_ORT_PRECISION='{}'. Falling back to fp32.",
+                    other
+                );
+                OrtPrecision::Fp32
+            }
+        },
+        Err(_) => OrtPrecision::Fp32,
+    }
+}
+
+fn detect_onnx_precision_from_path(path: &Path) -> OrtPrecision {
+    let lower = path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_else(|| path.to_string_lossy().to_ascii_lowercase());
+
+    if lower.contains(".fp16") || lower.contains("_fp16") || lower.contains("-fp16") {
+        OrtPrecision::Fp16
+    } else {
+        OrtPrecision::Fp32
+    }
+}
+
+fn directml_onnx_candidates_for(precision: OrtPrecision, project_root: &Path) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    match precision {
+        OrtPrecision::Fp16 => {
+            candidates.push(project_root.join("model_weights.fp16.onnx"));
+            candidates.push(project_root.join("model.fp16.onnx"));
+            candidates.push(project_root.join("onnx/model.fp16.onnx"));
+            candidates.push(PathBuf::from("model_weights.fp16.onnx"));
+            candidates.push(PathBuf::from("model.fp16.onnx"));
+            candidates.push(PathBuf::from("onnx/model.fp16.onnx"));
+        }
+        OrtPrecision::Fp32 => {
+            candidates.push(project_root.join("model_weights.onnx"));
+            candidates.push(project_root.join("model.onnx"));
+            candidates.push(project_root.join("onnx/model.onnx"));
+            candidates.push(PathBuf::from("model_weights.onnx"));
+            candidates.push(PathBuf::from("model.onnx"));
+            candidates.push(PathBuf::from("onnx/model.onnx"));
+        }
+    }
+    candidates
+}
+
+pub fn select_directml_onnx_model() -> Option<DirectmlModelSelection> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
     let project_root = project_root_path();
+    let requested_precision = configured_directml_precision();
 
     if let Ok(path) = std::env::var("DIFFSTOCK_ORT_MODEL") {
         let trimmed = path.trim();
         if !trimmed.is_empty() {
-            let env_path = std::path::PathBuf::from(trimmed);
+            let env_path = PathBuf::from(trimmed);
             candidates.push(env_path.clone());
             if !env_path.is_absolute() {
                 candidates.push(project_root.join(env_path));
@@ -78,14 +155,27 @@ pub fn find_directml_onnx_model_path() -> Option<std::path::PathBuf> {
         }
     }
 
-    candidates.push(project_root.join("model_weights.onnx"));
-    candidates.push(project_root.join("model.onnx"));
-    candidates.push(project_root.join("onnx/model.onnx"));
-    candidates.push(std::path::PathBuf::from("model_weights.onnx"));
-    candidates.push(std::path::PathBuf::from("model.onnx"));
-    candidates.push(std::path::PathBuf::from("onnx/model.onnx"));
+    candidates.extend(directml_onnx_candidates_for(requested_precision, &project_root));
+    candidates.extend(directml_onnx_candidates_for(
+        match requested_precision {
+            OrtPrecision::Fp16 => OrtPrecision::Fp32,
+            OrtPrecision::Fp32 => OrtPrecision::Fp16,
+        },
+        &project_root,
+    ));
 
-    candidates.into_iter().find(|p| p.exists() && p.is_file())
+    candidates
+        .into_iter()
+        .find(|path| path.exists() && path.is_file())
+        .map(|path| DirectmlModelSelection {
+            precision: detect_onnx_precision_from_path(&path),
+            path,
+            requested_precision,
+        })
+}
+
+pub fn find_directml_onnx_model_path() -> Option<PathBuf> {
+    select_directml_onnx_model().map(|selection| selection.path)
 }
 
 pub fn project_root_path() -> std::path::PathBuf {

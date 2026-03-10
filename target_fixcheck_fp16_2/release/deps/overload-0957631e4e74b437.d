@@ -1,0 +1,10 @@
+D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_fixcheck_fp16_2\release\deps\overload-0957631e4e74b437.d: C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\overload-0.1.1\src\lib.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\overload-0.1.1\src\unary.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\overload-0.1.1\src\assignment.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\overload-0.1.1\src\binary.rs
+
+D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_fixcheck_fp16_2\release\deps\liboverload-0957631e4e74b437.rlib: C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\overload-0.1.1\src\lib.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\overload-0.1.1\src\unary.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\overload-0.1.1\src\assignment.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\overload-0.1.1\src\binary.rs
+
+D:\Users\mrleo\Documents\GitHub\diffstock-tui\target_fixcheck_fp16_2\release\deps\liboverload-0957631e4e74b437.rmeta: C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\overload-0.1.1\src\lib.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\overload-0.1.1\src\unary.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\overload-0.1.1\src\assignment.rs C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\overload-0.1.1\src\binary.rs
+
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\overload-0.1.1\src\lib.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\overload-0.1.1\src\unary.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\overload-0.1.1\src\assignment.rs:
+C:\Users\mrleo\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\overload-0.1.1\src\binary.rs:
