@@ -2190,6 +2190,9 @@ const renderFutuConnectionKpis = (futuStatus, futuContext) => {
   const strategyNav = Number(strategySnapshot?.total_value);
   const strategyPnlUsd = Number(strategySnapshot?.pnl_usd);
   const strategyPnlPct = Number(strategySnapshot?.pnl_pct);
+  const capitalLimitUsd = Number(futuStatus?.rebalance_capital_limit_usd);
+  const strategyBaseCapitalUsd = Number(futuStatus?.strategy_start_capital_usd);
+  const hasCapitalLimit = Number.isFinite(capitalLimitUsd) && capitalLimitUsd > 0;
   const strategyPnlMood = Number.isFinite(strategyPnlUsd)
     ? (strategyPnlUsd >= 0 ? 'kpi-positive' : 'kpi-negative')
     : 'kpi-neutral';
@@ -2246,6 +2249,12 @@ const renderFutuConnectionKpis = (futuStatus, futuContext) => {
           <div class='paper-kpi-label'>Strategy Sleeve PnL</div>
           <div class='paper-kpi-value ${Number.isFinite(strategyPnlUsd) && strategyPnlUsd < 0 ? 'down' : 'up'}'>${Number.isFinite(strategyPnlUsd) ? `${formatSignedMoney(strategyPnlUsd)} (${formatPct(strategyPnlPct)})` : '--'}</div>
           <div class='futu-kpi-sub'>USD</div>
+        </div>
+        <div class='paper-kpi-card kpi-neutral'>
+          <div class='paper-kpi-label'>Rebalance Capital Limit</div>
+          <div class='paper-kpi-value'>${hasCapitalLimit ? `$${capitalLimitUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'Unlimited'}</div>
+          <div class='futu-kpi-sub'>Applied to rebalance sizing</div>
+          <div class='futu-kpi-sub'>Startup base ${Number.isFinite(strategyBaseCapitalUsd) && strategyBaseCapitalUsd > 0 ? `$${strategyBaseCapitalUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--'}</div>
         </div>
         <div class='paper-kpi-card ${ddMood}'>
           <div class='paper-kpi-label'>Sleeve Max Drawdown</div>

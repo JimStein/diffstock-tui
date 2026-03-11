@@ -1,0 +1,156 @@
+{
+  "candidate_symbols": [
+    "COPX",
+    "ETN",
+    "IAU",
+    "MSFT",
+    "NVDA",
+    "TLT",
+    "URA"
+  ],
+  "finished_at": "2026-03-10T21:28:01.277477900+08:00",
+  "initial_capital_usd": 80000.0,
+  "last_error": null,
+  "last_message": "Processed 137/252 trading days",
+  "latest_snapshot": {
+    "benchmark_return_pct": 23.351085620647293,
+    "cash_usd": 0.0,
+    "holdings": [
+      {
+        "asset_value": 37559.754220431154,
+        "avg_cost": 53.54,
+        "price": 54.19,
+        "quantity": 693.1122757045794,
+        "symbol": "COPX"
+      },
+      {
+        "asset_value": 61137.85280893865,
+        "avg_cost": 69.44,
+        "price": 70.63,
+        "quantity": 865.6074303969795,
+        "symbol": "IAU"
+      },
+      {
+        "asset_value": 5087.233594948208,
+        "avg_cost": 517.93,
+        "price": 514.45,
+        "quantity": 9.888684216052496,
+        "symbol": "MSFT"
+      },
+      {
+        "asset_value": 39706.40093173485,
+        "avg_cost": 176.67,
+        "price": 183.61,
+        "quantity": 216.25402174029108,
+        "symbol": "NVDA"
+      },
+      {
+        "asset_value": 9986.19872933657,
+        "avg_cost": 49.43,
+        "price": 50.4,
+        "quantity": 198.13886367731288,
+        "symbol": "URA"
+      }
+    ],
+    "holdings_symbols": [
+      "COPX",
+      "IAU",
+      "MSFT",
+      "NVDA",
+      "URA"
+    ],
+    "pnl_pct": 91.84680035673678,
+    "pnl_usd": 73477.44028538943,
+    "symbols": [
+      {
+        "change_1m": 0.6499999999999986,
+        "change_1m_pct": 1.2140455734030604,
+        "price": 54.19,
+        "symbol": "COPX"
+      },
+      {
+        "change_1m": 1.1899999999999977,
+        "change_1m_pct": 1.7137096774193517,
+        "price": 70.63,
+        "symbol": "IAU"
+      },
+      {
+        "change_1m": -3.4799999999999045,
+        "change_1m_pct": -0.6719054698511198,
+        "price": 514.45,
+        "symbol": "MSFT"
+      },
+      {
+        "change_1m": 6.940000000000026,
+        "change_1m_pct": 3.928227769287387,
+        "price": 183.61,
+        "symbol": "NVDA"
+      },
+      {
+        "change_1m": 0.9699999999999989,
+        "change_1m_pct": 1.9623710297390227,
+        "price": 50.4,
+        "symbol": "URA"
+      }
+    ],
+    "timestamp": "2025-09-22T04:00:00+00:00",
+    "total_value": 153477.44028538943
+  },
+  "latest_weights": [
+    {
+      "symbol": "IAU",
+      "weight": 0.39981692069667346
+    },
+    {
+      "symbol": "NVDA",
+      "weight": 0.2541309055586445
+    },
+    {
+      "symbol": "COPX",
+      "weight": 0.24683823911796451
+    },
+    {
+      "symbol": "URA",
+      "weight": 0.06514645084809344
+    },
+    {
+      "symbol": "MSFT",
+      "weight": 0.034067483778624064
+    }
+  ],
+  "latest_weights_as_of": "2025-09-22",
+  "period_days": 252,
+  "progress_current_day": 137,
+  "progress_total_days": 252,
+  "rebalance_every_days": 1,
+  "runtime_file": "D:\\Users\\mrleo\\Documents\\GitHub\\diffstock-tui\\log\\backtest_runtime_20260310_175317.jsonl",
+  "saved_at": "2026-03-10T21:28:01.277689100+08:00",
+  "started_at": "2026-03-10T17:53:17.185582+08:00",
+  "status": "stopped",
+  "summary": {
+    "alpha_pct": 68.49571473608948,
+    "alpha_usd": 54796.57178887159,
+    "annualized_alpha_pct": 99.19234398441388,
+    "benchmark_annual_vol_pct": 27.025465032140733,
+    "benchmark_cagr_pct": 47.11259416365052,
+    "benchmark_calmar": 3.0036409193791993,
+    "benchmark_max_drawdown_pct": -15.685161917885937,
+    "benchmark_sharpe": 1.380706868312577,
+    "benchmark_sortino": 1.7511884701053035,
+    "benchmark_total_pnl_usd": 18680.86849651784,
+    "benchmark_total_return_pct": 23.351085620647293,
+    "beta_vs_benchmark": 0.4815370931927407,
+    "information_ratio": 3.9072013781831028,
+    "strategy_annual_vol_pct": 19.764792821948557,
+    "strategy_cagr_pct": 231.49055758434992,
+    "strategy_calmar": 42.58752992243539,
+    "strategy_max_drawdown_pct": -5.435641794815604,
+    "strategy_sharpe": 5.927739197822801,
+    "strategy_sortino": 13.905267577556986,
+    "strategy_total_pnl_usd": 73477.44028538943,
+    "strategy_total_return_pct": 91.84680035673678,
+    "strategy_win_rate_pct": 66.42335766423358,
+    "trading_days": 137
+  },
+  "summary_file": "D:\\Users\\mrleo\\Documents\\GitHub\\diffstock-tui\\log\\backtest_summary_20260310_175317.json"
+}

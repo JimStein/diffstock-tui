@@ -214,6 +214,11 @@ impl FutuApiClient {
         Command::new(&self.config.python_bin)
             .env("PYTHONIOENCODING", "utf-8")
             .env("PYTHONUTF8", "1")
+            .env(
+                "PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION",
+                std::env::var("PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION")
+                    .unwrap_or_else(|_| "python".to_string()),
+            )
             .arg("-X")
             .arg("utf8")
             .arg("-c")

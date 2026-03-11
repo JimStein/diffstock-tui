@@ -30,19 +30,19 @@
   "targets": [
     {
       "symbol": "COPX",
-      "target_weight": 0.35509854967043664
+      "target_weight": 0.35264736744109365
     },
     {
       "symbol": "IAU",
-      "target_weight": 0.25048644458745056
+      "target_weight": 0.30282307786078033
     },
     {
       "symbol": "NVDA",
-      "target_weight": 0.21058456362031677
+      "target_weight": 0.20766609158111163
     },
     {
       "symbol": "TLT",
-      "target_weight": 0.0719503021179866
+      "target_weight": 0.018599196495264012
     }
   ],
   "analyses": [
@@ -1546,10 +1546,61 @@
           "side": "SELL",
           "quantity": 220.0,
           "price": 88.68,
-          "notional": 19509.600000000002,
-          "fee": 9.754800000000001
+          "notional": 19509.6,
+          "fee": 9.7548
         }
       ]
+    },
+    {
+      "timestamp": "2026-03-10T23:31:02.278363800+08:00",
+      "portfolio_value_before": 80656.36716016382,
+      "portfolio_value_after": 80647.24763466383,
+      "cash_after": 9670.740634663829,
+      "trades": [
+        {
+          "timestamp": "2026-03-10T23:31:02.278363800+08:00",
+          "symbol": "COPX",
+          "side": "BUY",
+          "quantity": 4.0,
+          "price": 84.109,
+          "notional": 336.436,
+          "fee": 0.168218
+        },
+        {
+          "timestamp": "2026-03-10T23:31:02.278363800+08:00",
+          "symbol": "IAU",
+          "side": "BUY",
+          "quantity": 45.0,
+          "price": 98.32,
+          "notional": 4424.4,
+          "fee": 2.2121999999999997
+        },
+        {
+          "timestamp": "2026-03-10T23:31:02.278363800+08:00",
+          "symbol": "NVDA",
+          "side": "BUY",
+          "quantity": 50.0,
+          "price": 186.0265,
+          "notional": 9301.325,
+          "fee": 4.6506625
+        },
+        {
+          "timestamp": "2026-03-10T23:31:02.278363800+08:00",
+          "symbol": "TLT",
+          "side": "SELL",
+          "quantity": 47.0,
+          "price": 88.87,
+          "notional": 4176.89,
+          "fee": 2.088445
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-11T02:30:55.099471800+08:00",
+      "portfolio_value_before": 80416.60063466383,
+      "portfolio_value_after": 80416.60063466383,
+      "cash_after": 9670.740634663829,
+      "trades": []
     }
   ]
 }

@@ -335,12 +335,22 @@ struct FutuSimStrategyLog {
     selected_trd_env: Option<String>,
     selected_market: Option<String>,
     runtime_file: String,
+    #[serde(default = "default_futu_history_order_range_days")]
+    history_order_range_days: u32,
+    #[serde(default)]
+    rebalance_capital_limit_usd: Option<f64>,
+    #[serde(default)]
+    strategy_start_capital_usd: Option<f64>,
     #[serde(default)]
     latest_snapshot: Option<paper_trading::MinutePortfolioSnapshot>,
     #[serde(default)]
     latest_positions: Vec<FutuPositionState>,
     #[serde(default)]
     latest_logs: Vec<String>,
+}
+
+fn default_futu_history_order_range_days() -> u32 {
+    30
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1570,6 +1580,7 @@ async fn futu_load(
 
     let mut resolved_strategy_path: Option<PathBuf> = None;
     let mut resolved_runtime_path: Option<PathBuf> = None;
+    let mut loaded_strategy_log: Option<FutuSimStrategyLog> = None;
 
     if !strategy_input.is_empty() {
         let strategy_path = resolve_input_path(&strategy_input);
@@ -1577,6 +1588,7 @@ async fn futu_load(
             .map_err(|e| api_err(StatusCode::BAD_REQUEST, &format!("invalid strategy_file: {}", e)))?;
         resolved_runtime_path = Some(resolve_input_path(&strategy_log.runtime_file));
         resolved_strategy_path = Some(strategy_path);
+        loaded_strategy_log = Some(strategy_log);
     }
 
     if resolved_runtime_path.is_none() {
@@ -1592,6 +1604,14 @@ async fn futu_load(
             resolved_strategy_path = Some(resolve_input_path(&strategy_input));
         } else {
             resolved_strategy_path = find_latest_log_file("futu_sim_strategy_", ".json");
+        }
+    }
+
+    if loaded_strategy_log.is_none() {
+        if let Some(strategy_path) = resolved_strategy_path.as_ref() {
+            if strategy_path.exists() {
+                loaded_strategy_log = Some(load_futu_strategy_log(strategy_path).map_err(internal_err)?);
+            }
         }
     }
 
@@ -1638,17 +1658,35 @@ async fn futu_load(
     fs.positions = last.positions.clone();
     fs.latest_snapshot = Some(last.snapshot.clone());
     fs.snapshots = snapshots;
-    fs.strategy_start_capital_usd = last.strategy_start_capital_usd;
+    fs.history_order_range_days = loaded_strategy_log
+        .as_ref()
+        .map(|log| log.history_order_range_days.clamp(0, 3650))
+        .unwrap_or_else(default_futu_history_order_range_days);
+    fs.rebalance_capital_limit_usd = loaded_strategy_log
+        .as_ref()
+        .and_then(|log| log.rebalance_capital_limit_usd)
+        .filter(|value| value.is_finite() && *value > 0.0);
+    fs.strategy_start_capital_usd = loaded_strategy_log
+        .as_ref()
+        .and_then(|log| log.strategy_start_capital_usd)
+        .or(last.strategy_start_capital_usd);
     fs.latest_strategy_snapshot = last.strategy_snapshot.clone();
     fs.strategy_snapshots = runtime_lines
         .iter()
         .filter_map(|line| line.strategy_snapshot.clone())
         .collect::<Vec<_>>();
     let loaded_snapshot_count = fs.snapshots.len();
+    let loaded_range_days = fs.history_order_range_days;
+    let loaded_cap_text = fs
+        .rebalance_capital_limit_usd
+        .map(|value| format!("${:.2}", value))
+        .unwrap_or_else(|| "Unlimited".to_string());
     fs.logs.push(runtime_log_with_ts(format!(
-        "Futu history loaded => {} snapshots from {}",
+        "Futu history loaded => {} snapshots from {} (range={}d, cap={})",
         loaded_snapshot_count,
-        runtime_path.display()
+        runtime_path.display(),
+        loaded_range_days,
+        loaded_cap_text
     )));
     if fs.logs.len() > 200 {
         let keep_from = fs.logs.len().saturating_sub(200);
@@ -1659,6 +1697,8 @@ async fn futu_load(
         "ok": true,
         "runtime_file": runtime_path.display().to_string(),
         "snapshots": runtime_lines.len(),
+        "history_order_range_days": fs.history_order_range_days,
+        "rebalance_capital_limit_usd": fs.rebalance_capital_limit_usd,
     })))
 }
 
@@ -3160,6 +3200,9 @@ async fn futu_execution_loop(
                     selected_trd_env: fs.selected_trd_env.clone(),
                     selected_market: fs.selected_market.clone(),
                     runtime_file: runtime_path.clone().unwrap_or_default(),
+                    history_order_range_days: fs.history_order_range_days,
+                    rebalance_capital_limit_usd: fs.rebalance_capital_limit_usd,
+                    strategy_start_capital_usd: fs.strategy_start_capital_usd,
                     latest_snapshot: fs.latest_snapshot.clone(),
                     latest_positions: fs.positions.clone(),
                     latest_logs: fs.logs.iter().rev().take(80).cloned().collect::<Vec<_>>().into_iter().rev().collect(),
