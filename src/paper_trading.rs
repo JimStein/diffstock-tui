@@ -260,6 +260,7 @@ struct PaperRuntime {
     holdings_avg_cost: HashMap<String, f64>,
     previous_prices: HashMap<String, f64>,
     benchmark_initial_price: f64,
+    latest_allocation: Option<portfolio::PortfolioAllocation>,
     strategy_log: StrategyLog,
     strategy_path: PathBuf,
     runtime_path: PathBuf,
@@ -268,6 +269,7 @@ struct PaperRuntime {
 pub async fn run_paper_trading(
     candidate_symbols: Vec<String>,
     target_weights: Vec<(String, f64)>,
+    initial_allocation: Option<portfolio::PortfolioAllocation>,
     config: PaperTradingConfig,
     event_tx: Sender<PaperEvent>,
     mut command_rx: Receiver<PaperCommand>,
@@ -309,6 +311,7 @@ pub async fn run_paper_trading(
         holdings_avg_cost,
         previous_prices: current_prices.clone(),
         benchmark_initial_price,
+        latest_allocation: initial_allocation,
         strategy_log: StrategyLog {
             created_at: Local::now().to_rfc3339(),
             initial_capital_usd: config.initial_capital_usd,
@@ -802,6 +805,7 @@ pub async fn run_paper_trading_from_strategy_file(
         holdings_avg_cost,
         previous_prices: current_prices.clone(),
         benchmark_initial_price,
+        latest_allocation: None,
         strategy_log,
         strategy_path: strategy_path.clone(),
         runtime_path: PathBuf::from(runtime_path),
@@ -1216,10 +1220,19 @@ async fn optimize_targets_from_candidate_pool(
         return Ok(None);
     }
 
-    let alloc = portfolio::run_portfolio_optimization_with_backend(&candidate_symbols, backend).await?;
+    let alloc = portfolio::run_portfolio_optimization_with_backend_and_regime(
+        &candidate_symbols,
+        backend,
+        runtime
+            .latest_allocation
+            .as_ref()
+            .map(|allocation| allocation.market_regime.clone()),
+    )
+    .await?;
     let next_targets = normalize_weights(&alloc.weights);
 
     runtime.strategy_log.targets = next_targets;
+    runtime.latest_allocation = Some(alloc.clone());
     for target in &runtime.strategy_log.targets {
         runtime
             .holdings_shares

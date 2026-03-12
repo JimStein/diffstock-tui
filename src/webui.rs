@@ -963,7 +963,14 @@ async fn portfolio_opt(
         None => req.compute_backend.map(Into::into).unwrap_or(state.backend_default),
     };
     let backend = config::resolve_compute_backend(requested_backend, "webui-portfolio");
-    let alloc = portfolio::run_portfolio_optimization_with_backend(&symbols, backend)
+    let previous_overlay = state
+        .portfolio
+        .lock()
+        .await
+        .last_allocation
+        .as_ref()
+        .map(|allocation| allocation.market_regime.clone());
+    let alloc = portfolio::run_portfolio_optimization_with_backend_and_regime(&symbols, backend, previous_overlay)
         .await
         .map_err(internal_err)?;
 
@@ -3666,7 +3673,16 @@ async fn start_backtest(
                         backend,
                     )
                     .await?;
-                    let allocation = portfolio::optimize_portfolio(&forecasts)?;
+                    let previous_overlay = {
+                        let bt = backtest_state.lock().await;
+                        bt.latest_allocation
+                            .as_ref()
+                            .map(|allocation| allocation.market_regime.clone())
+                    };
+                    let allocation = portfolio::optimize_portfolio_with_previous_regime(
+                        &forecasts,
+                        previous_overlay.as_ref(),
+                    )?;
                     current_weights = normalize_allocation_weights(allocation.weights.clone());
 
                     let mut bt = backtest_state.lock().await;
@@ -3966,7 +3982,7 @@ async fn start_paper(
         return Err(api_err(StatusCode::BAD_REQUEST, "targets cannot be empty"));
     }
 
-    let optimization = optimize_candidate_pool_targets(&symbols, state.backend_default)
+    let optimization = optimize_candidate_pool_targets(&symbols, state.backend_default, None)
         .await
         .map_err(internal_err)?;
     let weights = optimization
@@ -4098,8 +4114,17 @@ async fn start_paper(
 
     let paper_state_runner = state.paper.clone();
     let candidate_symbols = symbols.clone();
+    let initial_allocation = optimization.allocation.clone();
     tokio::spawn(async move {
-        let res = paper_trading::run_paper_trading(candidate_symbols, weights, cfg, event_tx, cmd_rx).await;
+        let res = paper_trading::run_paper_trading(
+            candidate_symbols,
+            weights,
+            Some(initial_allocation),
+            cfg,
+            event_tx,
+            cmd_rx,
+        )
+        .await;
         let mut ps = paper_state_runner.lock().await;
         ps.running = false;
         ps.paused = false;
@@ -4298,7 +4323,14 @@ async fn paper_targets_update(
         return Err(api_err(StatusCode::BAD_REQUEST, "symbols cannot be empty"));
     }
 
-    let optimization = optimize_candidate_pool_targets(&symbols, state.backend_default)
+    let previous_overlay = state
+        .paper
+        .lock()
+        .await
+        .latest_allocation
+        .as_ref()
+        .map(|allocation| allocation.market_regime.clone());
+    let optimization = optimize_candidate_pool_targets(&symbols, state.backend_default, previous_overlay)
         .await
         .map_err(internal_err)?;
     let next_target_state = optimization
@@ -4464,8 +4496,14 @@ async fn paper_optimization_update(
 async fn optimize_candidate_pool_targets(
     symbols: &[String],
     backend: config::ComputeBackend,
+    previous_overlay: Option<portfolio::MarketRegimeOverlay>,
 ) -> Result<CandidatePoolOptimizationResult> {
-    let allocation = portfolio::run_portfolio_optimization_with_backend(symbols, backend).await?;
+    let allocation = portfolio::run_portfolio_optimization_with_backend_and_regime(
+        symbols,
+        backend,
+        previous_overlay,
+    )
+    .await?;
     let out = normalize_weight_pairs_preserve_cash(allocation.weights.clone())
         .into_iter()
         .map(|(symbol, target_weight)| paper_trading::TargetWeight {

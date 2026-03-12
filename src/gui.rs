@@ -1478,7 +1478,7 @@ impl GuiApp {
                 .iter()
                 .map(|(symbol, _)| symbol.clone())
                 .collect::<Vec<_>>();
-            if let Err(error) = paper_trading::run_paper_trading(candidate_symbols, target_weights, config, tx_clone, cmd_rx).await {
+            if let Err(error) = paper_trading::run_paper_trading(candidate_symbols, target_weights, None, config, tx_clone, cmd_rx).await {
                 let _ = tx
                     .send(PaperEvent::Error(format!("Paper trading stopped: {}", error)))
                     .await;

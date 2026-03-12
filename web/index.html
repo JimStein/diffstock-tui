@@ -1578,12 +1578,14 @@
         display: grid;
         grid-template-columns: minmax(320px, 1.4fr) minmax(260px, 1fr);
         gap: 16px;
+        align-items: start;
       }
       .portfolio-overlay-main,
       .portfolio-overlay-side {
         display: flex;
         flex-direction: column;
         gap: 12px;
+        align-self: start;
       }
       .portfolio-overlay-hero {
         display: flex;
@@ -1761,6 +1763,14 @@
         grid-template-columns: 132px 1fr 46px;
         gap: 10px;
         align-items: center;
+        padding: 8px 10px;
+        border-radius: 10px;
+        border: 1px solid transparent;
+      }
+      .overlay-diagnostic-row.is-dominant {
+        background: linear-gradient(90deg, rgba(0,212,170,.12), rgba(59,130,246,.08));
+        border-color: rgba(0,212,170,.35);
+        box-shadow: inset 0 0 0 1px rgba(255,255,255,.03);
       }
       .overlay-diagnostic-name,
       .overlay-diagnostic-value {
@@ -1776,6 +1786,18 @@
       .overlay-diagnostic-value {
         text-align: right;
         color: var(--muted);
+      }
+      .overlay-diagnostic-badge {
+        margin-top: 4px;
+        display: inline-block;
+        padding: 1px 6px;
+        border-radius: 999px;
+        background: rgba(0,212,170,.16);
+        color: var(--text-1);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: .04em;
+        text-transform: uppercase;
       }
       .overlay-diagnostic-meta {
         font-size: 10px;
@@ -1802,6 +1824,19 @@
       .overlay-diagnostic-fill.danger {
         background: linear-gradient(90deg, #ff6b6b, var(--down));
       }
+      .overlay-diagnostic-row.is-dominant .overlay-diagnostic-track {
+        border-color: rgba(0,212,170,.45);
+        background: rgba(0,212,170,.10);
+      }
+      .overlay-diagnostic-row.is-dominant .overlay-diagnostic-fill {
+        box-shadow: 0 0 12px rgba(0,212,170,.35);
+      }
+      .overlay-diagnostic-row.is-dominant .overlay-diagnostic-name {
+        color: var(--text-1);
+      }
+      .overlay-diagnostic-row.is-dominant .overlay-diagnostic-value {
+        color: var(--text-1);
+      }
       .overlay-reasons {
         display: flex;
         flex-direction: column;
@@ -1810,12 +1845,17 @@
         border: 1px solid var(--border);
         border-radius: 12px;
         background: rgba(255,255,255,.025);
-        min-height: 100%;
+        min-height: 0;
+        max-height: 320px;
+        overflow: hidden;
       }
       .overlay-reason-list {
         display: flex;
         flex-direction: column;
         gap: 8px;
+        overflow-y: auto;
+        overflow-x: hidden;
+        padding-right: 4px;
       }
       .overlay-reason-item {
         border: 1px solid var(--border);
@@ -1824,6 +1864,39 @@
         padding: 10px 12px;
         color: var(--text-2);
         line-height: 1.45;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+      .overlay-threshold-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 10px;
+      }
+      .overlay-threshold-title {
+        margin-bottom: 8px;
+        color: var(--text-1);
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .overlay-threshold-line {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        font-size: 11px;
+        font-family: var(--mono);
+        color: var(--text-2);
+      }
+      .overlay-threshold-line + .overlay-threshold-line {
+        margin-top: 6px;
+      }
+      .overlay-threshold-line span:last-child {
+        text-align: right;
+        color: var(--muted);
+      }
+      .overlay-threshold-emphasis {
+        color: var(--text-1) !important;
+        font-weight: 700;
       }
       .overlay-reasons-empty {
         display: flex;
@@ -1836,6 +1909,17 @@
         background: rgba(255,255,255,.02);
         text-align: center;
         padding: 14px;
+      }
+      .overlay-reason-list::-webkit-scrollbar {
+        width: 8px;
+      }
+      .overlay-reason-list::-webkit-scrollbar-thumb {
+        background: rgba(122,145,186,.45);
+        border-radius: 999px;
+      }
+      .overlay-reason-list::-webkit-scrollbar-track {
+        background: rgba(255,255,255,.03);
+        border-radius: 999px;
       }
       @media (max-width: 980px) {
         .portfolio-overlay-body {
@@ -2220,12 +2304,297 @@
       letter-spacing: .4px;
       font-weight: 700;
     }
+    .futu-badge-real.sim {
+      background: rgba(0,212,170,.12)!important;
+      border-color: rgba(0,212,170,.32)!important;
+      color: #87f1d4!important;
+    }
     .futu-badge-real-safe {
       background: rgba(245,158,11,.14)!important;
       border-color: rgba(245,158,11,.45)!important;
       color: #ffd28a!important;
       letter-spacing: .3px;
       font-weight: 700;
+    }
+    .futu-badge-real-safe.sim {
+      background: rgba(59,130,246,.12)!important;
+      border-color: rgba(59,130,246,.30)!important;
+      color: #a8c7ff!important;
+    }
+    #futuTabBadge.mode-real {
+      background: rgba(255,71,87,.16);
+      border-color: rgba(255,71,87,.38);
+      color: #ff9199;
+    }
+    #futuTabBadge.mode-sim {
+      background: rgba(0,212,170,.12);
+      border-color: rgba(0,212,170,.32);
+      color: #87f1d4;
+    }
+    #tab-futu .futu-mode-panel {
+      border: 1px solid rgba(255,255,255,.06);
+      background:
+        radial-gradient(circle at top right, rgba(59,130,246,.12), transparent 38%),
+        radial-gradient(circle at left center, rgba(0,212,170,.10), transparent 34%),
+        linear-gradient(180deg, rgba(11,16,26,.88) 0%, rgba(8,12,20,.94) 100%);
+    }
+    #tab-futu .futu-mode-grid {
+      display: grid;
+      grid-template-columns: minmax(280px, 1.5fr) repeat(2, minmax(220px, 1fr));
+      gap: 12px;
+      align-items: stretch;
+    }
+    #tab-futu .futu-mode-hero-card,
+    #tab-futu .futu-mode-detail-card {
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,.08);
+      padding: 16px 18px;
+      min-height: 128px;
+    }
+    #tab-futu .futu-mode-hero-card {
+      background: linear-gradient(135deg, rgba(18,31,49,.92), rgba(12,19,30,.96));
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      box-shadow: 0 16px 40px rgba(0,0,0,.24);
+    }
+    #tab-futu .futu-mode-hero-card.mode-real {
+      background: linear-gradient(135deg, rgba(64,18,26,.92), rgba(26,13,18,.97));
+      border-color: rgba(255,71,87,.28);
+    }
+    #tab-futu .futu-mode-hero-card.mode-sim {
+      border-color: rgba(0,212,170,.24);
+    }
+    #tab-futu .futu-mode-kicker,
+    #tab-futu .futu-mode-detail-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--muted);
+      font-weight: 700;
+    }
+    #tab-futu .futu-mode-hero-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      align-items: flex-end;
+    }
+    #tab-futu .futu-mode-hero-title {
+      font-size: 28px;
+      line-height: 1;
+      font-weight: 800;
+      letter-spacing: .02em;
+      color: var(--text-1);
+      margin-bottom: 8px;
+    }
+    #tab-futu .futu-mode-hero-text,
+    #tab-futu .futu-mode-detail-text {
+      color: var(--text-2);
+      line-height: 1.5;
+      max-width: 48ch;
+    }
+    #tab-futu .futu-mode-pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 64px;
+      height: 34px;
+      padding: 0 14px;
+      border-radius: 999px;
+      font-family: var(--mono);
+      font-weight: 800;
+      letter-spacing: .08em;
+      border: 1px solid transparent;
+    }
+    #tab-futu .futu-mode-pill.mode-real {
+      background: rgba(255,71,87,.16);
+      color: #ff9199;
+      border-color: rgba(255,71,87,.42);
+    }
+    #tab-futu .futu-mode-pill.mode-sim {
+      background: rgba(0,212,170,.12);
+      color: #87f1d4;
+      border-color: rgba(0,212,170,.34);
+    }
+    #tab-futu .futu-mode-detail-card {
+      background: rgba(255,255,255,.03);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      justify-content: center;
+    }
+    #tab-futu .futu-mode-detail-card.mode-real {
+      border-color: rgba(255,71,87,.24);
+      background: linear-gradient(180deg, rgba(255,71,87,.07), rgba(255,255,255,.02));
+    }
+    #tab-futu .futu-mode-detail-card.mode-sim {
+      border-color: rgba(0,212,170,.20);
+      background: linear-gradient(180deg, rgba(0,212,170,.06), rgba(255,255,255,.02));
+    }
+    #tab-futu .futu-mode-detail-value {
+      font-size: 20px;
+      line-height: 1.1;
+      color: var(--text-1);
+      font-weight: 800;
+    }
+    #tab-futu .futu-live-gate-card {
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,.08);
+      padding: 16px 18px;
+      background: linear-gradient(135deg, rgba(32,19,22,.92), rgba(16,12,18,.96));
+      box-shadow: 0 16px 40px rgba(0,0,0,.22);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    #tab-futu .futu-live-gate-card.sim {
+      background: linear-gradient(135deg, rgba(16,29,35,.92), rgba(10,17,23,.96));
+      border-color: rgba(0,212,170,.24);
+    }
+    #tab-futu .futu-live-gate-card.real-disabled {
+      border-color: rgba(255,71,87,.28);
+    }
+    #tab-futu .futu-live-gate-kicker {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--muted);
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    #tab-futu .futu-live-gate-title {
+      font-size: 24px;
+      line-height: 1;
+      font-weight: 800;
+      color: var(--text-1);
+      margin-bottom: 8px;
+    }
+    #tab-futu .futu-live-gate-text {
+      color: var(--text-2);
+      line-height: 1.5;
+      max-width: 64ch;
+    }
+    #tab-futu .futu-live-gate-pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 116px;
+      height: 38px;
+      padding: 0 16px;
+      border-radius: 999px;
+      font-family: var(--mono);
+      font-weight: 800;
+      letter-spacing: .08em;
+      border: 1px solid transparent;
+      white-space: nowrap;
+    }
+    #tab-futu .futu-live-gate-pill.real-disabled {
+      background: rgba(255,71,87,.16);
+      border-color: rgba(255,71,87,.42);
+      color: #ff9199;
+    }
+    #tab-futu .futu-live-gate-pill.sim {
+      background: rgba(0,212,170,.12);
+      border-color: rgba(0,212,170,.34);
+      color: #87f1d4;
+    }
+    #tab-futu .futu-checklist-panel {
+      border: 1px solid rgba(255,255,255,.06);
+      background: linear-gradient(180deg, rgba(11,16,26,.86), rgba(8,12,20,.94));
+    }
+    #tab-futu .futu-checklist-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+    }
+    #tab-futu .futu-checklist-item {
+      border: 1px solid rgba(255,255,255,.06);
+      border-radius: 12px;
+      padding: 12px 14px;
+      background: rgba(255,255,255,.03);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-height: 108px;
+    }
+    #tab-futu .futu-checklist-item.ok {
+      border-color: rgba(0,212,170,.22);
+      background: linear-gradient(180deg, rgba(0,212,170,.07), rgba(255,255,255,.02));
+    }
+    #tab-futu .futu-checklist-item.warn {
+      border-color: rgba(245,158,11,.24);
+      background: linear-gradient(180deg, rgba(245,158,11,.07), rgba(255,255,255,.02));
+    }
+    #tab-futu .futu-checklist-item.fail {
+      border-color: rgba(255,71,87,.26);
+      background: linear-gradient(180deg, rgba(255,71,87,.08), rgba(255,255,255,.02));
+    }
+    #tab-futu .futu-checklist-item.unknown {
+      border-color: rgba(59,130,246,.22);
+      background: linear-gradient(180deg, rgba(59,130,246,.06), rgba(255,255,255,.02));
+    }
+    #tab-futu .futu-checklist-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--muted);
+      font-weight: 700;
+    }
+    #tab-futu .futu-checklist-status {
+      font-size: 20px;
+      line-height: 1.1;
+      color: var(--text-1);
+      font-weight: 800;
+    }
+    #tab-futu .futu-checklist-text {
+      color: var(--text-2);
+      line-height: 1.45;
+      font-size: 12px;
+    }
+    #tab-futu .futu-manual-order-panel.real-mode {
+      border-color: rgba(255,71,87,.28);
+      background: linear-gradient(180deg, rgba(48,15,22,.78) 0%, rgba(18,10,15,.90) 100%);
+      box-shadow: 0 0 0 1px rgba(255,71,87,.10), 0 18px 38px rgba(0,0,0,.18);
+    }
+    #tab-futu .futu-manual-order-panel.real-mode .panel-title-icon {
+      background: rgba(255,71,87,.14);
+      border-color: rgba(255,71,87,.28);
+    }
+    #tab-futu .futu-manual-guard {
+      margin-bottom: 12px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,71,87,.24);
+      background: rgba(255,71,87,.08);
+      color: #ffd3d7;
+      line-height: 1.5;
+      display: none;
+    }
+    #tab-futu .futu-manual-order-panel.real-mode .futu-manual-guard {
+      display: block;
+    }
+    #tab-futu .futu-manual-guard strong {
+      color: #fff2f3;
+    }
+    #tab-futu .futu-manual-submit-real {
+      background: linear-gradient(135deg, rgba(255,71,87,.92), rgba(199,36,65,.92)) !important;
+      border-color: rgba(255,71,87,.52) !important;
+      color: white !important;
+      box-shadow: 0 10px 24px rgba(255,71,87,.18);
+    }
+    @media (max-width: 1100px) {
+      #tab-futu .futu-mode-grid {
+        grid-template-columns: 1fr;
+      }
+      #tab-futu .futu-mode-hero-row {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+      #tab-futu .futu-live-gate-card {
+        flex-direction: column;
+        align-items: flex-start;
+      }
     }
     .futu-kpi-sub-sep {
       height: 1px;
@@ -2751,7 +3120,7 @@
         </button>
         <button class="tab-btn" data-tab="futu">
           <span class="tab-icon-wrap"><span class="tab-icon">🛰️</span></span>
-          <span class="tab-label">Futu Simulation</span>
+          <span class="tab-label">Futu Trade</span>
           <span class="tab-badge" id="futuTabBadge"></span>
         </button>
         <div class="sidebar-section">System</div>
@@ -2941,7 +3310,7 @@
           </div>
           <div class="small">
             Strategy Engine 只负责下单意图与再平衡信号分发；具体执行模块保持隔离：
-            <strong>Paper Trading Executor</strong> 与 <strong>Futu Simulation Executor</strong> 分别在各自页面运行与监控。
+            <strong>Paper Trading Executor</strong> 与 <strong>FUTU Trade Executor</strong> 分别在各自页面运行与监控。
           </div>
         </div>
         <div id="strategyEngineMount" class="exec-engine-grid">
@@ -3050,7 +3419,7 @@
           </div>
 
           <div class="panel paper-ctrl-panel">
-            <div class="exec-segment-tag">Step 3 · FUTU Simulation Executor</div>
+            <div class="exec-segment-tag">Step 3 · FUTU Trade Executor</div>
             <div class="paper-ctrl-header" id="futuCtrlHeader">
               <div class="paper-ctrl-summary" id="futuCtrlSummary">
                 <span class="paper-ctrl-status">
@@ -3290,7 +3659,7 @@
         </div>
       </section>
 
-      <!-- ══════ Futu Simulation Tab ══════ -->
+      <!-- ══════ Futu Trade Tab ══════ -->
       <section id="tab-futu" class="tab-panel hidden">
         <div class="panel paper-ctrl-panel">
           <div class="paper-ctrl-header">
@@ -3300,8 +3669,8 @@
                 <span id="futuExecStatus">DISCONNECTED</span>
               </span>
               <span class="paper-ctrl-badge futu-badge-capital">💰&nbsp;$<span id="futuExecCapital">--</span></span>
-              <span class="paper-ctrl-badge futu-badge-real" id="futuRealModeBadge" style="display:none;">REAL MODE</span>
-              <span class="paper-ctrl-badge futu-badge-real-safe" id="futuRealSafetyHint" style="display:none;">REAL ORDER DISABLED · PLACEHOLDER ONLY</span>
+              <span class="paper-ctrl-badge futu-badge-real sim" id="futuRealModeBadge">SIM MODE</span>
+              <span class="paper-ctrl-badge futu-badge-real-safe sim" id="futuRealSafetyHint">SIM ORDERS ACTIVE · SAFE SANDBOX</span>
               <span class="paper-ctrl-badge futu-badge-schedule">🕐&nbsp;<span id="futuExecSchedule">Signal-driven</span></span>
               <span class="paper-ctrl-badge futu-badge-wait">⏳&nbsp;<span id="futuExecNextOpt">Awaiting signal</span></span>
               <span class="paper-ctrl-badge futu-badge-pool">🎯&nbsp;<span id="futuExecPool">--</span></span>
@@ -3311,10 +3680,53 @@
             </div>
           </div>
         </div>
+        <div class="panel futu-mode-panel">
+          <div class="panel-header" style="margin-bottom:12px;">
+            <div class="panel-title"><span class="panel-title-icon">🛡</span> Trade Mode</div>
+            <div class="panel-subtitle" id="futuModeCardSubtitle">Simulation sandbox selected. This page is ready to evolve into real trading controls once live order routing is enabled.</div>
+          </div>
+          <div class="futu-mode-grid">
+            <div class="futu-mode-hero-card mode-sim" id="futuModeHeroCard">
+              <div class="futu-mode-kicker">Execution Route</div>
+              <div class="futu-mode-hero-row">
+                <div>
+                  <div class="futu-mode-hero-title" id="futuModeHeroTitle">SIMULATION SANDBOX</div>
+                  <div class="futu-mode-hero-text" id="futuModeHeroText">Orders currently target the FUTU simulate environment, suitable for dry runs and execution rehearsal.</div>
+                </div>
+                <div class="futu-mode-pill mode-sim" id="futuModeHeroPill">SIM</div>
+              </div>
+            </div>
+            <div class="futu-mode-detail-card mode-sim" id="futuModeSafetyCard">
+              <div class="futu-mode-detail-label">Order Safety</div>
+              <div class="futu-mode-detail-value" id="futuModeSafetyTitle">Simulation orders allowed</div>
+              <div class="futu-mode-detail-text" id="futuModeSafetyText">Manual orders and rebalance orders stay inside the sandbox account.</div>
+            </div>
+            <div class="futu-mode-detail-card mode-sim" id="futuModeRouteCard">
+              <div class="futu-mode-detail-label">Active Route</div>
+              <div class="futu-mode-detail-value" id="futuModeRouteTitle">Account -- · Env --</div>
+              <div class="futu-mode-detail-text" id="futuModeRouteText">Waiting for account selection and connection refresh.</div>
+            </div>
+          </div>
+        </div>
+        <div class="panel futu-live-gate-card sim" id="futuLiveGateCard">
+          <div>
+            <div class="futu-live-gate-kicker">Live Trading Gate</div>
+            <div class="futu-live-gate-title" id="futuLiveGateTitle">SIMULATION ONLY</div>
+            <div class="futu-live-gate-text" id="futuLiveGateText">FUTU is running in sandbox mode. Real-account context can be inspected later, but live order routing is not armed in this build.</div>
+          </div>
+          <div class="futu-live-gate-pill sim" id="futuLiveGatePill">SIM ONLY</div>
+        </div>
+        <div class="panel futu-checklist-panel">
+          <div class="panel-header" style="margin-bottom:12px;">
+            <div class="panel-title"><span class="panel-title-icon">✅</span> Real Trading Checklist</div>
+            <div class="panel-subtitle">Preparation matrix for moving from simulation rehearsal to a future live-trading rollout.</div>
+          </div>
+          <div class="futu-checklist-grid" id="futuChecklistGrid"></div>
+        </div>
         <div class="panel">
           <div class="panel-header" style="margin-bottom:14px;">
             <div class="panel-title"><span class="panel-title-icon">🔌</span> Connection &amp; Account</div>
-            <div class="panel-subtitle" id="futuConnSummary">Waiting for Futu API...</div>
+            <div class="panel-subtitle" id="futuConnSummary">Waiting for FUTU trade API...</div>
           </div>
           <div class="futu-conn-main-wrap">
 
@@ -3388,7 +3800,7 @@
             <div class="futu-conn-kpi-row">
               <div class="panel-header" style="margin-bottom:8px;">
                 <div class="panel-title">📊 Session KPI <span id="futuKpiDurationBadge" class="kpi-duration-badge" style="display:none;"></span></div>
-                <div class="panel-subtitle">Live FUTU simulation performance snapshot</div>
+                <div class="panel-subtitle">Live FUTU trade performance snapshot</div>
               </div>
               <div id="futuConnKpiGrid" class="paper-kpi-grid"></div>
             </div>
@@ -3487,10 +3899,13 @@
             </thead>
             <tbody></tbody>
           </table>
-          <div class="futu-manual-order-panel">
+          <div class="futu-manual-order-panel" id="futuManualOrderPanel">
             <div class="panel-header" style="margin-bottom:10px;">
-              <div class="panel-title"><span class="panel-title-icon">🛠️</span> Manual Rebalance Order (SIM)</div>
-              <div class="panel-subtitle" id="futuManualOrderHint">Place manual BUY/SELL limit order for Futu SIM account.</div>
+              <div class="panel-title"><span class="panel-title-icon">🛠️</span> Manual Rebalance Order</div>
+              <div class="panel-subtitle" id="futuManualOrderHint">Place manual BUY/SELL limit order for the FUTU simulation account.</div>
+            </div>
+            <div class="futu-manual-guard" id="futuManualGuard">
+              <strong>REAL account context detected.</strong> This form stays visible for workflow validation, but live order routing is still intentionally blocked. Use it as a preflight checklist, not as a live execution switch.
             </div>
             <div class="row" style="align-items:flex-end; gap:12px; flex-wrap:wrap;">
               <div class="field" style="min-width:130px;">

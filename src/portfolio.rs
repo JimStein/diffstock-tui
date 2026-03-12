@@ -42,6 +42,19 @@ pub const OPTIMIZER_SAMPLES: usize = 100_000;
 /// Risk-off overlay thresholds.
 pub const REGIME_NEGATIVE_BREADTH_THRESHOLD: f64 = 0.75;
 pub const REGIME_CVAR_RISK_OFF_THRESHOLD: f64 = 0.04;
+pub const REGIME_DEFENSIVE_BREADTH_ENTER: f64 = 0.55;
+pub const REGIME_DEFENSIVE_BREADTH_EXIT: f64 = 0.45;
+pub const REGIME_RISK_OFF_BREADTH_EXIT: f64 = 0.60;
+pub const REGIME_DEFENSIVE_CVAR_ENTER: f64 = 0.025;
+pub const REGIME_DEFENSIVE_CVAR_EXIT: f64 = 0.018;
+pub const REGIME_RISK_OFF_CVAR_EXIT: f64 = 0.03;
+pub const REGIME_DEFENSIVE_RETURN_ENTER: f64 = 0.08;
+pub const REGIME_DEFENSIVE_RETURN_EXIT: f64 = 0.12;
+pub const REGIME_RISK_OFF_RETURN_EXIT: f64 = 0.03;
+pub const REGIME_RISK_ON_MIN_GROSS: f64 = 0.85;
+pub const REGIME_DEFENSIVE_MAX_GROSS: f64 = 0.75;
+pub const REGIME_DEFENSIVE_MIN_GROSS: f64 = 0.35;
+pub const REGIME_RISK_OFF_MAX_GROSS: f64 = 0.20;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Data Structures
@@ -106,10 +119,69 @@ pub struct PortfolioAllocation {
     pub market_regime: MarketRegimeOverlay,
 }
 
+fn clamp_unit(value: f64) -> f64 {
+    value.clamp(0.0, 1.0)
+}
+
+fn lerp(start: f64, end: f64, t: f64) -> f64 {
+    start + (end - start) * clamp_unit(t)
+}
+
+fn normalized_above(value: f64, start: f64, end: f64) -> f64 {
+    if end <= start {
+        return 0.0;
+    }
+    clamp_unit((value - start) / (end - start))
+}
+
+fn normalized_below(value: f64, start: f64, end: f64) -> f64 {
+    if start <= end {
+        return 0.0;
+    }
+    clamp_unit((start - value) / (start - end))
+}
+
+fn state_with_hysteresis(
+    previous_state: MarketRegimeState,
+    defensive_pressure: f64,
+    risk_off_pressure: f64,
+) -> MarketRegimeState {
+    match previous_state {
+        MarketRegimeState::RiskOff => {
+            if risk_off_pressure >= 0.35 {
+                MarketRegimeState::RiskOff
+            } else if defensive_pressure >= 0.20 {
+                MarketRegimeState::Defensive
+            } else {
+                MarketRegimeState::RiskOn
+            }
+        }
+        MarketRegimeState::Defensive => {
+            if risk_off_pressure >= 0.65 {
+                MarketRegimeState::RiskOff
+            } else if defensive_pressure >= 0.20 || risk_off_pressure >= 0.30 {
+                MarketRegimeState::Defensive
+            } else {
+                MarketRegimeState::RiskOn
+            }
+        }
+        MarketRegimeState::RiskOn => {
+            if risk_off_pressure >= 0.80 {
+                MarketRegimeState::RiskOff
+            } else if defensive_pressure >= 0.45 || risk_off_pressure >= 0.35 {
+                MarketRegimeState::Defensive
+            } else {
+                MarketRegimeState::RiskOn
+            }
+        }
+    }
+}
+
 fn compute_market_regime_overlay(
     forecasts: &[AssetForecast],
     portfolio_expected_annual_return: f64,
     portfolio_cvar_95: f64,
+    previous_overlay: Option<&MarketRegimeOverlay>,
 ) -> MarketRegimeOverlay {
     let asset_count = forecasts.len().max(1) as f64;
     let bearish_breadth = forecasts
@@ -127,6 +199,46 @@ fn compute_market_regime_overlay(
         .filter(|forecast| forecast.sharpe <= 0.0)
         .count() as f64
         / asset_count;
+    let defensive_breadth_pressure = [bearish_breadth, negative_return_breadth, negative_sharpe_breadth]
+        .into_iter()
+        .map(|value| normalized_above(value, REGIME_DEFENSIVE_BREADTH_EXIT, REGIME_NEGATIVE_BREADTH_THRESHOLD))
+        .fold(0.0, f64::max);
+    let risk_off_breadth_pressure = [bearish_breadth, negative_return_breadth, negative_sharpe_breadth]
+        .into_iter()
+        .map(|value| normalized_above(value, REGIME_RISK_OFF_BREADTH_EXIT, 0.95))
+        .fold(0.0, f64::max);
+    let defensive_return_pressure = normalized_below(
+        portfolio_expected_annual_return,
+        REGIME_DEFENSIVE_RETURN_EXIT,
+        0.0,
+    );
+    let risk_off_return_pressure = normalized_below(
+        portfolio_expected_annual_return,
+        REGIME_RISK_OFF_RETURN_EXIT,
+        -0.10,
+    );
+    let defensive_cvar_pressure = normalized_above(
+        portfolio_cvar_95,
+        REGIME_DEFENSIVE_CVAR_EXIT,
+        REGIME_CVAR_RISK_OFF_THRESHOLD,
+    );
+    let risk_off_cvar_pressure = normalized_above(
+        portfolio_cvar_95,
+        REGIME_RISK_OFF_CVAR_EXIT,
+        0.08,
+    );
+
+    let defensive_pressure = defensive_breadth_pressure
+        .max(defensive_return_pressure)
+        .max(defensive_cvar_pressure);
+    let risk_off_pressure = risk_off_breadth_pressure
+        .max(risk_off_return_pressure)
+        .max(risk_off_cvar_pressure);
+
+    let previous_state = previous_overlay
+        .map(|overlay| overlay.state)
+        .unwrap_or(MarketRegimeState::RiskOn);
+    let state = state_with_hysteresis(previous_state, defensive_pressure, risk_off_pressure);
 
     let mut reasons = Vec::new();
     if bearish_breadth >= REGIME_NEGATIVE_BREADTH_THRESHOLD {
@@ -135,19 +247,37 @@ fn compute_market_regime_overlay(
             bearish_breadth * 100.0,
             REGIME_NEGATIVE_BREADTH_THRESHOLD * 100.0
         ));
+    } else if bearish_breadth >= REGIME_DEFENSIVE_BREADTH_ENTER {
+        reasons.push(format!(
+            "bearish breadth {:.0}% >= {:.0}%",
+            bearish_breadth * 100.0,
+            REGIME_DEFENSIVE_BREADTH_ENTER * 100.0
+        ));
     }
     if negative_return_breadth >= REGIME_NEGATIVE_BREADTH_THRESHOLD {
         reasons.push(format!(
-            "negative-return breadth {:.0}% >= {:.0}%",
+            "negative return breadth {:.0}% >= {:.0}%",
             negative_return_breadth * 100.0,
             REGIME_NEGATIVE_BREADTH_THRESHOLD * 100.0
+        ));
+    } else if negative_return_breadth >= REGIME_DEFENSIVE_BREADTH_ENTER {
+        reasons.push(format!(
+            "negative return breadth {:.0}% >= {:.0}%",
+            negative_return_breadth * 100.0,
+            REGIME_DEFENSIVE_BREADTH_ENTER * 100.0
         ));
     }
     if negative_sharpe_breadth >= REGIME_NEGATIVE_BREADTH_THRESHOLD {
         reasons.push(format!(
-            "negative-sharpe breadth {:.0}% >= {:.0}%",
+            "negative sharpe breadth {:.0}% >= {:.0}%",
             negative_sharpe_breadth * 100.0,
             REGIME_NEGATIVE_BREADTH_THRESHOLD * 100.0
+        ));
+    } else if negative_sharpe_breadth >= REGIME_DEFENSIVE_BREADTH_ENTER {
+        reasons.push(format!(
+            "negative sharpe breadth {:.0}% >= {:.0}%",
+            negative_sharpe_breadth * 100.0,
+            REGIME_DEFENSIVE_BREADTH_ENTER * 100.0
         ));
     }
     if portfolio_expected_annual_return <= 0.0 {
@@ -155,25 +285,54 @@ fn compute_market_regime_overlay(
             "portfolio expected annual return {:.2}% <= 0%",
             portfolio_expected_annual_return * 100.0
         ));
+    } else if portfolio_expected_annual_return <= REGIME_DEFENSIVE_RETURN_ENTER {
+        reasons.push(format!(
+            "portfolio expected annual return {:.2}% <= {:.2}%",
+            portfolio_expected_annual_return * 100.0,
+            REGIME_DEFENSIVE_RETURN_ENTER * 100.0
+        ));
     }
     if portfolio_cvar_95 >= REGIME_CVAR_RISK_OFF_THRESHOLD {
         reasons.push(format!(
-            "portfolio cvar {:.2}% >= {:.2}%",
+            "portfolio cvar(95) {:.2}% >= {:.2}%",
             portfolio_cvar_95 * 100.0,
             REGIME_CVAR_RISK_OFF_THRESHOLD * 100.0
         ));
+    } else if portfolio_cvar_95 >= REGIME_DEFENSIVE_CVAR_ENTER {
+        reasons.push(format!(
+            "portfolio cvar(95) {:.2}% >= {:.2}%",
+            portfolio_cvar_95 * 100.0,
+            REGIME_DEFENSIVE_CVAR_ENTER * 100.0
+        ));
     }
 
-    let (state, max_gross_exposure) = match reasons.len() {
-        0 | 1 => (MarketRegimeState::RiskOn, 1.0),
-        2 => (MarketRegimeState::Defensive, 0.5),
-        3 => (MarketRegimeState::Defensive, 0.25),
-        _ => (MarketRegimeState::RiskOff, 0.0),
+    let raw_state = if risk_off_pressure >= 0.80 {
+        MarketRegimeState::RiskOff
+    } else if defensive_pressure >= 0.45 || risk_off_pressure >= 0.35 {
+        MarketRegimeState::Defensive
+    } else {
+        MarketRegimeState::RiskOn
+    };
+    if state == previous_state && state != raw_state {
+        reasons.push(format!(
+            "hysteresis hold: remain {:?} until signals improve further",
+            state
+        ));
+    }
+
+    let max_gross_exposure = match state {
+        MarketRegimeState::RiskOn => lerp(1.0, REGIME_RISK_ON_MIN_GROSS, defensive_pressure.max(risk_off_pressure * 0.6)),
+        MarketRegimeState::Defensive => lerp(
+            REGIME_DEFENSIVE_MAX_GROSS,
+            REGIME_DEFENSIVE_MIN_GROSS,
+            defensive_pressure.max(risk_off_pressure),
+        ),
+        MarketRegimeState::RiskOff => lerp(REGIME_RISK_OFF_MAX_GROSS, 0.0, risk_off_pressure),
     };
 
     MarketRegimeOverlay {
         state,
-        max_gross_exposure,
+        max_gross_exposure: clamp_unit(max_gross_exposure),
         bearish_breadth,
         negative_return_breadth,
         negative_sharpe_breadth,
@@ -464,6 +623,13 @@ fn portfolio_cvar(weights: &[f64], forecasts: &[AssetForecast], alpha: f64) -> f
 ///   3. Select top portfolios by Sharpe, then pick the one with lowest CVaR among them
 ///   4. Apply vol-targeting overlay to scale leverage
 pub fn optimize_portfolio(forecasts: &[AssetForecast]) -> Result<PortfolioAllocation> {
+    optimize_portfolio_with_previous_regime(forecasts, None)
+}
+
+pub fn optimize_portfolio_with_previous_regime(
+    forecasts: &[AssetForecast],
+    previous_overlay: Option<&MarketRegimeOverlay>,
+) -> Result<PortfolioAllocation> {
     let n = forecasts.len();
     if n == 0 {
         return Err(anyhow::anyhow!("No asset forecasts to optimize"));
@@ -539,7 +705,7 @@ pub fn optimize_portfolio(forecasts: &[AssetForecast]) -> Result<PortfolioAlloca
         1.0
     };
 
-    let regime_overlay = compute_market_regime_overlay(forecasts, port_ret, cvar);
+    let regime_overlay = compute_market_regime_overlay(forecasts, port_ret, cvar, previous_overlay);
     let gross_exposure = leverage.min(regime_overlay.max_gross_exposure.max(0.0));
 
     let final_weights: Vec<(String, f64)> = forecasts
@@ -685,6 +851,14 @@ pub async fn run_portfolio_optimization_with_backend(
     symbols: &[String],
     backend: ComputeBackend,
 ) -> Result<PortfolioAllocation> {
+    run_portfolio_optimization_with_backend_and_regime(symbols, backend, None).await
+}
+
+pub async fn run_portfolio_optimization_with_backend_and_regime(
+    symbols: &[String],
+    backend: ComputeBackend,
+    previous_overlay: Option<MarketRegimeOverlay>,
+) -> Result<PortfolioAllocation> {
     info!(
         "=== DiffStock Portfolio Optimizer ===\n  Assets: {:?}\n  Horizon: {} days\n  MC Paths: {}\n  Backend: {:?}\n  Target Vol: {:.0}%",
         symbols,
@@ -743,7 +917,7 @@ pub async fn run_portfolio_optimization_with_backend(
     }
 
     // Step 2: Optimize
-    let allocation = optimize_portfolio(&forecasts)?;
+    let allocation = optimize_portfolio_with_previous_regime(&forecasts, previous_overlay.as_ref())?;
 
     // Step 3: Print results
     print_allocation(&allocation);
@@ -952,6 +1126,127 @@ mod tests {
         let alloc = optimize_portfolio(&forecasts).expect("single-asset optimization should succeed");
         assert!(alloc.leverage > 0.0, "Vol-target leverage should stay positive");
         assert!(alloc.max_gross_exposure >= 0.0 && alloc.max_gross_exposure <= 1.0);
+    }
+
+    #[test]
+    fn test_risk_on_overlay_stays_within_risk_on_band() {
+        let forecasts = vec![
+            AssetForecast {
+                symbol: "AAAA".to_string(),
+                current_price: 100.0,
+                expected_return: 0.01,
+                volatility: 0.02,
+                annual_return: 0.18,
+                annual_vol: 0.20,
+                sharpe: 0.9,
+                mc_period_returns: vec![0.03, 0.02, 0.01, 0.015, 0.01, 0.025, 0.02, 0.01],
+                p10_price: 99.0,
+                p50_price: 108.0,
+                p90_price: 118.0,
+            },
+            AssetForecast {
+                symbol: "BBBB".to_string(),
+                current_price: 120.0,
+                expected_return: 0.009,
+                volatility: 0.018,
+                annual_return: 0.16,
+                annual_vol: 0.18,
+                sharpe: 0.8,
+                mc_period_returns: vec![0.025, 0.02, 0.015, 0.01, 0.02, 0.018, 0.012, 0.01],
+                p10_price: 118.0,
+                p50_price: 131.0,
+                p90_price: 140.0,
+            },
+        ];
+
+        let alloc = optimize_portfolio(&forecasts).expect("risk-on optimization should succeed");
+        assert_eq!(alloc.market_regime.state, MarketRegimeState::RiskOn);
+        assert!(alloc.max_gross_exposure >= REGIME_RISK_ON_MIN_GROSS);
+        assert!(alloc.max_gross_exposure <= 1.0);
+    }
+
+    #[test]
+    fn test_defensive_overlay_uses_banded_continuous_gross() {
+        let forecasts = vec![
+            AssetForecast {
+                symbol: "AAAA".to_string(),
+                current_price: 100.0,
+                expected_return: 0.004,
+                volatility: 0.02,
+                annual_return: 0.02,
+                annual_vol: 0.22,
+                sharpe: 0.1,
+                mc_period_returns: vec![0.015, 0.01, 0.005, 0.0, 0.01, 0.008, 0.004, 0.002],
+                p10_price: 95.0,
+                p50_price: 101.0,
+                p90_price: 111.0,
+            },
+            AssetForecast {
+                symbol: "BBBB".to_string(),
+                current_price: 110.0,
+                expected_return: 0.003,
+                volatility: 0.018,
+                annual_return: 0.03,
+                annual_vol: 0.20,
+                sharpe: 0.15,
+                mc_period_returns: vec![0.014, 0.009, 0.004, 0.001, 0.009, 0.007, 0.003, 0.0],
+                p10_price: 106.0,
+                p50_price: 112.0,
+                p90_price: 121.0,
+            },
+        ];
+
+        let overlay = compute_market_regime_overlay(&forecasts, 0.03, 0.028, None);
+        assert_eq!(overlay.state, MarketRegimeState::Defensive);
+        assert!(overlay.max_gross_exposure <= REGIME_DEFENSIVE_MAX_GROSS);
+        assert!(overlay.max_gross_exposure >= REGIME_DEFENSIVE_MIN_GROSS);
+    }
+
+    #[test]
+    fn test_hysteresis_holds_defensive_until_signals_improve_further() {
+        let forecasts = vec![
+            AssetForecast {
+                symbol: "AAAA".to_string(),
+                current_price: 100.0,
+                expected_return: 0.006,
+                volatility: 0.02,
+                annual_return: 0.09,
+                annual_vol: 0.21,
+                sharpe: 0.3,
+                mc_period_returns: vec![0.02, 0.015, 0.01, 0.005, 0.01, 0.012, 0.008, 0.01],
+                p10_price: 97.0,
+                p50_price: 99.0,
+                p90_price: 110.0,
+            },
+            AssetForecast {
+                symbol: "BBBB".to_string(),
+                current_price: 100.0,
+                expected_return: 0.006,
+                volatility: 0.02,
+                annual_return: 0.09,
+                annual_vol: 0.21,
+                sharpe: 0.3,
+                mc_period_returns: vec![0.02, 0.015, 0.01, 0.005, 0.01, 0.012, 0.008, 0.01],
+                p10_price: 97.0,
+                p50_price: 103.0,
+                p90_price: 110.0,
+            },
+        ];
+
+        let previous_overlay = MarketRegimeOverlay {
+            state: MarketRegimeState::Defensive,
+            max_gross_exposure: 0.55,
+            bearish_breadth: 0.75,
+            negative_return_breadth: 0.50,
+            negative_sharpe_breadth: 0.50,
+            portfolio_expected_annual_return: 0.05,
+            portfolio_cvar_95: 0.03,
+            reasons: vec!["prior defensive state".to_string()],
+        };
+
+        let overlay = compute_market_regime_overlay(&forecasts, 0.09, 0.015, Some(&previous_overlay));
+        assert_eq!(overlay.state, MarketRegimeState::Defensive);
+        assert!(overlay.reasons.iter().any(|reason| reason.contains("hysteresis hold")));
     }
 
     #[test]

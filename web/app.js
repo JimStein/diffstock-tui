@@ -1584,6 +1584,19 @@ const getRegimeMeta = (state) => {
 const PORTFOLIO_WEIGHT_COLORS = ['#3b82f6', '#8b5cf6', '#00d4aa', '#f59e0b', '#ff4757', '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#a78bfa'];
 const REGIME_NEGATIVE_BREADTH_THRESHOLD = 0.75;
 const REGIME_CVAR_RISK_OFF_THRESHOLD = 0.04;
+const REGIME_DEFENSIVE_BREADTH_ENTER = 0.55;
+const REGIME_DEFENSIVE_BREADTH_EXIT = 0.45;
+const REGIME_RISK_OFF_BREADTH_EXIT = 0.60;
+const REGIME_DEFENSIVE_CVAR_ENTER = 0.025;
+const REGIME_DEFENSIVE_CVAR_EXIT = 0.018;
+const REGIME_RISK_OFF_CVAR_EXIT = 0.03;
+const REGIME_DEFENSIVE_RETURN_ENTER = 0.08;
+const REGIME_DEFENSIVE_RETURN_EXIT = 0.12;
+const REGIME_RISK_OFF_RETURN_EXIT = 0.03;
+const REGIME_RISK_ON_MIN_GROSS = 0.85;
+const REGIME_DEFENSIVE_MAX_GROSS = 0.75;
+const REGIME_DEFENSIVE_MIN_GROSS = 0.35;
+const REGIME_RISK_OFF_MAX_GROSS = 0.20;
 const REGIME_OVERLAY_SCOPES = {
   portfolio: {
     titlePrefix: '组合优化',
@@ -1610,6 +1623,267 @@ const formatAsOfText = (value) => {
   return `最近快照 ${date.toLocaleString()}`;
 };
 
+const getRegimeBand = (state) => {
+  const normalized = String(state || 'risk_on').trim().toLowerCase();
+  if (normalized === 'risk_off') {
+    return {
+      label: 'RiskOff 档',
+      grossRange: `${formatWeightPct(0)} - ${formatWeightPct(REGIME_RISK_OFF_MAX_GROSS)}`,
+      entry: `进入: 广度 >= ${formatWeightPct(REGIME_NEGATIVE_BREADTH_THRESHOLD, 0)} 或 CVaR >= ${formatWeightPct(REGIME_CVAR_RISK_OFF_THRESHOLD, 1)}`,
+      exit: `退出: 广度 < ${formatWeightPct(REGIME_RISK_OFF_BREADTH_EXIT, 0)} 且 CVaR < ${formatWeightPct(REGIME_RISK_OFF_CVAR_EXIT, 1)} 且年化收益 > ${formatWeightPct(REGIME_RISK_OFF_RETURN_EXIT, 0)}`,
+    };
+  }
+  if (normalized === 'defensive') {
+    return {
+      label: 'Defensive 档',
+      grossRange: `${formatWeightPct(REGIME_DEFENSIVE_MIN_GROSS)} - ${formatWeightPct(REGIME_DEFENSIVE_MAX_GROSS)}`,
+      entry: `进入: 广度 >= ${formatWeightPct(REGIME_DEFENSIVE_BREADTH_ENTER, 0)} 或 CVaR >= ${formatWeightPct(REGIME_DEFENSIVE_CVAR_ENTER, 1)} 或年化收益 <= ${formatWeightPct(REGIME_DEFENSIVE_RETURN_ENTER, 0)}`,
+      exit: `退出: 广度 < ${formatWeightPct(REGIME_DEFENSIVE_BREADTH_EXIT, 0)} 且 CVaR < ${formatWeightPct(REGIME_DEFENSIVE_CVAR_EXIT, 1)} 且年化收益 > ${formatWeightPct(REGIME_DEFENSIVE_RETURN_EXIT, 0)}`,
+    };
+  }
+  return {
+    label: 'RiskOn 档',
+    grossRange: `${formatWeightPct(REGIME_RISK_ON_MIN_GROSS)} - ${formatWeightPct(1)}`,
+    entry: `进入: 信号回暖后恢复部署`,
+    exit: `退出: 广度 >= ${formatWeightPct(REGIME_DEFENSIVE_BREADTH_ENTER, 0)} 或 CVaR >= ${formatWeightPct(REGIME_DEFENSIVE_CVAR_ENTER, 1)} 或年化收益 <= ${formatWeightPct(REGIME_DEFENSIVE_RETURN_ENTER, 0)}`,
+  };
+};
+
+const formatHysteresisStatus = (reasonList) => {
+  const held = Array.isArray(reasonList) && reasonList.some((reason) => /hysteresis hold/i.test(String(reason || '')));
+  return held ? '迟滞锁定中' : '未锁定';
+};
+
+const normalizedAbove = (value, start, end) => {
+  if (end <= start) return 0;
+  return clampUnit((Number(value || 0) - start) / (end - start));
+};
+
+const normalizedBelow = (value, start, end) => {
+  if (start <= end) return 0;
+  return clampUnit((start - Number(value || 0)) / (start - end));
+};
+
+const getThresholdGap = (value, threshold, direction) => {
+  if (!Number.isFinite(value) || !Number.isFinite(threshold)) return null;
+  if (direction === 'below') return value - threshold;
+  return threshold - value;
+};
+
+const formatThresholdGap = (gap, direction, digits = 1) => {
+  if (!Number.isFinite(gap)) return '无';
+  if (Math.abs(gap) < 0.0005) return '刚好到线';
+  if (gap > 0) return `还差 ${formatWeightPct(gap, digits)}`;
+  return direction === 'below'
+    ? `已低于 ${formatWeightPct(Math.abs(gap), digits)}`
+    : `已高于 ${formatWeightPct(Math.abs(gap), digits)}`;
+};
+
+const getRegimeThresholdRows = (state, regime, expectedAnnualReturn, cvar95) => {
+  const normalized = String(state || 'risk_on').trim().toLowerCase();
+  const rows = [
+    {
+      label: '看空广度',
+      current: clampUnit(regime.bearish_breadth),
+      direction: 'above',
+    },
+    {
+      label: '负收益广度',
+      current: clampUnit(regime.negative_return_breadth),
+      direction: 'above',
+    },
+    {
+      label: '负 Sharpe 广度',
+      current: clampUnit(regime.negative_sharpe_breadth),
+      direction: 'above',
+    },
+    {
+      label: '年化预期收益',
+      current: Number(expectedAnnualReturn || 0),
+      direction: 'below',
+    },
+    {
+      label: 'CVaR 95',
+      current: Number(cvar95 || 0),
+      direction: 'above',
+    },
+  ];
+
+  const thresholdsByState = {
+    risk_on: {
+      enterLabel: '进入 Defensive',
+      exitLabel: '退出 RiskOn',
+      enter: [
+        REGIME_DEFENSIVE_BREADTH_ENTER,
+        REGIME_DEFENSIVE_BREADTH_ENTER,
+        REGIME_DEFENSIVE_BREADTH_ENTER,
+        REGIME_DEFENSIVE_RETURN_ENTER,
+        REGIME_DEFENSIVE_CVAR_ENTER,
+      ],
+      exit: [
+        REGIME_DEFENSIVE_BREADTH_ENTER,
+        REGIME_DEFENSIVE_BREADTH_ENTER,
+        REGIME_DEFENSIVE_BREADTH_ENTER,
+        REGIME_DEFENSIVE_RETURN_ENTER,
+        REGIME_DEFENSIVE_CVAR_ENTER,
+      ],
+    },
+    defensive: {
+      enterLabel: '进入 RiskOff',
+      exitLabel: '退出 Defensive',
+      enter: [
+        REGIME_NEGATIVE_BREADTH_THRESHOLD,
+        REGIME_NEGATIVE_BREADTH_THRESHOLD,
+        REGIME_NEGATIVE_BREADTH_THRESHOLD,
+        0,
+        REGIME_CVAR_RISK_OFF_THRESHOLD,
+      ],
+      exit: [
+        REGIME_DEFENSIVE_BREADTH_EXIT,
+        REGIME_DEFENSIVE_BREADTH_EXIT,
+        REGIME_DEFENSIVE_BREADTH_EXIT,
+        REGIME_DEFENSIVE_RETURN_EXIT,
+        REGIME_DEFENSIVE_CVAR_EXIT,
+      ],
+    },
+    risk_off: {
+      enterLabel: '进入更紧档',
+      exitLabel: '退出 RiskOff',
+      enter: [null, null, null, null, null],
+      exit: [
+        REGIME_RISK_OFF_BREADTH_EXIT,
+        REGIME_RISK_OFF_BREADTH_EXIT,
+        REGIME_RISK_OFF_BREADTH_EXIT,
+        REGIME_RISK_OFF_RETURN_EXIT,
+        REGIME_RISK_OFF_CVAR_EXIT,
+      ],
+    },
+  };
+
+  const selected = thresholdsByState[normalized] || thresholdsByState.risk_on;
+  return {
+    enterLabel: selected.enterLabel,
+    exitLabel: selected.exitLabel,
+    rows: rows.map((row, index) => {
+      const enterThreshold = selected.enter[index];
+      const exitThreshold = selected.exit[index];
+      return {
+        ...row,
+        enterThreshold,
+        exitThreshold,
+        enterGap: getThresholdGap(row.current, enterThreshold, row.direction),
+        exitGap: getThresholdGap(row.current, exitThreshold, row.direction),
+      };
+    }),
+  };
+};
+
+const summarizeThresholdGap = (rows, kind, fallbackText) => {
+  const filtered = rows.filter((row) => Number.isFinite(row[`${kind}Gap`]));
+  if (filtered.length === 0) {
+    return {
+      value: '--',
+      sub: fallbackText,
+    };
+  }
+
+  const crossed = filtered
+    .filter((row) => row[`${kind}Gap`] <= 0)
+    .sort((a, b) => a[`${kind}Gap`] - b[`${kind}Gap`]);
+  if (crossed.length > 0) {
+    const row = crossed[0];
+    return {
+      value: '已达到',
+      sub: `${row.label} ${formatThresholdGap(row[`${kind}Gap`], row.direction)}`,
+    };
+  }
+
+  const nearest = [...filtered].sort((a, b) => a[`${kind}Gap`] - b[`${kind}Gap`])[0];
+  return {
+    value: formatThresholdGap(nearest[`${kind}Gap`], nearest.direction),
+    sub: `最近: ${nearest.label}`,
+  };
+};
+
+const getDominantGrossDriver = (state, regime, expectedAnnualReturn, cvar95) => {
+  const candidates = [
+    {
+      key: 'bearish_breadth',
+      label: '看空广度',
+      defensivePressure: normalizedAbove(regime.bearish_breadth, REGIME_DEFENSIVE_BREADTH_EXIT, REGIME_NEGATIVE_BREADTH_THRESHOLD),
+      riskOffPressure: normalizedAbove(regime.bearish_breadth, REGIME_RISK_OFF_BREADTH_EXIT, 0.95),
+    },
+    {
+      key: 'negative_return_breadth',
+      label: '负收益广度',
+      defensivePressure: normalizedAbove(regime.negative_return_breadth, REGIME_DEFENSIVE_BREADTH_EXIT, REGIME_NEGATIVE_BREADTH_THRESHOLD),
+      riskOffPressure: normalizedAbove(regime.negative_return_breadth, REGIME_RISK_OFF_BREADTH_EXIT, 0.95),
+    },
+    {
+      key: 'negative_sharpe_breadth',
+      label: '负 Sharpe 广度',
+      defensivePressure: normalizedAbove(regime.negative_sharpe_breadth, REGIME_DEFENSIVE_BREADTH_EXIT, REGIME_NEGATIVE_BREADTH_THRESHOLD),
+      riskOffPressure: normalizedAbove(regime.negative_sharpe_breadth, REGIME_RISK_OFF_BREADTH_EXIT, 0.95),
+    },
+    {
+      key: 'expected_return',
+      label: '年化预期收益',
+      defensivePressure: normalizedBelow(expectedAnnualReturn, REGIME_DEFENSIVE_RETURN_EXIT, 0),
+      riskOffPressure: normalizedBelow(expectedAnnualReturn, REGIME_RISK_OFF_RETURN_EXIT, -0.10),
+    },
+    {
+      key: 'cvar_95',
+      label: 'CVaR 95',
+      defensivePressure: normalizedAbove(cvar95, REGIME_DEFENSIVE_CVAR_EXIT, REGIME_CVAR_RISK_OFF_THRESHOLD),
+      riskOffPressure: normalizedAbove(cvar95, REGIME_RISK_OFF_CVAR_EXIT, 0.08),
+    },
+  ];
+
+  const normalized = String(state || 'risk_on').trim().toLowerCase();
+  const ranked = candidates.map((candidate) => {
+    let effectivePressure = candidate.defensivePressure;
+    let pressureSource = 'defensive';
+    if (normalized === 'risk_off') {
+      effectivePressure = candidate.riskOffPressure;
+      pressureSource = 'risk_off';
+    } else if (normalized === 'defensive') {
+      if (candidate.riskOffPressure >= candidate.defensivePressure) {
+        effectivePressure = candidate.riskOffPressure;
+        pressureSource = 'risk_off';
+      }
+    } else if (candidate.riskOffPressure * 0.6 > candidate.defensivePressure) {
+      effectivePressure = candidate.riskOffPressure * 0.6;
+      pressureSource = 'risk_off_scaled';
+    }
+
+    return {
+      ...candidate,
+      effectivePressure,
+      pressureSource,
+    };
+  }).sort((a, b) => b.effectivePressure - a.effectivePressure);
+
+  const dominant = ranked[0] || null;
+  if (!dominant) {
+    return {
+      key: null,
+      label: '无',
+      detail: '当前没有显著的 gross 压缩驱动项。',
+    };
+  }
+
+  const sourceLabel = dominant.pressureSource === 'risk_off'
+    ? 'RiskOff pressure'
+    : dominant.pressureSource === 'risk_off_scaled'
+      ? 'RiskOff pressure x 0.6'
+      : 'Defensive pressure';
+  return {
+    key: dominant.key,
+    label: dominant.label,
+    detail: `${sourceLabel} ${formatWeightPct(dominant.effectivePressure)}`,
+  };
+};
+
 const translateRegimeReason = (reason) => {
   const text = String(reason || '').trim();
   if (!text) return '无';
@@ -1634,9 +1908,20 @@ const translateRegimeReason = (reason) => {
     return `组合年化预期收益 ${match[1]}%，已经跌到 0% 以下。`;
   }
 
+  match = text.match(/portfolio expected annual return ([\-\d.]+)% <= ([\d.]+)%/i);
+  if (match) {
+    return `组合年化预期收益 ${match[1]}%，已经低于防守阈值 ${match[2]}%。`;
+  }
+
   match = text.match(/portfolio cvar\(95\) ([\-\d.]+)% >= ([\d.]+)%/i);
   if (match) {
     return `组合 CVaR95 ${match[1]}%，已经高于风险阈值 ${match[2]}%。`;
+  }
+
+  match = text.match(/hysteresis hold: remain (.+) until signals improve further/i);
+  if (match) {
+    const stateText = formatRegimeLabel(match[1]);
+    return `迟滞保护仍然生效，当前继续保持 ${stateText} 状态，直到信号进一步改善。`;
   }
 
   return text;
@@ -1663,9 +1948,49 @@ const renderRegimeOverlay = (scope, alloc, asOf) => {
 
   const scopeMeta = REGIME_OVERLAY_SCOPES[scope] || REGIME_OVERLAY_SCOPES.portfolio;
   if (!alloc || typeof alloc !== 'object') {
-    panel.classList.remove('is-visible');
+    panel.classList.add('is-visible');
+    badge.className = 'regime-badge';
+    badge.textContent = 'Pending';
     title.textContent = `${scopeMeta.titlePrefix} Regime Overlay`;
     subtitle.textContent = scopeMeta.emptyText;
+    metrics.innerHTML = `
+      <div class='overlay-metric-card'>
+        <div class='overlay-metric-label'>最大总仓位</div>
+        <div class='overlay-metric-value'>--</div>
+        <div class='overlay-metric-sub'>等待最新 allocation</div>
+      </div>
+      <div class='overlay-metric-card'>
+        <div class='overlay-metric-label'>目标现金</div>
+        <div class='overlay-metric-value'>--</div>
+        <div class='overlay-metric-sub'>等待最新 allocation</div>
+      </div>
+      <div class='overlay-metric-card'>
+        <div class='overlay-metric-label'>已部署仓位</div>
+        <div class='overlay-metric-value'>--</div>
+        <div class='overlay-metric-sub'>等待最新 allocation</div>
+      </div>
+      <div class='overlay-metric-card'>
+        <div class='overlay-metric-label'>触发原因</div>
+        <div class='overlay-metric-value'>0</div>
+        <div class='overlay-metric-sub'>当前无新快照</div>
+      </div>
+    `;
+    exposureWrap.innerHTML = `
+      <div class='overlay-exposure-header'>
+        <span>目标分配结构</span>
+        <span>等待候选池/回测产生最新 allocation</span>
+      </div>
+      <div class='overlay-exposure-bar'><div class='overlay-exposure-seg cash' style='flex-basis:100%;'>等待数据</div></div>
+      <div class='overlay-exposure-legend'><span class='overlay-exposure-legend-item'><span class='overlay-exposure-legend-dot' style='background:#6b7a99'></span>暂无可视化数据</span></div>
+    `;
+    diagnostics.innerHTML = `
+      <div class='overlay-section-label'>广度诊断</div>
+      <div class='overlay-reasons-empty'>当前还没有最新的 regime 快照，所以阈值条和组合检查暂时不显示。</div>
+    `;
+    reasons.innerHTML = `
+      <div class='overlay-section-label'>触发原因</div>
+      <div class='overlay-reasons-empty'>先执行一次 portfolio optimize、paper targets update，或让 backtest 进入首次 rebalance，这里就会出现实际内容。</div>
+    `;
     return;
   }
 
@@ -1680,6 +2005,12 @@ const renderRegimeOverlay = (scope, alloc, asOf) => {
   const expectedAnnualReturn = Number(alloc.expected_annual_return || 0);
   const cvar95 = Math.abs(Number(alloc.cvar_95 || 0));
   const asOfText = formatAsOfText(asOf);
+  const band = getRegimeBand(regime.state);
+  const hysteresisStatus = formatHysteresisStatus(reasonList);
+  const thresholdInfo = getRegimeThresholdRows(regime.state, regime, expectedAnnualReturn, cvar95);
+  const nearestEnter = summarizeThresholdGap(thresholdInfo.rows, 'enter', '当前档位没有更紧的进入阈值');
+  const nearestExit = summarizeThresholdGap(thresholdInfo.rows, 'exit', '当前档位没有更松的退出阈值');
+  const dominantDriver = getDominantGrossDriver(regime.state, regime, expectedAnnualReturn, cvar95);
 
   panel.classList.add('is-visible');
   badge.className = `regime-badge ${stateMeta.stateClass}`;
@@ -1707,6 +2038,31 @@ const renderRegimeOverlay = (scope, alloc, asOf) => {
       <div class='overlay-metric-label'>触发原因</div>
       <div class='overlay-metric-value'>${reasonCount}</div>
       <div class='overlay-metric-sub'>当前生效</div>
+    </div>
+    <div class='overlay-metric-card'>
+      <div class='overlay-metric-label'>当前档位</div>
+      <div class='overlay-metric-value'>${escapeHtmlText(band.label)}</div>
+      <div class='overlay-metric-sub'>gross 区间 ${escapeHtmlText(band.grossRange)}</div>
+    </div>
+    <div class='overlay-metric-card'>
+      <div class='overlay-metric-label'>Hysteresis</div>
+      <div class='overlay-metric-value'>${escapeHtmlText(hysteresisStatus)}</div>
+      <div class='overlay-metric-sub'>防止阈值附近反复切档</div>
+    </div>
+    <div class='overlay-metric-card'>
+      <div class='overlay-metric-label'>进入阈值</div>
+      <div class='overlay-metric-value'>${escapeHtmlText(nearestEnter.value)}</div>
+      <div class='overlay-metric-sub'>${escapeHtmlText(nearestEnter.sub)}</div>
+    </div>
+    <div class='overlay-metric-card'>
+      <div class='overlay-metric-label'>退出阈值</div>
+      <div class='overlay-metric-value'>${escapeHtmlText(nearestExit.value)}</div>
+      <div class='overlay-metric-sub'>${escapeHtmlText(nearestExit.sub)}</div>
+    </div>
+    <div class='overlay-metric-card'>
+      <div class='overlay-metric-label'>主导指标</div>
+      <div class='overlay-metric-value'>${escapeHtmlText(dominantDriver.label)}</div>
+      <div class='overlay-metric-sub'>${escapeHtmlText(dominantDriver.detail)}</div>
     </div>
   `;
 
@@ -1746,31 +2102,56 @@ const renderRegimeOverlay = (scope, alloc, asOf) => {
   `;
 
   const breadthRows = [
-    { label: '看空广度', hint: `风险关闭阈值 ${formatWeightPct(REGIME_NEGATIVE_BREADTH_THRESHOLD, 0)}`, value: clampUnit(regime.bearish_breadth), warn: 0.5, danger: REGIME_NEGATIVE_BREADTH_THRESHOLD },
-    { label: '负收益广度', hint: `风险关闭阈值 ${formatWeightPct(REGIME_NEGATIVE_BREADTH_THRESHOLD, 0)}`, value: clampUnit(regime.negative_return_breadth), warn: 0.5, danger: REGIME_NEGATIVE_BREADTH_THRESHOLD },
-    { label: '负 Sharpe 广度', hint: `风险关闭阈值 ${formatWeightPct(REGIME_NEGATIVE_BREADTH_THRESHOLD, 0)}`, value: clampUnit(regime.negative_sharpe_breadth), warn: 0.5, danger: REGIME_NEGATIVE_BREADTH_THRESHOLD },
+    { key: 'bearish_breadth', label: '看空广度', hint: `风险关闭阈值 ${formatWeightPct(REGIME_NEGATIVE_BREADTH_THRESHOLD, 0)}`, value: clampUnit(regime.bearish_breadth), warn: 0.5, danger: REGIME_NEGATIVE_BREADTH_THRESHOLD },
+    { key: 'negative_return_breadth', label: '负收益广度', hint: `风险关闭阈值 ${formatWeightPct(REGIME_NEGATIVE_BREADTH_THRESHOLD, 0)}`, value: clampUnit(regime.negative_return_breadth), warn: 0.5, danger: REGIME_NEGATIVE_BREADTH_THRESHOLD },
+    { key: 'negative_sharpe_breadth', label: '负 Sharpe 广度', hint: `风险关闭阈值 ${formatWeightPct(REGIME_NEGATIVE_BREADTH_THRESHOLD, 0)}`, value: clampUnit(regime.negative_sharpe_breadth), warn: 0.5, danger: REGIME_NEGATIVE_BREADTH_THRESHOLD },
   ];
   diagnostics.innerHTML = `
     <div class='overlay-section-label'>广度诊断</div>
     ${breadthRows.map((row) => {
       const fillClass = row.value >= row.danger ? 'danger' : row.value >= row.warn ? 'warn' : '';
+      const dominantClass = dominantDriver.key === row.key ? 'is-dominant' : '';
       return `
-        <div class='overlay-diagnostic-row'>
+        <div class='overlay-diagnostic-row ${dominantClass}'>
           <div class='overlay-diagnostic-name'>${row.label}<div class='overlay-diagnostic-meta'>${row.hint}</div></div>
           <div class='overlay-diagnostic-track'><div class='overlay-diagnostic-fill ${fillClass}' style='width:${(row.value * 100).toFixed(1)}%;'></div></div>
-          <div class='overlay-diagnostic-value'>${formatWeightPct(row.value, 0)}</div>
+          <div class='overlay-diagnostic-value'>${formatWeightPct(row.value, 0)}${dominantDriver.key === row.key ? '<div class="overlay-diagnostic-badge">主导</div>' : ''}</div>
         </div>`;
     }).join('')}
     <div class='overlay-section-label'>组合检查</div>
-    <div class='overlay-diagnostic-row'>
+    <div class='overlay-diagnostic-row ${dominantDriver.key === 'expected_return' ? 'is-dominant' : ''}'>
       <div class='overlay-diagnostic-name'>年化预期收益<div class='overlay-diagnostic-meta'>低于 0% 直接偏防守</div></div>
       <div class='overlay-diagnostic-track'><div class='overlay-diagnostic-fill ${expectedAnnualReturn < 0 ? 'danger' : expectedAnnualReturn < 0.08 ? 'warn' : ''}' style='width:${(clampUnit(Math.abs(expectedAnnualReturn) / 0.25) * 100).toFixed(1)}%;'></div></div>
-      <div class='overlay-diagnostic-value'>${formatWeightPct(expectedAnnualReturn, 1)}</div>
+      <div class='overlay-diagnostic-value'>${formatWeightPct(expectedAnnualReturn, 1)}${dominantDriver.key === 'expected_return' ? '<div class="overlay-diagnostic-badge">主导</div>' : ''}</div>
     </div>
-    <div class='overlay-diagnostic-row'>
+    <div class='overlay-diagnostic-row ${dominantDriver.key === 'cvar_95' ? 'is-dominant' : ''}'>
       <div class='overlay-diagnostic-name'>CVaR 95<div class='overlay-diagnostic-meta'>风险关闭阈值 ${formatWeightPct(REGIME_CVAR_RISK_OFF_THRESHOLD, 1)}</div></div>
       <div class='overlay-diagnostic-track'><div class='overlay-diagnostic-fill ${cvar95 >= REGIME_CVAR_RISK_OFF_THRESHOLD ? 'danger' : cvar95 >= REGIME_CVAR_RISK_OFF_THRESHOLD * 0.6 ? 'warn' : ''}' style='width:${(clampUnit(cvar95 / 0.25) * 100).toFixed(1)}%;'></div></div>
-      <div class='overlay-diagnostic-value'>${formatWeightPct(Number(alloc.cvar_95 || 0), 1)}</div>
+      <div class='overlay-diagnostic-value'>${formatWeightPct(Number(alloc.cvar_95 || 0), 1)}${dominantDriver.key === 'cvar_95' ? '<div class="overlay-diagnostic-badge">主导</div>' : ''}</div>
+    </div>
+    <div class='overlay-section-label'>档位与迟滞</div>
+    <div class='overlay-reason-item'>
+      <strong>${escapeHtmlText(band.label)}</strong><br>
+      gross 区间: ${escapeHtmlText(band.grossRange)}<br>
+      ${escapeHtmlText(band.entry)}<br>
+      ${escapeHtmlText(band.exit)}<br>
+      当前迟滞状态: ${escapeHtmlText(hysteresisStatus)}
+    </div>
+    <div class='overlay-section-label'>阈值距离与主导项</div>
+    <div class='overlay-threshold-grid'>
+      ${thresholdInfo.rows.map((row) => `
+        <div class='overlay-reason-item'>
+          <div class='overlay-threshold-title'>${escapeHtmlText(row.label)}</div>
+          <div class='overlay-threshold-line'><span>当前值</span><span>${formatWeightPct(row.current, 1)}</span></div>
+          <div class='overlay-threshold-line'><span>${escapeHtmlText(thresholdInfo.enterLabel)}</span><span>${row.enterThreshold == null ? '最紧档' : formatThresholdGap(row.enterGap, row.direction)}</span></div>
+          <div class='overlay-threshold-line'><span>${escapeHtmlText(thresholdInfo.exitLabel)}</span><span>${row.exitThreshold == null ? '最宽档' : formatThresholdGap(row.exitGap, row.direction)}</span></div>
+        </div>`).join('')}
+      <div class='overlay-reason-item'>
+        <div class='overlay-threshold-title'>主导 max_gross_exposure</div>
+        <div class='overlay-threshold-line'><span>当前主导项</span><span class='overlay-threshold-emphasis'>${escapeHtmlText(dominantDriver.label)}</span></div>
+        <div class='overlay-threshold-line'><span>有效压力</span><span>${escapeHtmlText(dominantDriver.detail)}</span></div>
+        <div class='overlay-threshold-line'><span>解释</span><span>当前 gross 压缩主要由这一项决定</span></div>
+      </div>
     </div>
   `;
 
@@ -4172,6 +4553,84 @@ const setFutuManualOrderHint = (text, mode = '') => {
   if (mode === 'err') futuManualOrderHint.classList.add('down');
 };
 
+const renderFutuTradingChecklist = (context) => {
+  const grid = document.getElementById('futuChecklistGrid');
+  if (!grid) return;
+
+  const items = [
+    {
+      label: 'Account Selected',
+      status: context.hasAccount ? 'READY' : 'MISSING',
+      tone: context.hasAccount ? 'ok' : 'warn',
+      text: context.hasAccount
+        ? `Active account #${context.selectedAccId} is selected for ${context.selectedMarket} routing.`
+        : 'Choose and apply a FUTU account before considering live rollout.',
+    },
+    {
+      label: 'Trading Environment',
+      status: context.isRealMode ? 'REAL' : 'SIM',
+      tone: context.isRealMode ? 'warn' : 'ok',
+      text: context.isRealMode
+        ? 'REAL account context is visible. This is useful for inspection, but not enough to arm live execution.'
+        : 'Simulation environment is selected, which is the correct rehearsal mode before going live.',
+    },
+    {
+      label: 'Gateway Link',
+      status: context.connected ? 'ONLINE' : 'OFFLINE',
+      tone: context.connected ? 'ok' : 'warn',
+      text: context.connected
+        ? `OpenD gateway is connected at ${context.connHostPort}.`
+        : 'Gateway is not connected. Live readiness cannot be assessed while broker connectivity is offline.',
+    },
+    {
+      label: 'Executor State',
+      status: context.running ? 'RUNNING' : 'IDLE',
+      tone: context.running ? 'ok' : 'warn',
+      text: context.running
+        ? 'FUTU executor loop is active and can react to signals.'
+        : 'Start the FUTU executor to validate the end-to-end operational path.',
+    },
+    {
+      label: 'Market Data',
+      status: context.dataFeedReady ? 'READY' : 'DEGRADED',
+      tone: context.dataFeedReady ? 'ok' : 'warn',
+      text: context.dataFeedReady
+        ? `Realtime data path is healthy via ${context.dataLiveSource}.`
+        : `Realtime data path is not fully healthy. Current source: ${context.dataLiveSource}.`,
+    },
+    {
+      label: 'Risk Gate',
+      status: context.hasRiskGate ? 'READY' : 'PENDING',
+      tone: context.hasRiskGate ? 'ok' : 'warn',
+      text: context.hasRiskGate
+        ? 'Latest regime overlay exists, so cash cap and gross exposure controls are available.'
+        : 'No latest allocation overlay yet. Run candidate optimization before trusting execution limits.',
+    },
+    {
+      label: 'Broker Unlock',
+      status: 'UNKNOWN',
+      tone: 'unknown',
+      text: 'Unlock status is not surfaced to the WebUI yet. Backend/API wiring is still needed before this can become a hard readiness check.',
+    },
+    {
+      label: 'Order Gate',
+      status: context.isRealMode ? 'DISABLED' : 'SIM ONLY',
+      tone: context.isRealMode ? 'fail' : 'ok',
+      text: context.isRealMode
+        ? 'Live order placement remains intentionally blocked by the backend safety gate in this build.'
+        : 'Orders can be submitted only to the simulation environment. Real order routing is still disarmed.',
+    },
+  ];
+
+  grid.innerHTML = items.map((item) => `
+    <div class='futu-checklist-item ${item.tone}'>
+      <div class='futu-checklist-label'>${escapeHtmlText(item.label)}</div>
+      <div class='futu-checklist-status'>${escapeHtmlText(item.status)}</div>
+      <div class='futu-checklist-text'>${escapeHtmlText(item.text)}</div>
+    </div>
+  `).join('');
+};
+
 const submitFutuManualOrder = async () => {
   const selectedEnv = String(latestFutuStatus?.selected_trd_env || '').toUpperCase();
   if (selectedEnv && selectedEnv !== 'SIMULATE') {
@@ -4798,6 +5257,14 @@ if (futuStrategyCapitalApplyBtn) {
 if (futuManualSubmitBtn) {
   futuManualSubmitBtn.addEventListener('click', async () => {
     if (futuManualSubmitBtn.disabled) return;
+    const selectedEnv = String(latestFutuStatus?.selected_trd_env || '').toUpperCase();
+    if (selectedEnv === 'REAL') {
+      const confirmed = window.confirm('REAL account context is selected. Live orders are still blocked by the safety gate in this build. Continue only to validate the form and see the safety warning?');
+      if (!confirmed) return;
+      setFutuManualOrderHint('REAL account selected. Order form validated, but live order submission remains blocked by the safety gate.', 'err');
+      setStatus('REAL trading is still blocked by the safety gate', 'err');
+      return;
+    }
     futuManualSubmitBtn.disabled = true;
     const prev = futuManualSubmitBtn.textContent;
     futuManualSubmitBtn.textContent = 'Submitting...';
@@ -5271,6 +5738,23 @@ const refreshFutu = async () => {
     const futuExecCapital = document.getElementById('futuExecCapital');
     const futuRealModeBadge = document.getElementById('futuRealModeBadge');
     const futuRealSafetyHint = document.getElementById('futuRealSafetyHint');
+    const futuModeCardSubtitle = document.getElementById('futuModeCardSubtitle');
+    const futuModeHeroCard = document.getElementById('futuModeHeroCard');
+    const futuModeHeroTitle = document.getElementById('futuModeHeroTitle');
+    const futuModeHeroText = document.getElementById('futuModeHeroText');
+    const futuModeHeroPill = document.getElementById('futuModeHeroPill');
+    const futuModeSafetyCard = document.getElementById('futuModeSafetyCard');
+    const futuModeSafetyTitle = document.getElementById('futuModeSafetyTitle');
+    const futuModeSafetyText = document.getElementById('futuModeSafetyText');
+    const futuModeRouteCard = document.getElementById('futuModeRouteCard');
+    const futuModeRouteTitle = document.getElementById('futuModeRouteTitle');
+    const futuModeRouteText = document.getElementById('futuModeRouteText');
+    const futuLiveGateCard = document.getElementById('futuLiveGateCard');
+    const futuLiveGateTitle = document.getElementById('futuLiveGateTitle');
+    const futuLiveGateText = document.getElementById('futuLiveGateText');
+    const futuLiveGatePill = document.getElementById('futuLiveGatePill');
+    const futuManualOrderPanel = document.getElementById('futuManualOrderPanel');
+    const futuManualGuard = document.getElementById('futuManualGuard');
     const futuExecPool = document.getElementById('futuExecPool');
     const futuConnStatus = document.getElementById('futuConnStatus');
     const futuConnSummary = document.getElementById('futuConnSummary');
@@ -5384,8 +5868,83 @@ const refreshFutu = async () => {
     if (futuAccPill) { futuAccPill.style.display = selectedAccId && selectedAccId !== '--' ? '' : 'none'; }
     if (futuAccIdBadge) futuAccIdBadge.textContent = `#${selectedAccId}`;
     if (futuCtrlAccount) futuCtrlAccount.textContent = `${selectedEnv}/${selectedMarket} · #${selectedAccId}`;
-    if (futuRealModeBadge) futuRealModeBadge.style.display = isRealMode ? '' : 'none';
-    if (futuRealSafetyHint) futuRealSafetyHint.style.display = isRealMode ? '' : 'none';
+    if (futuTabBadge) {
+      futuTabBadge.textContent = isRealMode ? 'REAL' : 'SIM';
+      futuTabBadge.classList.toggle('mode-real', isRealMode);
+      futuTabBadge.classList.toggle('mode-sim', !isRealMode);
+    }
+    if (futuRealModeBadge) {
+      futuRealModeBadge.textContent = isRealMode ? 'REAL MODE' : 'SIM MODE';
+      futuRealModeBadge.classList.toggle('sim', !isRealMode);
+    }
+    if (futuRealSafetyHint) {
+      futuRealSafetyHint.textContent = isRealMode
+        ? 'REAL ORDER DISABLED · PLACEHOLDER ONLY'
+        : 'SIM ORDERS ACTIVE · SAFE SANDBOX';
+      futuRealSafetyHint.classList.toggle('sim', !isRealMode);
+    }
+    if (futuModeHeroCard) {
+      futuModeHeroCard.classList.toggle('mode-real', isRealMode);
+      futuModeHeroCard.classList.toggle('mode-sim', !isRealMode);
+    }
+    if (futuModeHeroPill) {
+      futuModeHeroPill.textContent = isRealMode ? 'REAL' : 'SIM';
+      futuModeHeroPill.classList.toggle('mode-real', isRealMode);
+      futuModeHeroPill.classList.toggle('mode-sim', !isRealMode);
+    }
+    if (futuModeSafetyCard) {
+      futuModeSafetyCard.classList.toggle('mode-real', isRealMode);
+      futuModeSafetyCard.classList.toggle('mode-sim', !isRealMode);
+    }
+    if (futuModeRouteCard) {
+      futuModeRouteCard.classList.toggle('mode-real', isRealMode);
+      futuModeRouteCard.classList.toggle('mode-sim', !isRealMode);
+    }
+    if (futuModeHeroTitle) {
+      futuModeHeroTitle.textContent = isRealMode ? 'REAL ACCOUNT ROUTE' : 'SIMULATION SANDBOX';
+    }
+    if (futuModeHeroText) {
+      futuModeHeroText.textContent = isRealMode
+        ? 'A REAL trading environment is selected. Live order placement remains safety-blocked until the backend explicitly enables real execution.'
+        : 'Orders currently target the FUTU simulate environment, suitable for dry runs and execution rehearsal.';
+    }
+    if (futuModeCardSubtitle) {
+      futuModeCardSubtitle.textContent = isRealMode
+        ? 'Real account context is visible now so this page can evolve into a true live-trading console later. At the moment, real order submission is still intentionally blocked.'
+        : 'Simulation sandbox selected. This page is ready to evolve into real trading controls once live order routing is enabled.';
+    }
+    if (futuModeSafetyTitle) {
+      futuModeSafetyTitle.textContent = isRealMode ? 'Live orders blocked for safety' : 'Simulation orders allowed';
+    }
+    if (futuModeSafetyText) {
+      futuModeSafetyText.textContent = isRealMode
+        ? 'The account can be inspected in REAL mode, but order placement stays in placeholder mode until the real-trading gate is opened deliberately.'
+        : 'Manual orders and rebalance orders stay inside the sandbox account, which is the safest rehearsal path before real deployment.';
+    }
+    if (futuModeRouteTitle) {
+      futuModeRouteTitle.textContent = `Account #${selectedAccId} · ${String(selectedEnv || '--').toUpperCase()}`;
+    }
+    if (futuModeRouteText) {
+      const connState = st.connected ? 'gateway connected' : 'gateway waiting';
+      futuModeRouteText.textContent = `${selectedMarket} market · ${connHostPort} · ${connState}${st.running ? ' · executor armed' : ' · executor idle'}`;
+    }
+    if (futuLiveGateCard) {
+      futuLiveGateCard.classList.toggle('sim', !isRealMode);
+      futuLiveGateCard.classList.toggle('real-disabled', isRealMode);
+    }
+    if (futuLiveGateTitle) {
+      futuLiveGateTitle.textContent = isRealMode ? 'LIVE TRADING DISABLED' : 'SIMULATION ONLY';
+    }
+    if (futuLiveGateText) {
+      futuLiveGateText.textContent = isRealMode
+        ? 'A REAL account is selected, but the backend still blocks live order placement. This page is prepared for future rollout, not yet armed for production trading.'
+        : 'FUTU is running in sandbox mode. This is the correct place to rehearse workflows before opening the live trading gate.';
+    }
+    if (futuLiveGatePill) {
+      futuLiveGatePill.textContent = isRealMode ? 'DISABLED' : 'SIM ONLY';
+      futuLiveGatePill.classList.toggle('sim', !isRealMode);
+      futuLiveGatePill.classList.toggle('real-disabled', isRealMode);
+    }
     if (futuAccountApplyHint) futuAccountApplyHint.textContent = `Preferred account: #${preferredAccId} · Active account: #${selectedAccId}`;
     if (futuAccountSelect) {
       if (!futuAccountListCache.length) {
@@ -5408,6 +5967,36 @@ const refreshFutu = async () => {
         ? `Current rebalance cap: $${cap.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
         : 'Current rebalance cap: Unlimited';
     }
+    if (futuManualOrderHint) {
+      futuManualOrderHint.textContent = isRealMode
+        ? 'REAL account selected. Manual order UI is visible for workflow validation, but live order placement is still blocked by the safety gate.'
+        : 'Place manual BUY/SELL limit order for the FUTU simulation account.';
+    }
+    if (futuManualOrderPanel) {
+      futuManualOrderPanel.classList.toggle('real-mode', isRealMode);
+    }
+    if (futuManualSubmitBtn) {
+      futuManualSubmitBtn.classList.toggle('futu-manual-submit-real', isRealMode);
+      futuManualSubmitBtn.textContent = isRealMode ? 'Validate Real Order Form' : 'Submit Manual Order';
+      futuManualSubmitBtn.title = isRealMode
+        ? 'REAL trading is blocked; use this button only to validate the order workflow.'
+        : 'Submit a manual order to the FUTU simulation account.';
+    }
+    if (futuManualGuard) {
+      futuManualGuard.style.display = isRealMode ? '' : 'none';
+    }
+    renderFutuTradingChecklist({
+      hasAccount: !!selectedAccId && selectedAccId !== '--',
+      selectedAccId,
+      selectedMarket,
+      isRealMode,
+      connected: !!st.connected,
+      running: !!st.running,
+      connHostPort,
+      dataFeedReady: !!st.data_ws_connected || String(st.data_live_source || '').toLowerCase().includes('polygon'),
+      dataLiveSource: String(st.data_live_source || 'unknown'),
+      hasRiskGate: !!st?.latest_allocation?.market_regime,
+    });
     if (futuCtrlCapital) {
       const acctNav = Number(st?.latest_snapshot?.total_value);
       const stratNav = Number(st?.latest_strategy_snapshot?.total_value);
