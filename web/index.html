@@ -1769,10 +1769,19 @@
       }
       .overlay-diagnostic-name {
         color: var(--text-2);
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
       }
       .overlay-diagnostic-value {
         text-align: right;
         color: var(--muted);
+      }
+      .overlay-diagnostic-meta {
+        font-size: 10px;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-weight: 400;
       }
       .overlay-diagnostic-track {
         position: relative;
@@ -3162,6 +3171,29 @@
           </div>
           <div id="paperKpiGrid" class="paper-kpi-grid"></div>
         </div>
+        <div id="paperOverlayPanel" class="panel portfolio-overlay-panel">
+          <div class="panel-header">
+            <div class="panel-title"><span class="panel-title-icon">R</span> Regime Overlay</div>
+            <div class="panel-subtitle">Paper 当前候选池使用的风控叠加层与现金约束。</div>
+          </div>
+          <div class="portfolio-overlay-body">
+            <div class="portfolio-overlay-main">
+              <div class="portfolio-overlay-hero">
+                <div class="portfolio-overlay-title">
+                  <h3 id="paperRegimeTitle">等待候选池优化</h3>
+                  <p id="paperRegimeSubtitle">执行一次 paper 优化后，这里会显示 regime、现金权重和触发原因。</p>
+                </div>
+                <div id="paperRegimeBadge" class="regime-badge">Pending</div>
+              </div>
+              <div id="paperOverlayMetrics" class="portfolio-overlay-metrics"></div>
+              <div id="paperExposureWrap" class="overlay-exposure-wrap"></div>
+            </div>
+            <div class="portfolio-overlay-side">
+              <div id="paperDiagnostics" class="overlay-diagnostics"></div>
+              <div id="paperReasons" class="overlay-reasons"></div>
+            </div>
+          </div>
+        </div>
         <div class="panel" style="padding:12px;">
           <div class="chart-summary-strip" id="chartSummaryStrip" style="display:none;"></div>
           <div class="range-group" id="paperRangeGroup">
@@ -3359,6 +3391,30 @@
                 <div class="panel-subtitle">Live FUTU simulation performance snapshot</div>
               </div>
               <div id="futuConnKpiGrid" class="paper-kpi-grid"></div>
+            </div>
+
+            <div id="futuOverlayPanel" class="panel portfolio-overlay-panel">
+              <div class="panel-header">
+                <div class="panel-title"><span class="panel-title-icon">R</span> Regime Overlay</div>
+                <div class="panel-subtitle">FUTU 策略袖口沿用 paper 候选池优化出来的风险叠加层。</div>
+              </div>
+              <div class="portfolio-overlay-body">
+                <div class="portfolio-overlay-main">
+                  <div class="portfolio-overlay-hero">
+                    <div class="portfolio-overlay-title">
+                      <h3 id="futuRegimeTitle">等待策略分配快照</h3>
+                      <p id="futuRegimeSubtitle">最近一次候选池优化完成后，这里会同步显示 FUTU 侧使用的 regime 约束。</p>
+                    </div>
+                    <div id="futuRegimeBadge" class="regime-badge">Pending</div>
+                  </div>
+                  <div id="futuOverlayMetrics" class="portfolio-overlay-metrics"></div>
+                  <div id="futuExposureWrap" class="overlay-exposure-wrap"></div>
+                </div>
+                <div class="portfolio-overlay-side">
+                  <div id="futuDiagnostics" class="overlay-diagnostics"></div>
+                  <div id="futuReasons" class="overlay-reasons"></div>
+                </div>
+              </div>
             </div>
 
           </div>
@@ -3693,6 +3749,29 @@
           </div>
           <div id="backtestSummaryMeta" class="small" style="margin-top:8px;color:var(--muted);">No completed backtest summary yet.</div>
           <div id="backtestKpiGrid" class="paper-kpi-grid" style="margin-top:10px;"></div>
+          <div id="backtestOverlayPanel" class="panel portfolio-overlay-panel" style="margin-top:10px;">
+            <div class="panel-header">
+              <div class="panel-title"><span class="panel-title-icon">R</span> Regime Overlay</div>
+              <div class="panel-subtitle">Backtest 最近一次 rebalance 使用的 regime 风控与现金留存。</div>
+            </div>
+            <div class="portfolio-overlay-body">
+              <div class="portfolio-overlay-main">
+                <div class="portfolio-overlay-hero">
+                  <div class="portfolio-overlay-title">
+                    <h3 id="backtestRegimeTitle">等待回测再平衡</h3>
+                    <p id="backtestRegimeSubtitle">回测开始后，这里会展示最近一次 rebalance 的 overlay 限制与原因。</p>
+                  </div>
+                  <div id="backtestRegimeBadge" class="regime-badge">Pending</div>
+                </div>
+                <div id="backtestOverlayMetrics" class="portfolio-overlay-metrics"></div>
+                <div id="backtestExposureWrap" class="overlay-exposure-wrap"></div>
+              </div>
+              <div class="portfolio-overlay-side">
+                <div id="backtestDiagnostics" class="overlay-diagnostics"></div>
+                <div id="backtestReasons" class="overlay-reasons"></div>
+              </div>
+            </div>
+          </div>
           <details style="margin-top:8px;">
             <summary style="cursor:pointer;font-size:11px;color:var(--muted);user-select:none;">Raw JSON</summary>
             <div id="backtestRawJson" class="train-raw-json" style="margin-top:6px;">Idle</div>
@@ -3750,6 +3829,6 @@
   </div>
 
   <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
-  <script src="/app.js?v=20260312a"></script>
+  <script src="/app.js?v=20260312b"></script>
 </body>
 </html>

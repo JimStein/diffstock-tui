@@ -213,6 +213,7 @@ pub enum PaperEvent {
     },
     TargetsUpdated {
         targets: Vec<TargetWeight>,
+        allocation: Option<portfolio::PortfolioAllocation>,
     },
     Info(String),
     Warning(String),
@@ -449,6 +450,7 @@ pub async fn run_paper_trading(
                     let _ = event_tx
                         .send(PaperEvent::TargetsUpdated {
                             targets: runtime.strategy_log.targets.clone(),
+                            allocation: None,
                         })
                         .await;
                     for target in &runtime.strategy_log.targets {
@@ -621,32 +623,32 @@ pub async fn run_paper_trading(
                     }))
                     .await;
                 match optimize_targets_from_candidate_pool(&mut runtime, config.optimization_backend).await {
-                    Ok(updated) => {
-                        if updated {
-                            let _ = event_tx
-                                .send(PaperEvent::TargetsUpdated {
-                                    targets: runtime.strategy_log.targets.clone(),
-                                })
-                                .await;
-                            let listed = runtime
-                                .strategy_log
-                                .targets
-                                .iter()
-                                .map(|t| format!("{}:{:.4}", t.symbol, t.target_weight))
-                                .collect::<Vec<_>>()
-                                .join(", ");
-                            let _ = event_tx
-                                .send(PaperEvent::Info(format!(
-                                    "Scheduled optimization updated targets (rebalance at next schedule): {}",
-                                    listed
-                                )))
-                                .await;
-                        }
+                    Ok(Some(allocation)) => {
+                        let _ = event_tx
+                            .send(PaperEvent::TargetsUpdated {
+                                targets: runtime.strategy_log.targets.clone(),
+                                allocation: Some(allocation),
+                            })
+                            .await;
+                        let listed = runtime
+                            .strategy_log
+                            .targets
+                            .iter()
+                            .map(|t| format!("{}:{:.4}", t.symbol, t.target_weight))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        let _ = event_tx
+                            .send(PaperEvent::Info(format!(
+                                "Scheduled optimization updated targets (rebalance at next schedule): {}",
+                                listed
+                            )))
+                            .await;
                         optimization_last_run_date = Some(now_date);
                         auto_opt_retry_count = 0;
                         auto_opt_retry_at = None;
                         emit_auto_opt_retry_status(&event_tx, 0, AUTO_OPT_MAX_RETRIES, None).await;
                     }
+                    Ok(None) => {}
                     Err(error) => {
                         auto_opt_retry_count = auto_opt_retry_count.saturating_add(1);
                         if auto_opt_retry_count >= AUTO_OPT_MAX_RETRIES {
@@ -947,6 +949,7 @@ pub async fn run_paper_trading_from_strategy_file(
                     let _ = event_tx
                         .send(PaperEvent::TargetsUpdated {
                             targets: runtime.strategy_log.targets.clone(),
+                            allocation: None,
                         })
                         .await;
                     for target in &runtime.strategy_log.targets {
@@ -1119,32 +1122,32 @@ pub async fn run_paper_trading_from_strategy_file(
                     }))
                     .await;
                 match optimize_targets_from_candidate_pool(&mut runtime, cfg.optimization_backend).await {
-                    Ok(updated) => {
-                        if updated {
-                            let _ = event_tx
-                                .send(PaperEvent::TargetsUpdated {
-                                    targets: runtime.strategy_log.targets.clone(),
-                                })
-                                .await;
-                            let listed = runtime
-                                .strategy_log
-                                .targets
-                                .iter()
-                                .map(|t| format!("{}:{:.4}", t.symbol, t.target_weight))
-                                .collect::<Vec<_>>()
-                                .join(", ");
-                            let _ = event_tx
-                                .send(PaperEvent::Info(format!(
-                                    "Scheduled optimization updated targets (rebalance at next schedule): {}",
-                                    listed
-                                )))
-                                .await;
-                        }
+                    Ok(Some(allocation)) => {
+                        let _ = event_tx
+                            .send(PaperEvent::TargetsUpdated {
+                                targets: runtime.strategy_log.targets.clone(),
+                                allocation: Some(allocation),
+                            })
+                            .await;
+                        let listed = runtime
+                            .strategy_log
+                            .targets
+                            .iter()
+                            .map(|t| format!("{}:{:.4}", t.symbol, t.target_weight))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        let _ = event_tx
+                            .send(PaperEvent::Info(format!(
+                                "Scheduled optimization updated targets (rebalance at next schedule): {}",
+                                listed
+                            )))
+                            .await;
                         optimization_last_run_date = Some(now_date);
                         auto_opt_retry_count = 0;
                         auto_opt_retry_at = None;
                         emit_auto_opt_retry_status(&event_tx, 0, AUTO_OPT_MAX_RETRIES, None).await;
                     }
+                    Ok(None) => {}
                     Err(error) => {
                         auto_opt_retry_count = auto_opt_retry_count.saturating_add(1);
                         if auto_opt_retry_count >= AUTO_OPT_MAX_RETRIES {
@@ -1190,7 +1193,7 @@ pub async fn run_paper_trading_from_strategy_file(
 async fn optimize_targets_from_candidate_pool(
     runtime: &mut PaperRuntime,
     backend: config::ComputeBackend,
-) -> Result<bool> {
+) -> Result<Option<portfolio::PortfolioAllocation>> {
     let mut candidate_symbols = if runtime.strategy_log.candidate_symbols.is_empty() {
         runtime
             .strategy_log
@@ -1210,7 +1213,7 @@ async fn optimize_targets_from_candidate_pool(
     candidate_symbols.dedup();
 
     if candidate_symbols.is_empty() {
-        return Ok(false);
+        return Ok(None);
     }
 
     let alloc = portfolio::run_portfolio_optimization_with_backend(&candidate_symbols, backend).await?;
@@ -1228,7 +1231,7 @@ async fn optimize_targets_from_candidate_pool(
             .or_insert(0.0);
     }
     write_strategy_json(&runtime.strategy_path, &runtime.strategy_log)?;
-    Ok(true)
+    Ok(Some(alloc))
 }
 
 fn run_analysis_once(runtime: &mut PaperRuntime, current_prices: &HashMap<String, f64>) -> Result<AnalysisRecord> {

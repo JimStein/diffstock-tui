@@ -1548,11 +1548,12 @@ const formatWeightPct = (value, digits = 1) => {
   return `${(value * 100).toFixed(digits)}%`;
 };
 
-const formatRegimeLabel = (state) => String(state || 'risk_on')
-  .split('_')
-  .filter(Boolean)
-  .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-  .join(' ');
+const formatRegimeLabel = (state) => {
+  const normalized = String(state || 'risk_on').trim().toLowerCase();
+  if (normalized === 'risk_off') return '风险关闭';
+  if (normalized === 'defensive') return '防守';
+  return '风险开启';
+};
 
 const getRegimeMeta = (state) => {
   const normalized = String(state || 'risk_on').trim().toLowerCase();
@@ -1560,41 +1561,111 @@ const getRegimeMeta = (state) => {
     return {
       stateClass: 'risk-off',
       badge: 'Risk Off',
-      title: 'Capital protection is dominating the optimizer',
-      subtitle: 'The regime overlay has cut gross exposure to the floor and can intentionally push the sleeve to full cash.',
+      title: '优先保本，允许全现金',
+      subtitle: '广度或尾部风险已经越线，gross 上限会被压到最低，必要时直接切到现金。',
     };
   }
   if (normalized === 'defensive') {
     return {
       stateClass: 'defensive',
       badge: 'Defensive',
-      title: 'The optimizer is in capital preservation mode',
-      subtitle: 'Signals are mixed, so the overlay is capping gross exposure instead of letting vol targeting fully deploy.',
+      title: '进入防守仓位控制',
+      subtitle: '信号分化，overlay 正在限制总敞口，避免波动目标把资金一次性打满。',
     };
   }
   return {
     stateClass: 'risk-on',
     badge: 'Risk On',
-    title: 'The optimizer is allowed to deploy normally',
-    subtitle: 'Breadth and tail-risk checks are not forcing a defensive cap, so target exposure can follow the model output.',
+    title: '允许按模型正常部署',
+    subtitle: '当前广度与尾部风险没有触发额外收缩，目标权重可以跟随模型输出。',
   };
 };
 
 const PORTFOLIO_WEIGHT_COLORS = ['#3b82f6', '#8b5cf6', '#00d4aa', '#f59e0b', '#ff4757', '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#a78bfa'];
+const REGIME_NEGATIVE_BREADTH_THRESHOLD = 0.75;
+const REGIME_CVAR_RISK_OFF_THRESHOLD = 0.04;
+const REGIME_OVERLAY_SCOPES = {
+  portfolio: {
+    titlePrefix: '组合优化',
+    emptyText: '运行组合优化后，这里会显示 regime、现金权重和风控触发原因。',
+  },
+  paper: {
+    titlePrefix: 'Paper',
+    emptyText: '执行一次 paper 候选池优化后，这里会显示当前使用中的 regime 叠加层。',
+  },
+  futu: {
+    titlePrefix: 'FUTU',
+    emptyText: '完成一次候选池优化后，这里会同步 FUTU 策略袖口沿用的 regime 约束。',
+  },
+  backtest: {
+    titlePrefix: 'Backtest',
+    emptyText: '回测出现首次 rebalance 后，这里会显示最近一次再平衡的 regime 约束。',
+  },
+};
 
-const renderPortfolioOverlay = (alloc) => {
-  const panel = document.getElementById('portfolioOverlayPanel');
-  const badge = document.getElementById('portfolioRegimeBadge');
-  const title = document.getElementById('portfolioRegimeTitle');
-  const subtitle = document.getElementById('portfolioRegimeSubtitle');
-  const metrics = document.getElementById('portfolioOverlayMetrics');
-  const exposureWrap = document.getElementById('portfolioExposureWrap');
-  const diagnostics = document.getElementById('portfolioDiagnostics');
-  const reasons = document.getElementById('portfolioReasons');
+const formatAsOfText = (value) => {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return `最近快照 ${value}`;
+  return `最近快照 ${date.toLocaleString()}`;
+};
+
+const translateRegimeReason = (reason) => {
+  const text = String(reason || '').trim();
+  if (!text) return '无';
+
+  let match = text.match(/bearish breadth ([\d.]+)% >= ([\d.]+)%/i);
+  if (match) {
+    return `看空广度 ${match[1]}%，已经高于风险阈值 ${match[2]}%。`;
+  }
+
+  match = text.match(/negative return breadth ([\d.]+)% >= ([\d.]+)%/i);
+  if (match) {
+    return `负收益广度 ${match[1]}%，已经高于风险阈值 ${match[2]}%。`;
+  }
+
+  match = text.match(/negative sharpe breadth ([\d.]+)% >= ([\d.]+)%/i);
+  if (match) {
+    return `负 Sharpe 广度 ${match[1]}%，已经高于风险阈值 ${match[2]}%。`;
+  }
+
+  match = text.match(/portfolio expected annual return ([\-\d.]+)% <= 0%/i);
+  if (match) {
+    return `组合年化预期收益 ${match[1]}%，已经跌到 0% 以下。`;
+  }
+
+  match = text.match(/portfolio cvar\(95\) ([\-\d.]+)% >= ([\d.]+)%/i);
+  if (match) {
+    return `组合 CVaR95 ${match[1]}%，已经高于风险阈值 ${match[2]}%。`;
+  }
+
+  return text;
+};
+
+const getOverlayElements = (scope) => {
+  const prefix = String(scope || '').trim();
+  return {
+    panel: document.getElementById(`${prefix}OverlayPanel`),
+    badge: document.getElementById(`${prefix}RegimeBadge`),
+    title: document.getElementById(`${prefix}RegimeTitle`),
+    subtitle: document.getElementById(`${prefix}RegimeSubtitle`),
+    metrics: document.getElementById(`${prefix}OverlayMetrics`),
+    exposureWrap: document.getElementById(`${prefix}ExposureWrap`),
+    diagnostics: document.getElementById(`${prefix}Diagnostics`),
+    reasons: document.getElementById(`${prefix}Reasons`),
+  };
+};
+
+const renderRegimeOverlay = (scope, alloc, asOf) => {
+  const elements = getOverlayElements(scope);
+  const { panel, badge, title, subtitle, metrics, exposureWrap, diagnostics, reasons } = elements;
   if (!panel || !badge || !title || !subtitle || !metrics || !exposureWrap || !diagnostics || !reasons) return;
 
+  const scopeMeta = REGIME_OVERLAY_SCOPES[scope] || REGIME_OVERLAY_SCOPES.portfolio;
   if (!alloc || typeof alloc !== 'object') {
     panel.classList.remove('is-visible');
+    title.textContent = `${scopeMeta.titlePrefix} Regime Overlay`;
+    subtitle.textContent = scopeMeta.emptyText;
     return;
   }
 
@@ -1604,34 +1675,38 @@ const renderPortfolioOverlay = (alloc) => {
   const deployedWeight = clampUnit(weights.reduce((sum, [, weight]) => sum + Number(weight || 0), 0));
   const maxGross = clampUnit(alloc.max_gross_exposure);
   const targetCash = clampUnit(Math.max(Number(alloc.target_cash_weight || 0), 1 - deployedWeight));
-  const reasonCount = Array.isArray(regime.reasons) ? regime.reasons.length : 0;
+  const reasonList = Array.isArray(regime.reasons) ? regime.reasons : [];
+  const reasonCount = reasonList.length;
+  const expectedAnnualReturn = Number(alloc.expected_annual_return || 0);
+  const cvar95 = Math.abs(Number(alloc.cvar_95 || 0));
+  const asOfText = formatAsOfText(asOf);
 
   panel.classList.add('is-visible');
   badge.className = `regime-badge ${stateMeta.stateClass}`;
   badge.textContent = stateMeta.badge;
-  title.textContent = stateMeta.title;
-  subtitle.textContent = `${stateMeta.subtitle} Current state: ${formatRegimeLabel(regime.state)}.`;
+  title.textContent = `${scopeMeta.titlePrefix} · ${stateMeta.title}`;
+  subtitle.textContent = `${stateMeta.subtitle}${asOfText ? ` ${asOfText}。` : ` 当前状态：${formatRegimeLabel(regime.state)}。`}`;
 
   metrics.innerHTML = `
     <div class='overlay-metric-card'>
-      <div class='overlay-metric-label'>Max Gross</div>
+      <div class='overlay-metric-label'>最大总仓位</div>
       <div class='overlay-metric-value'>${formatWeightPct(maxGross)}</div>
-      <div class='overlay-metric-sub'>Overlay ceiling</div>
+      <div class='overlay-metric-sub'>overlay 上限</div>
     </div>
     <div class='overlay-metric-card'>
-      <div class='overlay-metric-label'>Target Cash</div>
+      <div class='overlay-metric-label'>目标现金</div>
       <div class='overlay-metric-value'>${formatWeightPct(targetCash)}</div>
-      <div class='overlay-metric-sub'>Residual dry powder</div>
+      <div class='overlay-metric-sub'>保留缓冲</div>
     </div>
     <div class='overlay-metric-card'>
-      <div class='overlay-metric-label'>Deployed</div>
+      <div class='overlay-metric-label'>已部署仓位</div>
       <div class='overlay-metric-value'>${formatWeightPct(deployedWeight)}</div>
-      <div class='overlay-metric-sub'>Sum of live target weights</div>
+      <div class='overlay-metric-sub'>目标权重合计</div>
     </div>
     <div class='overlay-metric-card'>
-      <div class='overlay-metric-label'>Triggers</div>
+      <div class='overlay-metric-label'>触发原因</div>
       <div class='overlay-metric-value'>${reasonCount}</div>
-      <div class='overlay-metric-sub'>Active overlay reasons</div>
+      <div class='overlay-metric-sub'>当前生效</div>
     </div>
   `;
 
@@ -1645,7 +1720,7 @@ const renderPortfolioOverlay = (alloc) => {
     }));
   if (targetCash > 0.0001) {
     exposureSegments.push({
-      label: 'Cash',
+      label: '现金',
       weight: targetCash,
       color: '#6b7a99',
       cash: true,
@@ -1657,63 +1732,68 @@ const renderPortfolioOverlay = (alloc) => {
       const text = segment.weight >= 0.12 ? `${segment.label} ${pct}` : segment.weight >= 0.06 ? segment.label : '';
       return `<div class='overlay-exposure-seg${segment.cash ? ' cash' : ''}' style='flex-basis:${(segment.weight * 100).toFixed(2)}%;${segment.cash ? '' : `background:${segment.color};`}' title='${escapeHtmlText(`${segment.label}: ${pct}`)}'>${escapeHtmlText(text)}</div>`;
     }).join('')
-    : `<div class='overlay-exposure-seg cash' style='flex-basis:100%;'>Cash 100.0%</div>`;
+    : `<div class='overlay-exposure-seg cash' style='flex-basis:100%;'>现金 100.0%</div>`;
   const exposureLegend = exposureSegments.length > 0
     ? exposureSegments.map((segment) => `<span class='overlay-exposure-legend-item'><span class='overlay-exposure-legend-dot' style='background:${segment.color}'></span>${escapeHtmlText(segment.label)} ${formatWeightPct(segment.weight)}</span>`).join('')
-    : `<span class='overlay-exposure-legend-item'><span class='overlay-exposure-legend-dot' style='background:#6b7a99'></span>Cash 100.0%</span>`;
+    : `<span class='overlay-exposure-legend-item'><span class='overlay-exposure-legend-dot' style='background:#6b7a99'></span>现金 100.0%</span>`;
   exposureWrap.innerHTML = `
     <div class='overlay-exposure-header'>
-      <span>Target Allocation Mix</span>
-      <span>Gross ${formatWeightPct(deployedWeight)} / Cash ${formatWeightPct(targetCash)}</span>
+      <span>目标分配结构</span>
+      <span>Gross ${formatWeightPct(deployedWeight)} / 现金 ${formatWeightPct(targetCash)}</span>
     </div>
     <div class='overlay-exposure-bar'>${exposureBar}</div>
     <div class='overlay-exposure-legend'>${exposureLegend}</div>
   `;
 
   const breadthRows = [
-    { label: 'Bearish breadth', value: clampUnit(regime.bearish_breadth), warn: 0.5, danger: 0.7 },
-    { label: 'Negative return', value: clampUnit(regime.negative_return_breadth), warn: 0.5, danger: 0.7 },
-    { label: 'Negative sharpe', value: clampUnit(regime.negative_sharpe_breadth), warn: 0.5, danger: 0.7 },
+    { label: '看空广度', hint: `风险关闭阈值 ${formatWeightPct(REGIME_NEGATIVE_BREADTH_THRESHOLD, 0)}`, value: clampUnit(regime.bearish_breadth), warn: 0.5, danger: REGIME_NEGATIVE_BREADTH_THRESHOLD },
+    { label: '负收益广度', hint: `风险关闭阈值 ${formatWeightPct(REGIME_NEGATIVE_BREADTH_THRESHOLD, 0)}`, value: clampUnit(regime.negative_return_breadth), warn: 0.5, danger: REGIME_NEGATIVE_BREADTH_THRESHOLD },
+    { label: '负 Sharpe 广度', hint: `风险关闭阈值 ${formatWeightPct(REGIME_NEGATIVE_BREADTH_THRESHOLD, 0)}`, value: clampUnit(regime.negative_sharpe_breadth), warn: 0.5, danger: REGIME_NEGATIVE_BREADTH_THRESHOLD },
   ];
   diagnostics.innerHTML = `
-    <div class='overlay-section-label'>Breadth Diagnostics</div>
+    <div class='overlay-section-label'>广度诊断</div>
     ${breadthRows.map((row) => {
       const fillClass = row.value >= row.danger ? 'danger' : row.value >= row.warn ? 'warn' : '';
       return `
         <div class='overlay-diagnostic-row'>
-          <div class='overlay-diagnostic-name'>${row.label}</div>
+          <div class='overlay-diagnostic-name'>${row.label}<div class='overlay-diagnostic-meta'>${row.hint}</div></div>
           <div class='overlay-diagnostic-track'><div class='overlay-diagnostic-fill ${fillClass}' style='width:${(row.value * 100).toFixed(1)}%;'></div></div>
           <div class='overlay-diagnostic-value'>${formatWeightPct(row.value, 0)}</div>
         </div>`;
     }).join('')}
-    <div class='overlay-section-label'>Portfolio Checks</div>
+    <div class='overlay-section-label'>组合检查</div>
     <div class='overlay-diagnostic-row'>
-      <div class='overlay-diagnostic-name'>Expected return</div>
-      <div class='overlay-diagnostic-track'><div class='overlay-diagnostic-fill ${Number(alloc.expected_annual_return) < 0 ? 'danger' : Number(alloc.expected_annual_return) < 0.08 ? 'warn' : ''}' style='width:${(clampUnit(Math.abs(Number(alloc.expected_annual_return || 0)) / 0.25) * 100).toFixed(1)}%;'></div></div>
-      <div class='overlay-diagnostic-value'>${formatWeightPct(Number(alloc.expected_annual_return || 0), 1)}</div>
+      <div class='overlay-diagnostic-name'>年化预期收益<div class='overlay-diagnostic-meta'>低于 0% 直接偏防守</div></div>
+      <div class='overlay-diagnostic-track'><div class='overlay-diagnostic-fill ${expectedAnnualReturn < 0 ? 'danger' : expectedAnnualReturn < 0.08 ? 'warn' : ''}' style='width:${(clampUnit(Math.abs(expectedAnnualReturn) / 0.25) * 100).toFixed(1)}%;'></div></div>
+      <div class='overlay-diagnostic-value'>${formatWeightPct(expectedAnnualReturn, 1)}</div>
     </div>
     <div class='overlay-diagnostic-row'>
-      <div class='overlay-diagnostic-name'>CVaR 95</div>
-      <div class='overlay-diagnostic-track'><div class='overlay-diagnostic-fill ${Math.abs(Number(alloc.cvar_95 || 0)) > 0.15 ? 'danger' : Math.abs(Number(alloc.cvar_95 || 0)) > 0.08 ? 'warn' : ''}' style='width:${(clampUnit(Math.abs(Number(alloc.cvar_95 || 0)) / 0.25) * 100).toFixed(1)}%;'></div></div>
+      <div class='overlay-diagnostic-name'>CVaR 95<div class='overlay-diagnostic-meta'>风险关闭阈值 ${formatWeightPct(REGIME_CVAR_RISK_OFF_THRESHOLD, 1)}</div></div>
+      <div class='overlay-diagnostic-track'><div class='overlay-diagnostic-fill ${cvar95 >= REGIME_CVAR_RISK_OFF_THRESHOLD ? 'danger' : cvar95 >= REGIME_CVAR_RISK_OFF_THRESHOLD * 0.6 ? 'warn' : ''}' style='width:${(clampUnit(cvar95 / 0.25) * 100).toFixed(1)}%;'></div></div>
       <div class='overlay-diagnostic-value'>${formatWeightPct(Number(alloc.cvar_95 || 0), 1)}</div>
     </div>
   `;
 
   if (reasonCount === 0) {
     reasons.innerHTML = `
-      <div class='overlay-section-label'>Overlay Reasons</div>
-      <div class='overlay-reasons-empty'>No defensive throttle is active. The optimizer is operating without extra regime constraints.</div>
+      <div class='overlay-section-label'>触发原因</div>
+      <div class='overlay-reasons-empty'>当前没有额外防守节流，组合按常规 overlay 约束运行。</div>
     `;
     return;
   }
 
   reasons.innerHTML = `
-    <div class='overlay-section-label'>Overlay Reasons</div>
+    <div class='overlay-section-label'>触发原因</div>
     <div class='overlay-reason-list'>
-      ${regime.reasons.map((reason) => `<div class='overlay-reason-item'>${escapeHtmlText(reason)}</div>`).join('')}
+      ${reasonList.map((reason) => `<div class='overlay-reason-item'>${escapeHtmlText(translateRegimeReason(reason))}</div>`).join('')}
     </div>
   `;
 };
+
+const renderPortfolioOverlay = (alloc) => renderRegimeOverlay('portfolio', alloc, null);
+const renderPaperOverlay = (paperStatus) => renderRegimeOverlay('paper', paperStatus?.latest_allocation, paperStatus?.latest_allocation_as_of);
+const renderFutuOverlay = (futuStatus) => renderRegimeOverlay('futu', futuStatus?.latest_allocation, futuStatus?.latest_allocation_as_of);
+const renderBacktestOverlay = (backtestStatus) => renderRegimeOverlay('backtest', backtestStatus?.latest_allocation, backtestStatus?.latest_allocation_as_of);
 
 const normalizeTradeSide = (side) => {
   const s = String(side || '').toUpperCase();
@@ -2248,6 +2328,7 @@ const normalizeBacktestSummary = (summary) => {
 const renderPaperKpis = (paperStatus) => {
   const grid = document.getElementById('paperKpiGrid');
   if (!grid) return;
+  renderPaperOverlay(paperStatus);
 
   const snapshot = paperStatus?.latest_snapshot;
   if (!snapshot) {
@@ -2350,6 +2431,7 @@ const renderFutuConnectionKpis = (futuStatus, futuContext) => {
   const grid = document.getElementById('futuConnKpiGrid');
   const badge = document.getElementById('futuKpiDurationBadge');
   if (!grid) return;
+  renderFutuOverlay(futuStatus);
 
   const snapshot = futuStatus?.latest_snapshot;
   const strategySnapshot = futuStatus?.latest_strategy_snapshot;
@@ -5870,6 +5952,7 @@ const renderBacktestWeightsTable = (st) => {
 const renderIdleBacktestKpis = (st) => {
   const grid = document.getElementById('backtestKpiGrid');
   if (!grid) return;
+  renderBacktestOverlay(st);
   const asOfText = st?.last_message || 'No backtest run yet';
   const placeholder = '--';
   grid.innerHTML = `
@@ -5904,6 +5987,7 @@ const renderIdleBacktestKpis = (st) => {
 const renderBacktestKpis = (st) => {
   const grid = document.getElementById('backtestKpiGrid');
   if (!grid) return;
+  renderBacktestOverlay(st);
   const filtered = filterPaperContextByRangeDays(backtestFullContext, selectedBacktestRangeDays);
   const latest = filtered?.latest || backtestFullContext?.latest;
   const perf = computeBacktestPerformance(filtered) || normalizeBacktestSummary(st?.summary) || null;

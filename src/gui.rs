@@ -288,7 +288,7 @@ impl eframe::App for GuiApp {
                             ));
                         }
                     }
-                    Ok(PaperEvent::TargetsUpdated { targets }) => {
+                    Ok(PaperEvent::TargetsUpdated { targets, .. }) => {
                         self.paper_target_weights = Some(
                             targets
                                 .iter()

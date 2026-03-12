@@ -111,6 +111,8 @@ struct BacktestRuntimeState {
     summary: Option<BacktestPerformanceSummary>,
     latest_weights: Vec<PaperTargetState>,
     latest_weights_as_of: Option<String>,
+    latest_allocation: Option<portfolio::PortfolioAllocation>,
+    latest_allocation_as_of: Option<String>,
     logs: Vec<String>,
 }
 
@@ -225,6 +227,8 @@ impl Default for BacktestRuntimeState {
             summary: None,
             latest_weights: Vec::new(),
             latest_weights_as_of: None,
+            latest_allocation: None,
+            latest_allocation_as_of: None,
             logs: Vec::new(),
         }
     }
@@ -247,6 +251,8 @@ struct PaperRuntimeState {
     target_weights: Vec<PaperTargetState>,
     latest_snapshot: Option<paper_trading::MinutePortfolioSnapshot>,
     snapshots: Vec<paper_trading::MinutePortfolioSnapshot>,
+    latest_allocation: Option<portfolio::PortfolioAllocation>,
+    latest_allocation_as_of: Option<String>,
     last_analysis: Option<paper_trading::AnalysisRecord>,
     trade_history: Vec<paper_trading::TradeRecord>,
     logs: Vec<String>,
@@ -302,6 +308,8 @@ struct FutuRuntimeState {
     opend_positions_raw: Option<serde_json::Value>,
     latest_snapshot: Option<paper_trading::MinutePortfolioSnapshot>,
     snapshots: Vec<paper_trading::MinutePortfolioSnapshot>,
+    latest_allocation: Option<portfolio::PortfolioAllocation>,
+    latest_allocation_as_of: Option<String>,
     positions: Vec<FutuPositionState>,
     open_orders: Vec<serde_json::Value>,
     cancel_history: Vec<serde_json::Value>,
@@ -410,6 +418,8 @@ impl Default for FutuRuntimeState {
             opend_positions_raw: None,
             latest_snapshot: None,
             snapshots: Vec::new(),
+            latest_allocation: None,
+            latest_allocation_as_of: None,
             positions: Vec::new(),
             open_orders: Vec::new(),
             cancel_history: Vec::new(),
@@ -451,6 +461,8 @@ impl Default for PaperRuntimeState {
             target_weights: Vec::new(),
             latest_snapshot: None,
             snapshots: Vec::new(),
+            latest_allocation: None,
+            latest_allocation_as_of: None,
             last_analysis: None,
             trade_history: Vec::new(),
             logs: Vec::new(),
@@ -557,6 +569,11 @@ struct PaperStartRequest {
     time2: Option<String>,
     optimization_time: Option<String>,
     optimization_weekdays: Option<Vec<u32>>,
+}
+
+struct CandidatePoolOptimizationResult {
+    allocation: portfolio::PortfolioAllocation,
+    targets: Vec<paper_trading::TargetWeight>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1015,6 +1032,8 @@ async fn full_state(
     futu.data_ws_connected = data_ws_connected;
     futu.data_ws_diagnostics = data_ws_diagnostics.clone();
     futu.data_live_fetch_diagnostics = data_live_fetch_diagnostics.clone();
+    futu.latest_allocation = paper.latest_allocation.clone();
+    futu.latest_allocation_as_of = paper.latest_allocation_as_of.clone();
     let directml_selection = if matches!(state.backend_default, config::ComputeBackend::Directml) {
         config::select_directml_onnx_model()
     } else {
@@ -1048,10 +1067,13 @@ async fn futu_status(
     State(state): State<WebState>,
 ) -> Result<Json<FutuRuntimeState>, (StatusCode, Json<ApiError>)> {
     let mut status = state.futu.lock().await.clone();
+    let paper_status = state.paper.lock().await.clone();
     status.data_live_source = data::current_live_data_source().await;
     status.data_ws_connected = data::polygon_ws_connected().await;
     status.data_ws_diagnostics = data::current_ws_diagnostics().await;
     status.data_live_fetch_diagnostics = data::current_live_fetch_diagnostics().await;
+    status.latest_allocation = paper_status.latest_allocation;
+    status.latest_allocation_as_of = paper_status.latest_allocation_as_of;
     Ok(Json(status))
 }
 
@@ -3436,6 +3458,8 @@ async fn start_backtest(
         bt.summary = None;
         bt.latest_weights.clear();
         bt.latest_weights_as_of = None;
+        bt.latest_allocation = None;
+        bt.latest_allocation_as_of = None;
         bt.logs.clear();
         push_backtest_log(&mut bt, Some(runtime_path.as_path()), format!(
             "Backtest started => symbols={}, initial_capital={:.2}, period_days={}, rebalance_every_days={}, runtime_file={}",
@@ -3643,11 +3667,13 @@ async fn start_backtest(
                     )
                     .await?;
                     let allocation = portfolio::optimize_portfolio(&forecasts)?;
-                    current_weights = normalize_allocation_weights(allocation.weights);
+                    current_weights = normalize_allocation_weights(allocation.weights.clone());
 
                     let mut bt = backtest_state.lock().await;
                     bt.latest_weights = current_weights.clone();
                     bt.latest_weights_as_of = Some(current_date.to_string());
+                    bt.latest_allocation = Some(allocation);
+                    bt.latest_allocation_as_of = Some(current_date.to_string());
                     push_backtest_log(&mut bt, Some(backtest_runtime_path.as_path()), format!(
                         "Rebalance {} => {}",
                         current_date,
@@ -3940,10 +3966,11 @@ async fn start_paper(
         return Err(api_err(StatusCode::BAD_REQUEST, "targets cannot be empty"));
     }
 
-    let optimized_targets = optimize_candidate_pool_targets(&symbols, state.backend_default)
+    let optimization = optimize_candidate_pool_targets(&symbols, state.backend_default)
         .await
         .map_err(internal_err)?;
-    let weights = optimized_targets
+    let weights = optimization
+        .targets
         .iter()
         .map(|t| (t.symbol.clone(), t.target_weight))
         .collect::<Vec<_>>();
@@ -3977,7 +4004,8 @@ async fn start_paper(
         paper_state.strategy_file = None;
         paper_state.runtime_file = None;
         paper_state.candidate_symbols = symbols.clone();
-        paper_state.target_weights = optimized_targets
+        paper_state.target_weights = optimization
+            .targets
             .iter()
             .map(|target| PaperTargetState {
                 symbol: target.symbol.clone(),
@@ -3986,6 +4014,8 @@ async fn start_paper(
             .collect();
         paper_state.latest_snapshot = None;
         paper_state.snapshots.clear();
+        paper_state.latest_allocation = Some(optimization.allocation.clone());
+        paper_state.latest_allocation_as_of = Some(chrono::Local::now().to_rfc3339());
         paper_state.last_analysis = None;
         paper_state.trade_history.clear();
         paper_state.logs.clear();
@@ -4020,7 +4050,7 @@ async fn start_paper(
                     ps.auto_opt_retry_max = max_retries;
                     ps.auto_opt_retry_next_at = next_retry_at;
                 }
-                paper_trading::PaperEvent::TargetsUpdated { targets } => {
+                paper_trading::PaperEvent::TargetsUpdated { targets, allocation } => {
                     ps.target_weights = targets
                         .iter()
                         .map(|target| PaperTargetState {
@@ -4028,6 +4058,10 @@ async fn start_paper(
                             weight: target.target_weight,
                         })
                         .collect();
+                    if let Some(allocation) = allocation {
+                        ps.latest_allocation = Some(allocation);
+                        ps.latest_allocation_as_of = Some(chrono::Local::now().to_rfc3339());
+                    }
                 }
                 paper_trading::PaperEvent::Warning(msg) => {
                     ps.logs.push(runtime_log_with_ts(format!("WARNING: {}", msg)));
@@ -4127,6 +4161,8 @@ async fn load_paper(
         paper_state.target_weights = historical_targets;
         paper_state.latest_snapshot = None;
         paper_state.snapshots.clear();
+        paper_state.latest_allocation = None;
+        paper_state.latest_allocation_as_of = None;
         paper_state.last_analysis = None;
         paper_state.trade_history = historical_trades;
         paper_state.logs.clear();
@@ -4162,7 +4198,7 @@ async fn load_paper(
                     ps.auto_opt_retry_max = max_retries;
                     ps.auto_opt_retry_next_at = next_retry_at;
                 }
-                paper_trading::PaperEvent::TargetsUpdated { targets } => {
+                paper_trading::PaperEvent::TargetsUpdated { targets, allocation } => {
                     ps.target_weights = targets
                         .iter()
                         .map(|target| PaperTargetState {
@@ -4170,6 +4206,10 @@ async fn load_paper(
                             weight: target.target_weight,
                         })
                         .collect();
+                    if let Some(allocation) = allocation {
+                        ps.latest_allocation = Some(allocation);
+                        ps.latest_allocation_as_of = Some(chrono::Local::now().to_rfc3339());
+                    }
                 }
                 paper_trading::PaperEvent::Warning(msg) => {
                     ps.logs.push(runtime_log_with_ts(format!("WARNING: {}", msg)));
@@ -4258,10 +4298,11 @@ async fn paper_targets_update(
         return Err(api_err(StatusCode::BAD_REQUEST, "symbols cannot be empty"));
     }
 
-    let next_target_cmd = optimize_candidate_pool_targets(&symbols, state.backend_default)
+    let optimization = optimize_candidate_pool_targets(&symbols, state.backend_default)
         .await
         .map_err(internal_err)?;
-    let next_target_state = next_target_cmd
+    let next_target_state = optimization
+        .targets
         .iter()
         .map(|target| PaperTargetState {
             symbol: target.symbol.clone(),
@@ -4319,13 +4360,15 @@ async fn paper_targets_update(
         let mut ps = state.paper.lock().await;
         ps.candidate_symbols = symbols.clone();
         ps.target_weights = next_target_state;
+        ps.latest_allocation = Some(optimization.allocation.clone());
+        ps.latest_allocation_as_of = Some(chrono::Local::now().to_rfc3339());
         ps.cmd_tx.clone()
     };
 
     if let Some(tx) = tx {
         tx.send(paper_trading::PaperCommand::UpdateTargets {
             candidate_symbols: symbols.clone(),
-            targets: next_target_cmd,
+            targets: optimization.targets,
             apply_now,
         })
             .await
@@ -4421,9 +4464,9 @@ async fn paper_optimization_update(
 async fn optimize_candidate_pool_targets(
     symbols: &[String],
     backend: config::ComputeBackend,
-) -> Result<Vec<paper_trading::TargetWeight>> {
+) -> Result<CandidatePoolOptimizationResult> {
     let allocation = portfolio::run_portfolio_optimization_with_backend(symbols, backend).await?;
-    let out = normalize_weight_pairs_preserve_cash(allocation.weights)
+    let out = normalize_weight_pairs_preserve_cash(allocation.weights.clone())
         .into_iter()
         .map(|(symbol, target_weight)| paper_trading::TargetWeight {
             symbol,
@@ -4431,7 +4474,10 @@ async fn optimize_candidate_pool_targets(
         })
         .collect::<Vec<_>>();
 
-    Ok(out)
+    Ok(CandidatePoolOptimizationResult {
+        allocation,
+        targets: out,
+    })
 }
 
 async fn paper_pause(
@@ -4681,6 +4727,8 @@ fn save_backtest_summary_file(
         "latest_snapshot": state.latest_snapshot,
         "latest_weights": state.latest_weights,
         "latest_weights_as_of": state.latest_weights_as_of,
+        "latest_allocation": state.latest_allocation,
+        "latest_allocation_as_of": state.latest_allocation_as_of,
         "summary": state.summary,
         "last_message": state.last_message,
         "last_error": state.last_error,
