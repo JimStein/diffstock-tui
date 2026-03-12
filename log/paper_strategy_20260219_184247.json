@@ -30,19 +30,19 @@
   "targets": [
     {
       "symbol": "COPX",
-      "target_weight": 0.35264736744109365
+      "target_weight": 0.38789954926605635
     },
     {
       "symbol": "IAU",
-      "target_weight": 0.30282307786078033
+      "target_weight": 0.23635446703919694
     },
     {
       "symbol": "NVDA",
-      "target_weight": 0.20766609158111163
+      "target_weight": 0.020816414055486978
     },
     {
       "symbol": "TLT",
-      "target_weight": 0.018599196495264012
+      "target_weight": 0.3251724445430314
     }
   ],
   "analyses": [
@@ -1555,7 +1555,7 @@
       "timestamp": "2026-03-10T23:31:02.278363800+08:00",
       "portfolio_value_before": 80656.36716016382,
       "portfolio_value_after": 80647.24763466383,
-      "cash_after": 9670.740634663829,
+      "cash_after": 9670.740634663827,
       "trades": [
         {
           "timestamp": "2026-03-10T23:31:02.278363800+08:00",
@@ -1599,8 +1599,87 @@
       "timestamp": "2026-03-11T02:30:55.099471800+08:00",
       "portfolio_value_before": 80416.60063466383,
       "portfolio_value_after": 80416.60063466383,
-      "cash_after": 9670.740634663829,
+      "cash_after": 9670.740634663827,
       "trades": []
+    },
+    {
+      "timestamp": "2026-03-11T23:31:38.400674200+08:00",
+      "portfolio_value_before": 79846.46063466383,
+      "portfolio_value_after": 79822.35862716382,
+      "cash_after": 2612.5036271638237,
+      "trades": [
+        {
+          "timestamp": "2026-03-11T23:31:38.400674200+08:00",
+          "symbol": "COPX",
+          "side": "BUY",
+          "quantity": 37.0,
+          "price": 82.58,
+          "notional": 3055.46,
+          "fee": 1.52773
+        },
+        {
+          "timestamp": "2026-03-11T23:31:38.400674200+08:00",
+          "symbol": "IAU",
+          "side": "SELL",
+          "quantity": 55.0,
+          "price": 97.38,
+          "notional": 5355.9,
+          "fee": 2.67795
+        },
+        {
+          "timestamp": "2026-03-11T23:31:38.400674200+08:00",
+          "symbol": "NVDA",
+          "side": "SELL",
+          "quantity": 82.0,
+          "price": 185.72,
+          "notional": 15229.039999999999,
+          "fee": 7.61452
+        },
+        {
+          "timestamp": "2026-03-11T23:31:38.400674200+08:00",
+          "symbol": "TLT",
+          "side": "BUY",
+          "quantity": 281.0,
+          "price": 87.415,
+          "notional": 24563.615,
+          "fee": 12.281807500000001
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-12T02:30:54.619167800+08:00",
+      "portfolio_value_before": 79401.30362716383,
+      "portfolio_value_after": 79401.08606466383,
+      "cash_after": 2721.171064663824,
+      "trades": [
+        {
+          "timestamp": "2026-03-12T02:30:54.619167800+08:00",
+          "symbol": "COPX",
+          "side": "BUY",
+          "quantity": 2.0,
+          "price": 81.56,
+          "notional": 163.12,
+          "fee": 0.08156000000000001
+        },
+        {
+          "timestamp": "2026-03-12T02:30:54.619167800+08:00",
+          "symbol": "IAU",
+          "side": "SELL",
+          "quantity": 1.0,
+          "price": 97.355,
+          "notional": 97.355,
+          "fee": 0.048677500000000005
+        },
+        {
+          "timestamp": "2026-03-12T02:30:54.619167800+08:00",
+          "symbol": "TLT",
+          "side": "SELL",
+          "quantity": 2.0,
+          "price": 87.325,
+          "notional": 174.65,
+          "fee": 0.087325
+        }
+      ]
     }
   ]
 }

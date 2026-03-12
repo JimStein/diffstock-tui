@@ -933,10 +933,10 @@ async fn portfolio_opt(
     symbols.sort();
     symbols.dedup();
 
-    if symbols.len() < 2 {
+    if symbols.is_empty() {
         return Err(api_err(
             StatusCode::BAD_REQUEST,
-            "at least 2 symbols are required",
+            "at least 1 symbol is required",
         ));
     }
 
@@ -1969,9 +1969,15 @@ async fn futu_execution_loop(
                     strategy_needs_seed = true;
                 }
 
-                let (rebalance_signal, target_weights) = {
+                let (rebalance_signal, paper_candidate_symbols, target_weights) = {
                     let ps = paper_state.lock().await;
                     let signal = ps.last_analysis.as_ref().map(|a| a.timestamp.clone());
+                    let candidate_symbols = ps
+                        .candidate_symbols
+                        .iter()
+                        .map(|symbol| symbol.trim().to_uppercase())
+                        .filter(|symbol| !symbol.is_empty())
+                        .collect::<Vec<_>>();
                     let targets = ps
                         .target_weights
                         .iter()
@@ -1984,7 +1990,7 @@ async fn futu_execution_loop(
                             }
                         })
                         .collect::<Vec<_>>();
-                    (signal, targets)
+                    (signal, candidate_symbols, targets)
                 };
                 let selected_market = payload
                     .selected_market
@@ -2004,7 +2010,9 @@ async fn futu_execution_loop(
                             .unwrap_or("SIMULATE")
                             .to_uppercase();
 
-                        if selected_env == "SIMULATE" && !target_weights.is_empty() {
+                        if selected_env == "SIMULATE"
+                            && (!target_weights.is_empty() || !paper_candidate_symbols.is_empty())
+                        {
                             let selected_market = payload
                                 .selected_market
                                 .clone()
@@ -2041,9 +2049,10 @@ async fn futu_execution_loop(
                                 }
                             }
 
-                            let mut candidate_symbols = target_weights
+                            let mut candidate_symbols = paper_candidate_symbols
                                 .iter()
-                                .filter_map(|(symbol, _)| {
+                                .chain(target_weights.iter().map(|(symbol, _)| symbol))
+                                .filter_map(|symbol| {
                                     let normalized =
                                         normalize_futu_symbol_for_market(symbol, &selected_market);
                                     if normalized.is_empty() {
@@ -2075,26 +2084,11 @@ async fn futu_execution_loop(
                                     *entry += weight.max(0.0);
                                 }
 
-                                let total_positive_weight = target_weight_map
-                                    .values()
-                                    .copied()
-                                    .filter(|w| w.is_finite() && *w > 0.0)
-                                    .sum::<f64>();
-
-                                let normalized_targets = if total_positive_weight > 0.0 {
-                                    target_weight_map
-                                        .into_iter()
-                                        .filter_map(|(symbol, weight)| {
-                                            if weight > 0.0 {
-                                                Some((symbol, weight / total_positive_weight))
-                                            } else {
-                                                None
-                                            }
-                                        })
-                                        .collect::<HashMap<_, _>>()
-                                } else {
-                                    HashMap::new()
-                                };
+                                let normalized_targets = normalize_weight_pairs_preserve_cash(
+                                    target_weight_map.into_iter().collect::<Vec<_>>(),
+                                )
+                                .into_iter()
+                                .collect::<HashMap<_, _>>();
 
                                 let needed_symbols = candidate_symbols.clone();
 
@@ -2770,12 +2764,10 @@ async fn futu_execution_loop(
                     }
                 }
 
-                let candidate_symbol_set = target_weights
+                let candidate_symbol_set = paper_candidate_symbols
                     .iter()
-                    .filter_map(|(symbol, weight)| {
-                        if !weight.is_finite() || *weight <= 0.0 {
-                            return None;
-                        }
+                    .chain(target_weights.iter().map(|(symbol, _)| symbol))
+                    .filter_map(|symbol| {
                         let normalized = normalize_futu_symbol_for_market(symbol, &selected_market);
                         if normalized.is_empty() {
                             None
@@ -3329,28 +3321,35 @@ fn normalize_backtest_symbols(symbols: &[String]) -> Vec<String> {
 }
 
 fn normalize_allocation_weights(weights: Vec<(String, f64)>) -> Vec<PaperTargetState> {
+    let mut out = normalize_weight_pairs_preserve_cash(weights)
+        .into_iter()
+        .map(|(symbol, weight)| PaperTargetState { symbol, weight })
+        .collect::<Vec<_>>();
+    out.sort_by(|a, b| b.weight.partial_cmp(&a.weight).unwrap_or(std::cmp::Ordering::Equal));
+    out
+}
+
+fn normalize_weight_pairs_preserve_cash(weights: Vec<(String, f64)>) -> Vec<(String, f64)> {
     let mut out = weights
         .into_iter()
         .filter_map(|(symbol, weight)| {
+            let normalized_symbol = symbol.trim().to_uppercase();
             let clipped = weight.clamp(0.0, 1.0);
-            if clipped > 0.0 {
-                Some(PaperTargetState {
-                    symbol: symbol.trim().to_uppercase(),
-                    weight: clipped,
-                })
-            } else {
+            if normalized_symbol.is_empty() || !clipped.is_finite() || clipped <= 0.0 {
                 None
+            } else {
+                Some((normalized_symbol, clipped))
             }
         })
         .collect::<Vec<_>>();
 
-    let total: f64 = out.iter().map(|x| x.weight).sum();
+    let total: f64 = out.iter().map(|(_, weight)| *weight).sum();
     if total > 1.0 {
-        for item in &mut out {
-            item.weight /= total;
+        for (_, weight) in &mut out {
+            *weight /= total;
         }
     }
-    out.sort_by(|a, b| b.weight.partial_cmp(&a.weight).unwrap_or(std::cmp::Ordering::Equal));
+
     out
 }
 
@@ -3635,23 +3634,16 @@ async fn start_backtest(
                         );
                     }
 
-                    current_weights = if symbols.len() == 1 {
-                        vec![PaperTargetState {
-                            symbol: symbols[0].clone(),
-                            weight: 1.0,
-                        }]
-                    } else {
-                        let forecasts = portfolio::generate_multi_asset_forecasts_from_history_map(
-                            &sliced_histories,
-                            &symbols,
-                            portfolio::PORTFOLIO_HORIZON,
-                            portfolio::PORTFOLIO_MC_PATHS,
-                            backend,
-                        )
-                        .await?;
-                        let allocation = portfolio::optimize_portfolio(&forecasts)?;
-                        normalize_allocation_weights(allocation.weights)
-                    };
+                    let forecasts = portfolio::generate_multi_asset_forecasts_from_history_map(
+                        &sliced_histories,
+                        &symbols,
+                        portfolio::PORTFOLIO_HORIZON,
+                        portfolio::PORTFOLIO_MC_PATHS,
+                        backend,
+                    )
+                    .await?;
+                    let allocation = portfolio::optimize_portfolio(&forecasts)?;
+                    current_weights = normalize_allocation_weights(allocation.weights);
 
                     let mut bt = backtest_state.lock().await;
                     bt.latest_weights = current_weights.clone();
@@ -4430,40 +4422,14 @@ async fn optimize_candidate_pool_targets(
     symbols: &[String],
     backend: config::ComputeBackend,
 ) -> Result<Vec<paper_trading::TargetWeight>> {
-    if symbols.len() == 1 {
-        return Ok(vec![paper_trading::TargetWeight {
-            symbol: symbols[0].clone(),
-            target_weight: 1.0,
-        }]);
-    }
-
     let allocation = portfolio::run_portfolio_optimization_with_backend(symbols, backend).await?;
-    let mut out = allocation
-        .weights
+    let out = normalize_weight_pairs_preserve_cash(allocation.weights)
         .into_iter()
-        .filter_map(|(symbol, target_weight)| {
-            let weight = target_weight.clamp(0.0, 1.0);
-            if weight > 0.0 {
-                Some(paper_trading::TargetWeight {
-                    symbol,
-                    target_weight: weight,
-                })
-            } else {
-                None
-            }
+        .map(|(symbol, target_weight)| paper_trading::TargetWeight {
+            symbol,
+            target_weight,
         })
         .collect::<Vec<_>>();
-
-    if out.is_empty() {
-        return Err(anyhow::anyhow!("Portfolio optimization returned empty weights"));
-    }
-
-    let total_weight: f64 = out.iter().map(|x| x.target_weight).sum();
-    if total_weight > 1.0 {
-        for target in &mut out {
-            target.target_weight /= total_weight;
-        }
-    }
 
     Ok(out)
 }

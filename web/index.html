@@ -1563,6 +1563,280 @@
       flex-shrink: 0;
     }
 
+      .portfolio-overlay-panel {
+        display: none;
+        margin-bottom: 14px;
+        overflow: hidden;
+        background:
+          radial-gradient(circle at top right, rgba(59,130,246,.12), transparent 32%),
+          linear-gradient(180deg, rgba(21,28,44,.98), rgba(15,20,32,.98));
+      }
+      .portfolio-overlay-panel.is-visible {
+        display: block;
+      }
+      .portfolio-overlay-body {
+        display: grid;
+        grid-template-columns: minmax(320px, 1.4fr) minmax(260px, 1fr);
+        gap: 16px;
+      }
+      .portfolio-overlay-main,
+      .portfolio-overlay-side {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .portfolio-overlay-hero {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .portfolio-overlay-title {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .portfolio-overlay-title h3 {
+        font-size: 18px;
+        line-height: 1.1;
+        letter-spacing: -.02em;
+      }
+      .portfolio-overlay-title p {
+        color: var(--muted);
+        max-width: 540px;
+      }
+      .regime-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        align-self: flex-start;
+        padding: 7px 12px;
+        border-radius: 999px;
+        border: 1px solid var(--border-2);
+        background: rgba(255,255,255,.04);
+        color: var(--text);
+        font-family: var(--mono);
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+        white-space: nowrap;
+      }
+      .regime-badge::before {
+        content: '';
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: currentColor;
+        box-shadow: 0 0 12px currentColor;
+      }
+      .regime-badge.risk-on {
+        color: var(--up);
+        background: rgba(0,212,170,.10);
+        border-color: rgba(0,212,170,.26);
+      }
+      .regime-badge.defensive {
+        color: var(--gold);
+        background: rgba(245,158,11,.10);
+        border-color: rgba(245,158,11,.28);
+      }
+      .regime-badge.risk-off {
+        color: var(--down);
+        background: rgba(255,71,87,.10);
+        border-color: rgba(255,71,87,.24);
+      }
+      .portfolio-overlay-metrics {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: 10px;
+      }
+      .overlay-metric-card {
+        background: rgba(255,255,255,.03);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 10px 12px;
+        min-height: 76px;
+      }
+      .overlay-metric-label {
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: .06em;
+        font-size: 10px;
+        font-weight: 600;
+        margin-bottom: 6px;
+      }
+      .overlay-metric-value {
+        font-size: 22px;
+        line-height: 1;
+        font-weight: 700;
+        font-family: var(--mono);
+        font-variant-numeric: tabular-nums;
+      }
+      .overlay-metric-sub {
+        margin-top: 6px;
+        font-size: 10px;
+        color: var(--muted);
+        font-family: var(--mono);
+      }
+      .overlay-exposure-wrap {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 12px;
+        background: rgba(255,255,255,.025);
+      }
+      .overlay-exposure-header {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 8px;
+        color: var(--muted);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: .06em;
+        font-weight: 600;
+      }
+      .overlay-exposure-bar {
+        display: flex;
+        min-height: 28px;
+        border-radius: 8px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,.03);
+      }
+      .overlay-exposure-seg {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 0;
+        padding: 0 6px;
+        color: rgba(255,255,255,.88);
+        font-size: 10px;
+        font-weight: 700;
+        font-family: var(--mono);
+        letter-spacing: .02em;
+        text-shadow: 0 1px 2px rgba(0,0,0,.35);
+      }
+      .overlay-exposure-seg.cash {
+        color: var(--text-2);
+        background: linear-gradient(135deg, rgba(107,122,153,.95), rgba(74,86,112,.95));
+        text-shadow: none;
+      }
+      .overlay-exposure-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 12px;
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+      .overlay-exposure-legend-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .overlay-exposure-legend-dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 3px;
+        flex-shrink: 0;
+      }
+      .overlay-diagnostics {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 12px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: rgba(255,255,255,.025);
+      }
+      .overlay-section-label {
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: .06em;
+        font-size: 10px;
+        font-weight: 600;
+      }
+      .overlay-diagnostic-row {
+        display: grid;
+        grid-template-columns: 132px 1fr 46px;
+        gap: 10px;
+        align-items: center;
+      }
+      .overlay-diagnostic-name,
+      .overlay-diagnostic-value {
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+      .overlay-diagnostic-name {
+        color: var(--text-2);
+      }
+      .overlay-diagnostic-value {
+        text-align: right;
+        color: var(--muted);
+      }
+      .overlay-diagnostic-track {
+        position: relative;
+        height: 10px;
+        border-radius: 999px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,.04);
+      }
+      .overlay-diagnostic-fill {
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      }
+      .overlay-diagnostic-fill.warn {
+        background: linear-gradient(90deg, var(--gold), #ffd166);
+      }
+      .overlay-diagnostic-fill.danger {
+        background: linear-gradient(90deg, #ff6b6b, var(--down));
+      }
+      .overlay-reasons {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 12px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: rgba(255,255,255,.025);
+        min-height: 100%;
+      }
+      .overlay-reason-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .overlay-reason-item {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: rgba(255,255,255,.03);
+        padding: 10px 12px;
+        color: var(--text-2);
+        line-height: 1.45;
+      }
+      .overlay-reasons-empty {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 112px;
+        border: 1px dashed var(--border-2);
+        border-radius: 10px;
+        color: var(--muted);
+        background: rgba(255,255,255,.02);
+        text-align: center;
+        padding: 14px;
+      }
+      @media (max-width: 980px) {
+        .portfolio-overlay-body {
+          grid-template-columns: 1fr;
+        }
+        .overlay-diagnostic-row {
+          grid-template-columns: 112px 1fr 44px;
+        }
+      }
+
     /* ─── Button Group Separator ─── */
     .btn-sep {
       width: 1px;
@@ -2606,6 +2880,29 @@
           </div>
         </div>
         <div id="portfolioStatsPanel" class="stat-cards" style="display:none;"></div>
+        <div id="portfolioOverlayPanel" class="panel portfolio-overlay-panel">
+          <div class="panel-header">
+            <div class="panel-title"><span class="panel-title-icon">R</span> Regime Overlay</div>
+            <div class="panel-subtitle">Post-optimizer exposure cap shared by portfolio, backtest, paper and FUTU.</div>
+          </div>
+          <div class="portfolio-overlay-body">
+            <div class="portfolio-overlay-main">
+              <div class="portfolio-overlay-hero">
+                <div class="portfolio-overlay-title">
+                  <h3 id="portfolioRegimeTitle">Awaiting optimization</h3>
+                  <p id="portfolioRegimeSubtitle">Run portfolio optimization to visualize exposure cap, target cash and breadth diagnostics.</p>
+                </div>
+                <div id="portfolioRegimeBadge" class="regime-badge">Pending</div>
+              </div>
+              <div id="portfolioOverlayMetrics" class="portfolio-overlay-metrics"></div>
+              <div id="portfolioExposureWrap" class="overlay-exposure-wrap"></div>
+            </div>
+            <div class="portfolio-overlay-side">
+              <div id="portfolioDiagnostics" class="overlay-diagnostics"></div>
+              <div id="portfolioReasons" class="overlay-reasons"></div>
+            </div>
+          </div>
+        </div>
         <div class="panel">
           <div class="panel-header">
             <div class="panel-title">
@@ -3453,6 +3750,6 @@
   </div>
 
   <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
-  <script src="/app.js?v=20260311a"></script>
+  <script src="/app.js?v=20260312a"></script>
 </body>
 </html>

@@ -272,9 +272,6 @@ pub async fn run_paper_trading(
     mut command_rx: Receiver<PaperCommand>,
 ) -> Result<()> {
     let target_weights = normalize_weights(&target_weights);
-    if target_weights.is_empty() {
-        return Err(anyhow!("No target weights for paper trading"));
-    }
 
     let (strategy_path, runtime_path) = create_output_paths()?;
 
@@ -448,13 +445,6 @@ pub async fn run_paper_trading(
                         .map(|t| (t.symbol.clone(), t.target_weight))
                         .collect::<Vec<_>>();
                     let normalized = normalize_weights(&tuples);
-                    if normalized.is_empty() {
-                        let _ = event_tx
-                            .send(PaperEvent::Warning("Ignored empty target update".to_string()))
-                            .await;
-                        continue;
-                    }
-
                     runtime.strategy_log.targets = normalized;
                     let _ = event_tx
                         .send(PaperEvent::TargetsUpdated {
@@ -953,13 +943,6 @@ pub async fn run_paper_trading_from_strategy_file(
                         .map(|t| (t.symbol.clone(), t.target_weight))
                         .collect::<Vec<_>>();
                     let normalized = normalize_weights(&tuples);
-                    if normalized.is_empty() {
-                        let _ = event_tx
-                            .send(PaperEvent::Warning("Ignored empty target update".to_string()))
-                            .await;
-                        continue;
-                    }
-
                     runtime.strategy_log.targets = normalized;
                     let _ = event_tx
                         .send(PaperEvent::TargetsUpdated {
@@ -1230,19 +1213,8 @@ async fn optimize_targets_from_candidate_pool(
         return Ok(false);
     }
 
-    let next_targets = if candidate_symbols.len() == 1 {
-        vec![TargetWeight {
-            symbol: candidate_symbols[0].clone(),
-            target_weight: 1.0,
-        }]
-    } else {
-        let alloc = portfolio::run_portfolio_optimization_with_backend(&candidate_symbols, backend).await?;
-        normalize_weights(&alloc.weights)
-    };
-
-    if next_targets.is_empty() {
-        return Ok(false);
-    }
+    let alloc = portfolio::run_portfolio_optimization_with_backend(&candidate_symbols, backend).await?;
+    let next_targets = normalize_weights(&alloc.weights);
 
     runtime.strategy_log.targets = next_targets;
     for target in &runtime.strategy_log.targets {

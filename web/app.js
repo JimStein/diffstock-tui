@@ -1530,6 +1530,191 @@ const formatSignedMoney = (v) => {
   return `${v >= 0 ? '+' : '-'}$${Math.abs(v).toFixed(2)}`;
 };
 
+const escapeHtmlText = (value) => String(value)
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
+
+const clampUnit = (value) => {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return 0;
+  return Math.max(0, Math.min(1, num));
+};
+
+const formatWeightPct = (value, digits = 1) => {
+  if (!Number.isFinite(value)) return '--';
+  return `${(value * 100).toFixed(digits)}%`;
+};
+
+const formatRegimeLabel = (state) => String(state || 'risk_on')
+  .split('_')
+  .filter(Boolean)
+  .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+  .join(' ');
+
+const getRegimeMeta = (state) => {
+  const normalized = String(state || 'risk_on').trim().toLowerCase();
+  if (normalized === 'risk_off') {
+    return {
+      stateClass: 'risk-off',
+      badge: 'Risk Off',
+      title: 'Capital protection is dominating the optimizer',
+      subtitle: 'The regime overlay has cut gross exposure to the floor and can intentionally push the sleeve to full cash.',
+    };
+  }
+  if (normalized === 'defensive') {
+    return {
+      stateClass: 'defensive',
+      badge: 'Defensive',
+      title: 'The optimizer is in capital preservation mode',
+      subtitle: 'Signals are mixed, so the overlay is capping gross exposure instead of letting vol targeting fully deploy.',
+    };
+  }
+  return {
+    stateClass: 'risk-on',
+    badge: 'Risk On',
+    title: 'The optimizer is allowed to deploy normally',
+    subtitle: 'Breadth and tail-risk checks are not forcing a defensive cap, so target exposure can follow the model output.',
+  };
+};
+
+const PORTFOLIO_WEIGHT_COLORS = ['#3b82f6', '#8b5cf6', '#00d4aa', '#f59e0b', '#ff4757', '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#a78bfa'];
+
+const renderPortfolioOverlay = (alloc) => {
+  const panel = document.getElementById('portfolioOverlayPanel');
+  const badge = document.getElementById('portfolioRegimeBadge');
+  const title = document.getElementById('portfolioRegimeTitle');
+  const subtitle = document.getElementById('portfolioRegimeSubtitle');
+  const metrics = document.getElementById('portfolioOverlayMetrics');
+  const exposureWrap = document.getElementById('portfolioExposureWrap');
+  const diagnostics = document.getElementById('portfolioDiagnostics');
+  const reasons = document.getElementById('portfolioReasons');
+  if (!panel || !badge || !title || !subtitle || !metrics || !exposureWrap || !diagnostics || !reasons) return;
+
+  if (!alloc || typeof alloc !== 'object') {
+    panel.classList.remove('is-visible');
+    return;
+  }
+
+  const regime = alloc.market_regime || {};
+  const stateMeta = getRegimeMeta(regime.state);
+  const weights = Array.isArray(alloc.weights) ? alloc.weights.filter((entry) => Array.isArray(entry) && Number(entry[1]) > 0) : [];
+  const deployedWeight = clampUnit(weights.reduce((sum, [, weight]) => sum + Number(weight || 0), 0));
+  const maxGross = clampUnit(alloc.max_gross_exposure);
+  const targetCash = clampUnit(Math.max(Number(alloc.target_cash_weight || 0), 1 - deployedWeight));
+  const reasonCount = Array.isArray(regime.reasons) ? regime.reasons.length : 0;
+
+  panel.classList.add('is-visible');
+  badge.className = `regime-badge ${stateMeta.stateClass}`;
+  badge.textContent = stateMeta.badge;
+  title.textContent = stateMeta.title;
+  subtitle.textContent = `${stateMeta.subtitle} Current state: ${formatRegimeLabel(regime.state)}.`;
+
+  metrics.innerHTML = `
+    <div class='overlay-metric-card'>
+      <div class='overlay-metric-label'>Max Gross</div>
+      <div class='overlay-metric-value'>${formatWeightPct(maxGross)}</div>
+      <div class='overlay-metric-sub'>Overlay ceiling</div>
+    </div>
+    <div class='overlay-metric-card'>
+      <div class='overlay-metric-label'>Target Cash</div>
+      <div class='overlay-metric-value'>${formatWeightPct(targetCash)}</div>
+      <div class='overlay-metric-sub'>Residual dry powder</div>
+    </div>
+    <div class='overlay-metric-card'>
+      <div class='overlay-metric-label'>Deployed</div>
+      <div class='overlay-metric-value'>${formatWeightPct(deployedWeight)}</div>
+      <div class='overlay-metric-sub'>Sum of live target weights</div>
+    </div>
+    <div class='overlay-metric-card'>
+      <div class='overlay-metric-label'>Triggers</div>
+      <div class='overlay-metric-value'>${reasonCount}</div>
+      <div class='overlay-metric-sub'>Active overlay reasons</div>
+    </div>
+  `;
+
+  const exposureSegments = [...weights]
+    .sort((a, b) => Number(b[1]) - Number(a[1]))
+    .map(([symbol, weight], index) => ({
+      label: String(symbol || '').toUpperCase(),
+      weight: clampUnit(weight),
+      color: PORTFOLIO_WEIGHT_COLORS[index % PORTFOLIO_WEIGHT_COLORS.length],
+      cash: false,
+    }));
+  if (targetCash > 0.0001) {
+    exposureSegments.push({
+      label: 'Cash',
+      weight: targetCash,
+      color: '#6b7a99',
+      cash: true,
+    });
+  }
+  const exposureBar = exposureSegments.length > 0
+    ? exposureSegments.map((segment) => {
+      const pct = formatWeightPct(segment.weight);
+      const text = segment.weight >= 0.12 ? `${segment.label} ${pct}` : segment.weight >= 0.06 ? segment.label : '';
+      return `<div class='overlay-exposure-seg${segment.cash ? ' cash' : ''}' style='flex-basis:${(segment.weight * 100).toFixed(2)}%;${segment.cash ? '' : `background:${segment.color};`}' title='${escapeHtmlText(`${segment.label}: ${pct}`)}'>${escapeHtmlText(text)}</div>`;
+    }).join('')
+    : `<div class='overlay-exposure-seg cash' style='flex-basis:100%;'>Cash 100.0%</div>`;
+  const exposureLegend = exposureSegments.length > 0
+    ? exposureSegments.map((segment) => `<span class='overlay-exposure-legend-item'><span class='overlay-exposure-legend-dot' style='background:${segment.color}'></span>${escapeHtmlText(segment.label)} ${formatWeightPct(segment.weight)}</span>`).join('')
+    : `<span class='overlay-exposure-legend-item'><span class='overlay-exposure-legend-dot' style='background:#6b7a99'></span>Cash 100.0%</span>`;
+  exposureWrap.innerHTML = `
+    <div class='overlay-exposure-header'>
+      <span>Target Allocation Mix</span>
+      <span>Gross ${formatWeightPct(deployedWeight)} / Cash ${formatWeightPct(targetCash)}</span>
+    </div>
+    <div class='overlay-exposure-bar'>${exposureBar}</div>
+    <div class='overlay-exposure-legend'>${exposureLegend}</div>
+  `;
+
+  const breadthRows = [
+    { label: 'Bearish breadth', value: clampUnit(regime.bearish_breadth), warn: 0.5, danger: 0.7 },
+    { label: 'Negative return', value: clampUnit(regime.negative_return_breadth), warn: 0.5, danger: 0.7 },
+    { label: 'Negative sharpe', value: clampUnit(regime.negative_sharpe_breadth), warn: 0.5, danger: 0.7 },
+  ];
+  diagnostics.innerHTML = `
+    <div class='overlay-section-label'>Breadth Diagnostics</div>
+    ${breadthRows.map((row) => {
+      const fillClass = row.value >= row.danger ? 'danger' : row.value >= row.warn ? 'warn' : '';
+      return `
+        <div class='overlay-diagnostic-row'>
+          <div class='overlay-diagnostic-name'>${row.label}</div>
+          <div class='overlay-diagnostic-track'><div class='overlay-diagnostic-fill ${fillClass}' style='width:${(row.value * 100).toFixed(1)}%;'></div></div>
+          <div class='overlay-diagnostic-value'>${formatWeightPct(row.value, 0)}</div>
+        </div>`;
+    }).join('')}
+    <div class='overlay-section-label'>Portfolio Checks</div>
+    <div class='overlay-diagnostic-row'>
+      <div class='overlay-diagnostic-name'>Expected return</div>
+      <div class='overlay-diagnostic-track'><div class='overlay-diagnostic-fill ${Number(alloc.expected_annual_return) < 0 ? 'danger' : Number(alloc.expected_annual_return) < 0.08 ? 'warn' : ''}' style='width:${(clampUnit(Math.abs(Number(alloc.expected_annual_return || 0)) / 0.25) * 100).toFixed(1)}%;'></div></div>
+      <div class='overlay-diagnostic-value'>${formatWeightPct(Number(alloc.expected_annual_return || 0), 1)}</div>
+    </div>
+    <div class='overlay-diagnostic-row'>
+      <div class='overlay-diagnostic-name'>CVaR 95</div>
+      <div class='overlay-diagnostic-track'><div class='overlay-diagnostic-fill ${Math.abs(Number(alloc.cvar_95 || 0)) > 0.15 ? 'danger' : Math.abs(Number(alloc.cvar_95 || 0)) > 0.08 ? 'warn' : ''}' style='width:${(clampUnit(Math.abs(Number(alloc.cvar_95 || 0)) / 0.25) * 100).toFixed(1)}%;'></div></div>
+      <div class='overlay-diagnostic-value'>${formatWeightPct(Number(alloc.cvar_95 || 0), 1)}</div>
+    </div>
+  `;
+
+  if (reasonCount === 0) {
+    reasons.innerHTML = `
+      <div class='overlay-section-label'>Overlay Reasons</div>
+      <div class='overlay-reasons-empty'>No defensive throttle is active. The optimizer is operating without extra regime constraints.</div>
+    `;
+    return;
+  }
+
+  reasons.innerHTML = `
+    <div class='overlay-section-label'>Overlay Reasons</div>
+    <div class='overlay-reason-list'>
+      ${regime.reasons.map((reason) => `<div class='overlay-reason-item'>${escapeHtmlText(reason)}</div>`).join('')}
+    </div>
+  `;
+};
+
 const normalizeTradeSide = (side) => {
   const s = String(side || '').toUpperCase();
   if (s === 'BUY' || s === 'B') return 'BUY';
@@ -3184,22 +3369,29 @@ const fillAssetTable = (alloc, paperStatus) => {
     `;
   }
 
+  renderPortfolioOverlay(alloc);
+
   // Weight allocation bar
-  const WEIGHT_COLORS = ['#3b82f6','#8b5cf6','#00d4aa','#f59e0b','#ff4757','#ec4899','#06b6d4','#84cc16','#f97316','#a78bfa'];
   const barWrap = document.getElementById('portfolioWeightBar');
-  if (barWrap && alloc.weights && alloc.weights.length > 0) {
+  const cashWeight = clampUnit(Math.max(Number(alloc.target_cash_weight || 0), 1 - (alloc.weights || []).reduce((sum, [, w]) => sum + Number(w || 0), 0)));
+  if (barWrap && ((alloc.weights && alloc.weights.length > 0) || cashWeight > 0.0001)) {
     barWrap.style.display = '';
     const sorted = [...alloc.weights].sort((a, b) => b[1] - a[1]);
     let segments = '';
     let legendItems = '';
     sorted.forEach(([sym, w], i) => {
-      const color = WEIGHT_COLORS[i % WEIGHT_COLORS.length];
+      const color = PORTFOLIO_WEIGHT_COLORS[i % PORTFOLIO_WEIGHT_COLORS.length];
       const pct = (w * 100).toFixed(1);
       segments += `<div class='weight-bar-seg' style='flex-basis:${pct}%;background:${color};' title='${sym}: ${pct}%'>${w > 0.06 ? sym : ''}</div>`;
       legendItems += `<span class='weight-bar-legend-item'><span class='weight-bar-legend-dot' style='background:${color}'></span>${sym} ${pct}%</span>`;
     });
+    if (cashWeight > 0.0001) {
+      const cashPct = (cashWeight * 100).toFixed(1);
+      segments += `<div class='weight-bar-seg' style='flex-basis:${cashPct}%;background:#6b7a99;color:var(--text-2);text-shadow:none;' title='Cash: ${cashPct}%'>${cashWeight > 0.08 ? 'CASH' : ''}</div>`;
+      legendItems += `<span class='weight-bar-legend-item'><span class='weight-bar-legend-dot' style='background:#6b7a99'></span>Cash ${cashPct}%</span>`;
+    }
     barWrap.innerHTML = `
-      <div class='weight-bar-label'>Optimal Weight Allocation</div>
+      <div class='weight-bar-label'>Target Allocation Mix</div>
       <div class='weight-bar'>${segments}</div>
       <div class='weight-bar-legend'>${legendItems}</div>
     `;

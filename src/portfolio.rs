@@ -39,6 +39,10 @@ pub const CVAR_ALPHA: f64 = 0.05;
 /// Number of random portfolios to sample in Monte Carlo optimization.
 pub const OPTIMIZER_SAMPLES: usize = 100_000;
 
+/// Risk-off overlay thresholds.
+pub const REGIME_NEGATIVE_BREADTH_THRESHOLD: f64 = 0.75;
+pub const REGIME_CVAR_RISK_OFF_THRESHOLD: f64 = 0.04;
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Data Structures
 // ──────────────────────────────────────────────────────────────────────────────
@@ -67,6 +71,26 @@ pub struct AssetForecast {
     pub p90_price: f64,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MarketRegimeState {
+    RiskOn,
+    Defensive,
+    RiskOff,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MarketRegimeOverlay {
+    pub state: MarketRegimeState,
+    pub max_gross_exposure: f64,
+    pub bearish_breadth: f64,
+    pub negative_return_breadth: f64,
+    pub negative_sharpe_breadth: f64,
+    pub portfolio_expected_annual_return: f64,
+    pub portfolio_cvar_95: f64,
+    pub reasons: Vec<String>,
+}
+
 /// Complete portfolio allocation result.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PortfolioAllocation {
@@ -77,6 +101,86 @@ pub struct PortfolioAllocation {
     pub cvar_95: f64,                    // 95% CVaR of portfolio
     pub asset_forecasts: Vec<AssetForecast>,
     pub leverage: f64,                   // Vol-targeting leverage multiplier
+    pub max_gross_exposure: f64,
+    pub target_cash_weight: f64,
+    pub market_regime: MarketRegimeOverlay,
+}
+
+fn compute_market_regime_overlay(
+    forecasts: &[AssetForecast],
+    portfolio_expected_annual_return: f64,
+    portfolio_cvar_95: f64,
+) -> MarketRegimeOverlay {
+    let asset_count = forecasts.len().max(1) as f64;
+    let bearish_breadth = forecasts
+        .iter()
+        .filter(|forecast| forecast.p50_price <= forecast.current_price)
+        .count() as f64
+        / asset_count;
+    let negative_return_breadth = forecasts
+        .iter()
+        .filter(|forecast| forecast.annual_return <= 0.0)
+        .count() as f64
+        / asset_count;
+    let negative_sharpe_breadth = forecasts
+        .iter()
+        .filter(|forecast| forecast.sharpe <= 0.0)
+        .count() as f64
+        / asset_count;
+
+    let mut reasons = Vec::new();
+    if bearish_breadth >= REGIME_NEGATIVE_BREADTH_THRESHOLD {
+        reasons.push(format!(
+            "bearish breadth {:.0}% >= {:.0}%",
+            bearish_breadth * 100.0,
+            REGIME_NEGATIVE_BREADTH_THRESHOLD * 100.0
+        ));
+    }
+    if negative_return_breadth >= REGIME_NEGATIVE_BREADTH_THRESHOLD {
+        reasons.push(format!(
+            "negative-return breadth {:.0}% >= {:.0}%",
+            negative_return_breadth * 100.0,
+            REGIME_NEGATIVE_BREADTH_THRESHOLD * 100.0
+        ));
+    }
+    if negative_sharpe_breadth >= REGIME_NEGATIVE_BREADTH_THRESHOLD {
+        reasons.push(format!(
+            "negative-sharpe breadth {:.0}% >= {:.0}%",
+            negative_sharpe_breadth * 100.0,
+            REGIME_NEGATIVE_BREADTH_THRESHOLD * 100.0
+        ));
+    }
+    if portfolio_expected_annual_return <= 0.0 {
+        reasons.push(format!(
+            "portfolio expected annual return {:.2}% <= 0%",
+            portfolio_expected_annual_return * 100.0
+        ));
+    }
+    if portfolio_cvar_95 >= REGIME_CVAR_RISK_OFF_THRESHOLD {
+        reasons.push(format!(
+            "portfolio cvar {:.2}% >= {:.2}%",
+            portfolio_cvar_95 * 100.0,
+            REGIME_CVAR_RISK_OFF_THRESHOLD * 100.0
+        ));
+    }
+
+    let (state, max_gross_exposure) = match reasons.len() {
+        0 | 1 => (MarketRegimeState::RiskOn, 1.0),
+        2 => (MarketRegimeState::Defensive, 0.5),
+        3 => (MarketRegimeState::Defensive, 0.25),
+        _ => (MarketRegimeState::RiskOff, 0.0),
+    };
+
+    MarketRegimeOverlay {
+        state,
+        max_gross_exposure,
+        bearish_breadth,
+        negative_return_breadth,
+        negative_sharpe_breadth,
+        portfolio_expected_annual_return,
+        portfolio_cvar_95,
+        reasons,
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -379,43 +483,44 @@ pub fn optimize_portfolio(forecasts: &[AssetForecast]) -> Result<PortfolioAlloca
         );
     }
 
-    let mut best_weights: Vec<f64> = vec![1.0 / n as f64; n]; // Equal weight fallback
+    let refined_weights = if n == 1 {
+        vec![1.0]
+    } else {
+        let mut best_weights: Vec<f64> = vec![1.0 / n as f64; n];
 
-    // Phase 1: Maximum Sharpe via Monte Carlo random weight sampling
-    let best_candidate = (0..OPTIMIZER_SAMPLES)
-        .into_par_iter()
-        .map_init(rand::thread_rng, |rng, _| {
-            let weights = generate_random_weights(n, rng);
+        let best_candidate = (0..OPTIMIZER_SAMPLES)
+            .into_par_iter()
+            .map_init(rand::thread_rng, |rng, _| {
+                let weights = generate_random_weights(n, rng);
 
-            if weights.iter().any(|&w| w > MAX_SINGLE_WEIGHT) {
-                return None;
-            }
-            if weights.iter().any(|&w| w > 0.0 && w < MIN_SINGLE_WEIGHT) {
-                return None;
-            }
+                if weights.iter().any(|&w| w > MAX_SINGLE_WEIGHT) {
+                    return None;
+                }
+                if weights.iter().any(|&w| w > 0.0 && w < MIN_SINGLE_WEIGHT) {
+                    return None;
+                }
 
-            let port_ret = portfolio_return(&weights, &means) * periods_per_year;
-            let port_var = portfolio_variance(&weights, &cov) * periods_per_year;
-            let port_vol = port_var.sqrt();
-            if port_vol < 1e-8 {
-                return None;
-            }
+                let port_ret = portfolio_return(&weights, &means) * periods_per_year;
+                let port_var = portfolio_variance(&weights, &cov) * periods_per_year;
+                let port_vol = port_var.sqrt();
+                if port_vol < 1e-8 {
+                    return None;
+                }
 
-            let sharpe = (port_ret - RISK_FREE_RATE) / port_vol;
-            Some((sharpe, weights))
-        })
-        .filter_map(|candidate| candidate)
-        .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(Ordering::Equal));
+                let sharpe = (port_ret - RISK_FREE_RATE) / port_vol;
+                Some((sharpe, weights))
+            })
+            .filter_map(|candidate| candidate)
+            .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(Ordering::Equal));
 
-    if let Some((sharpe, weights)) = best_candidate {
-        let _ = sharpe;
-        best_weights = weights;
-    }
+        if let Some((sharpe, weights)) = best_candidate {
+            let _ = sharpe;
+            best_weights = weights;
+        }
 
-    // Phase 2: Among top candidates near the best Sharpe, prefer lower CVaR
-    // Re-sample around the best weights (local refinement)
-    let mut rng = rand::thread_rng();
-    let refined_weights = refine_weights(&best_weights, &means, &cov, forecasts, &mut rng);
+        let mut rng = rand::thread_rng();
+        refine_weights(&best_weights, &means, &cov, forecasts, &mut rng)
+    };
 
     let port_ret = portfolio_return(&refined_weights, &means) * periods_per_year;
     let port_var = portfolio_variance(&refined_weights, &cov) * periods_per_year;
@@ -434,29 +539,50 @@ pub fn optimize_portfolio(forecasts: &[AssetForecast]) -> Result<PortfolioAlloca
         1.0
     };
 
+    let regime_overlay = compute_market_regime_overlay(forecasts, port_ret, cvar);
+    let gross_exposure = leverage.min(regime_overlay.max_gross_exposure.max(0.0));
+
     let final_weights: Vec<(String, f64)> = forecasts
         .iter()
         .zip(refined_weights.iter())
-        .map(|(f, &w)| (f.symbol.clone(), w * leverage))
+        .map(|(f, &w)| (f.symbol.clone(), w * gross_exposure))
         .filter(|(_, w)| *w > 0.001) // Filter dust
         .collect();
 
-    let adjusted_return = port_ret * leverage;
-    let adjusted_vol = port_vol * leverage;
+    let adjusted_return = port_ret * gross_exposure;
+    let adjusted_vol = port_vol * gross_exposure;
     let adjusted_sharpe = if adjusted_vol > 1e-8 {
         (adjusted_return - RISK_FREE_RATE) / adjusted_vol
     } else {
         0.0
     };
+    let target_cash_weight = (1.0 - final_weights.iter().map(|(_, weight)| *weight).sum::<f64>())
+        .max(0.0)
+        .min(1.0);
+
+    info!(
+        "Regime overlay => state={:?}, max_gross_exposure={:.2}, reasons={}{}",
+        regime_overlay.state,
+        regime_overlay.max_gross_exposure,
+        regime_overlay.reasons.len(),
+        if regime_overlay.reasons.is_empty() {
+            String::new()
+        } else {
+            format!(" [{}]", regime_overlay.reasons.join("; "))
+        }
+    );
 
     Ok(PortfolioAllocation {
         weights: final_weights,
         expected_annual_return: adjusted_return,
         expected_annual_vol: adjusted_vol,
         sharpe_ratio: adjusted_sharpe,
-        cvar_95: cvar * leverage,
+        cvar_95: cvar * gross_exposure,
         asset_forecasts: forecasts.to_vec(),
         leverage,
+        max_gross_exposure: regime_overlay.max_gross_exposure,
+        target_cash_weight,
+        market_regime: regime_overlay,
     })
 }
 
@@ -818,6 +944,65 @@ mod tests {
         for (_, w) in &alloc.weights {
             assert!(*w > 0.0, "Output weights should be positive (after dust filter)");
         }
+    }
+
+    #[test]
+    fn test_optimize_portfolio_supports_single_asset() {
+        let forecasts = mock_forecasts(1);
+        let alloc = optimize_portfolio(&forecasts).expect("single-asset optimization should succeed");
+        assert!(alloc.leverage > 0.0, "Vol-target leverage should stay positive");
+        assert!(alloc.max_gross_exposure >= 0.0 && alloc.max_gross_exposure <= 1.0);
+    }
+
+    #[test]
+    fn test_risk_off_overlay_can_zero_exposure() {
+        let forecasts = vec![
+            AssetForecast {
+                symbol: "AAAA".to_string(),
+                current_price: 100.0,
+                expected_return: -0.02,
+                volatility: 0.03,
+                annual_return: -0.35,
+                annual_vol: 0.30,
+                sharpe: -1.2,
+                mc_period_returns: vec![-0.10, -0.08, -0.06, -0.05, -0.04, -0.09, -0.07, -0.03],
+                p10_price: 82.0,
+                p50_price: 90.0,
+                p90_price: 98.0,
+            },
+            AssetForecast {
+                symbol: "BBBB".to_string(),
+                current_price: 120.0,
+                expected_return: -0.018,
+                volatility: 0.028,
+                annual_return: -0.28,
+                annual_vol: 0.26,
+                sharpe: -0.9,
+                mc_period_returns: vec![-0.09, -0.07, -0.05, -0.04, -0.08, -0.06, -0.03, -0.02],
+                p10_price: 95.0,
+                p50_price: 108.0,
+                p90_price: 118.0,
+            },
+            AssetForecast {
+                symbol: "CCCC".to_string(),
+                current_price: 80.0,
+                expected_return: -0.022,
+                volatility: 0.032,
+                annual_return: -0.40,
+                annual_vol: 0.34,
+                sharpe: -1.4,
+                mc_period_returns: vec![-0.12, -0.10, -0.08, -0.06, -0.09, -0.07, -0.05, -0.04],
+                p10_price: 62.0,
+                p50_price: 72.0,
+                p90_price: 79.0,
+            },
+        ];
+
+        let alloc = optimize_portfolio(&forecasts).expect("risk-off optimization should succeed");
+        assert_eq!(alloc.max_gross_exposure, 0.0);
+        assert!(alloc.weights.is_empty(), "risk-off overlay should allow all-cash output");
+        assert_eq!(alloc.target_cash_weight, 1.0);
+        assert_eq!(alloc.market_regime.state, MarketRegimeState::RiskOff);
     }
 
     #[test]
