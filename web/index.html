@@ -2691,6 +2691,8 @@
     #tab-futu #futuLegend .legend-row:last-child {
       border-bottom: none;
       padding-bottom: 0;
+      grid-template-columns: minmax(82px, auto) minmax(0, 1fr);
+      align-items: start;
     }
     #tab-futu #futuLegend .legend-key {
       min-width: 0;
@@ -2699,6 +2701,12 @@
     #tab-futu #futuLegend .legend-val {
       color: #f3f7ff;
       font-variant-numeric: tabular-nums;
+    }
+    #tab-futu #futuLegend .legend-row:last-child .legend-val {
+      min-width: 0;
+      white-space: normal;
+      overflow-wrap: anywhere;
+      text-align: right;
     }
     #tab-futu .futu-main-column > .futu-book-panel {
       background:
