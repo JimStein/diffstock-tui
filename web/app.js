@@ -1537,6 +1537,18 @@ const formatSignedMoney = (v) => {
   return `${v >= 0 ? '+' : '-'}$${Math.abs(v).toFixed(2)}`;
 };
 
+const formatCompactCurrency = (v, { signed = false } = {}) => {
+  if (!Number.isFinite(v)) return '--';
+  const abs = Math.abs(v);
+  const formatter = new Intl.NumberFormat(undefined, {
+    notation: abs >= 1000 ? 'compact' : 'standard',
+    maximumFractionDigits: abs >= 1000 ? 1 : 2,
+    minimumFractionDigits: 0,
+  });
+  const prefix = signed ? (v >= 0 ? '+' : '-') : '';
+  return `${prefix}$${formatter.format(abs)}`;
+};
+
 const escapeHtmlText = (value) => String(value)
   .replace(/&/g, '&amp;')
   .replace(/</g, '&lt;')
@@ -1945,13 +1957,14 @@ const getOverlayElements = (scope) => {
     exposureWrap: document.getElementById(`${prefix}ExposureWrap`),
     diagnostics: document.getElementById(`${prefix}Diagnostics`),
     reasons: document.getElementById(`${prefix}Reasons`),
+    thresholds: document.getElementById(`${prefix}Thresholds`),
   };
 };
 
 const renderRegimeOverlay = (scope, alloc, asOf) => {
   const elements = getOverlayElements(scope);
-  const { panel, badge, title, subtitle, metrics, exposureWrap, diagnostics, reasons } = elements;
-  if (!panel || !badge || !title || !subtitle || !metrics || !exposureWrap || !diagnostics || !reasons) return;
+  const { panel, badge, title, subtitle, metrics, exposureWrap, diagnostics, reasons, thresholds } = elements;
+  if (!panel || !badge || !title || !subtitle || !metrics || !exposureWrap || !diagnostics || !reasons || !thresholds) return;
 
   const scopeMeta = REGIME_OVERLAY_SCOPES[scope] || REGIME_OVERLAY_SCOPES.portfolio;
   if (!alloc || typeof alloc !== 'object') {
@@ -1997,6 +2010,10 @@ const renderRegimeOverlay = (scope, alloc, asOf) => {
     reasons.innerHTML = `
       <div class='overlay-section-label'>触发原因</div>
       <div class='overlay-reasons-empty'>先执行一次 portfolio optimize、paper targets update，或让 backtest 进入首次 rebalance，这里就会出现实际内容。</div>
+    `;
+    thresholds.innerHTML = `
+      <div class='overlay-section-label'>阈值距离与主导项</div>
+      <div class='overlay-reasons-empty'>暂无阈值快照。保留这个空面板，方便确认当前 scope 已正确挂载调试节点。</div>
     `;
     return;
   }
@@ -2144,6 +2161,9 @@ const renderRegimeOverlay = (scope, alloc, asOf) => {
       ${escapeHtmlText(band.exit)}<br>
       当前迟滞状态: ${escapeHtmlText(hysteresisStatus)}
     </div>
+  `;
+
+  thresholds.innerHTML = thresholdInfo.rows.length > 0 ? `
     <div class='overlay-section-label'>阈值距离与主导项</div>
     <div class='overlay-threshold-grid'>
       ${thresholdInfo.rows.map((row) => `
@@ -2160,6 +2180,9 @@ const renderRegimeOverlay = (scope, alloc, asOf) => {
         <div class='overlay-threshold-line'><span>解释</span><span>当前 gross 压缩主要由这一项决定</span></div>
       </div>
     </div>
+  ` : `
+    <div class='overlay-section-label'>阈值距离与主导项</div>
+    <div class='overlay-reasons-empty'>当前 allocation 没有返回阈值距离明细，保留空面板以便继续排查数据链路。</div>
   `;
 
   if (reasonCount === 0) {
@@ -2820,6 +2843,7 @@ const renderFutuConnectionKpis = (futuStatus, futuContext) => {
   const badge = document.getElementById('futuKpiDurationBadge');
   if (!grid) return;
   renderFutuOverlay(futuStatus);
+  renderFutuAccountSectionPreview(futuStatus);
 
   const snapshot = futuStatus?.latest_snapshot;
   const strategySnapshot = futuStatus?.latest_strategy_snapshot;
@@ -2861,72 +2885,72 @@ const renderFutuConnectionKpis = (futuStatus, futuContext) => {
   const spreadClass = Number.isFinite(spreadPct) && spreadPct < 0 ? 'down' : 'up';
 
   grid.innerHTML = `
-    <div class='futu-kpi-column'>
-      <div class='futu-kpi-column-header'>
-        <div class='futu-kpi-column-title'>Account</div>
-        <div class='futu-kpi-column-subtitle'>Broker view</div>
+    <div class='futu-kpi-tail'>
+      <div class='futu-kpi-summary-item ${ddMood}'>
+        <div class='futu-kpi-summary-label'>Max Drawdown</div>
+        <div class='futu-kpi-summary-value ${Number.isFinite(maxDrawdownPct) && maxDrawdownPct < 0 ? 'down' : ''}'>${Number.isFinite(maxDrawdownPct) ? `${maxDrawdownPct.toFixed(2)}%` : '--'}</div>
       </div>
-      <div class='futu-conn-side-stack'>
-        <div class='paper-kpi-card kpi-neutral'>
-          <div class='paper-kpi-label'>Account NAV</div>
-          <div class='paper-kpi-value'>${Number.isFinite(totalAssets) ? `$${totalAssets.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--'}</div>
-          <div class='futu-kpi-sub'>USD</div>
-        </div>
-        <div class='paper-kpi-card ${pnlMood}'>
-          <div class='paper-kpi-label'>Account PnL</div>
-          <div class='paper-kpi-value ${Number.isFinite(pnlUsd) && pnlUsd < 0 ? 'down' : 'up'}'>${Number.isFinite(pnlUsd) ? `${formatSignedMoney(pnlUsd)} (${formatPct(pnlPct)})` : '--'}</div>
-          <div class='futu-kpi-sub'>USD</div>
-        </div>
-        <div class='paper-kpi-card kpi-neutral'>
-          <div class='paper-kpi-label'>Account Cash</div>
-          <div class='paper-kpi-value' id='futuAccountCash'>${Number.isFinite(cashUsd) ? `$${cashUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--'}</div>
-          <div class='futu-kpi-sub'>USD</div>
-        </div>
-        <div class='paper-kpi-card ${investedMood}'>
-          <div class='paper-kpi-label'>Open Risk</div>
-          <div class='paper-kpi-value ${investedClass}'>${Number.isFinite(investedPct) ? `${investedPct.toFixed(1)}%` : '--'}</div>
-          <div class='futu-kpi-sub'>%</div>
-        </div>
+      <div class='futu-kpi-summary-item ${winMood}'>
+        <div class='futu-kpi-summary-label'>Win Rate</div>
+        <div class='futu-kpi-summary-value'>${Number.isFinite(winRate) ? `${winRate.toFixed(1)}%` : '--'}</div>
+      </div>
+      <div class='futu-kpi-summary-item ${spreadMood}'>
+        <div class='futu-kpi-summary-label'>vs Benchmark</div>
+        <div class='futu-kpi-summary-value ${spreadClass}'>${Number.isFinite(spreadPct) ? `${spreadPct >= 0 ? '+' : ''}${spreadPct.toFixed(2)}%` : '--'}</div>
       </div>
     </div>
-    <div class='futu-kpi-column'>
-      <div class='futu-kpi-column-header'>
-        <div class='futu-kpi-column-title'>Strategy Sleeve</div>
-        <div class='futu-kpi-column-subtitle'>Strategy view</div>
-      </div>
-      <div class='futu-conn-side-stack'>
-        <div class='paper-kpi-card kpi-neutral'>
-          <div class='paper-kpi-label'>Sleeve NAV</div>
-          <div class='paper-kpi-value'>${Number.isFinite(strategyNav) ? `$${strategyNav.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--'}</div>
-          <div class='futu-kpi-sub'>USD</div>
+    <div class='futu-kpi-split'>
+      <section class='futu-kpi-section account'>
+        <div class='futu-kpi-section-head'>
+          <div class='futu-kpi-section-title'>Account</div>
+          <div class='futu-kpi-section-note'>Broker snapshot</div>
         </div>
-        <div class='paper-kpi-card ${strategyPnlMood}'>
-          <div class='paper-kpi-label'>Sleeve PnL</div>
-          <div class='paper-kpi-value ${Number.isFinite(strategyPnlUsd) && strategyPnlUsd < 0 ? 'down' : 'up'}'>${Number.isFinite(strategyPnlUsd) ? `${formatSignedMoney(strategyPnlUsd)} (${formatPct(strategyPnlPct)})` : '--'}</div>
-          <div class='futu-kpi-sub'>USD</div>
+        <div class='futu-kpi-section-grid'>
+          <div class='paper-kpi-card ${pnlMood} account-pnl-highlight'>
+            <div class='paper-kpi-label'>Account PnL</div>
+            <div class='paper-kpi-value ${Number.isFinite(pnlUsd) && pnlUsd < 0 ? 'down' : 'up'}'>${Number.isFinite(pnlUsd) ? `${formatSignedMoney(pnlUsd)} (${formatPct(pnlPct)})` : '--'}</div>
+            <div class='futu-kpi-sub'>Broker mark-to-market</div>
+          </div>
+          <div class='paper-kpi-card kpi-neutral'>
+            <div class='paper-kpi-label'>Account NAV</div>
+            <div class='paper-kpi-value'>${Number.isFinite(totalAssets) ? `$${totalAssets.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--'}</div>
+            <div class='futu-kpi-sub'>Broker equity</div>
+          </div>
+          <div class='paper-kpi-card kpi-neutral'>
+            <div class='paper-kpi-label'>Account Cash</div>
+            <div class='paper-kpi-value' id='futuAccountCash'>${Number.isFinite(cashUsd) ? `$${cashUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--'}</div>
+            <div class='futu-kpi-sub'>Available USD cash</div>
+          </div>
+          <div class='paper-kpi-card ${investedMood}'>
+            <div class='paper-kpi-label'>Open Risk</div>
+            <div class='paper-kpi-value ${investedClass}'>${Number.isFinite(investedPct) ? `${investedPct.toFixed(1)}%` : '--'}</div>
+            <div class='futu-kpi-sub'>Capital deployed</div>
+          </div>
         </div>
-        <div class='paper-kpi-card kpi-neutral'>
-          <div class='paper-kpi-label'>Cap Limit</div>
-          <div class='paper-kpi-value'>${hasCapitalLimit ? `$${capitalLimitUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'Unlimited'}</div>
-          <div class='futu-kpi-sub'>Applied to rebalance sizing</div>
-          <div class='futu-kpi-sub'>Startup base ${Number.isFinite(strategyBaseCapitalUsd) && strategyBaseCapitalUsd > 0 ? `$${strategyBaseCapitalUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--'}</div>
+      </section>
+      <section class='futu-kpi-section sleeve'>
+        <div class='futu-kpi-section-head'>
+          <div class='futu-kpi-section-title'>Sleeve</div>
+          <div class='futu-kpi-section-note'>Strategy snapshot</div>
         </div>
-        <div class='paper-kpi-card ${ddMood}'>
-          <div class='paper-kpi-label'>Max Drawdown</div>
-          <div class='paper-kpi-value ${Number.isFinite(maxDrawdownPct) && maxDrawdownPct < 0 ? 'down' : ''}'>${Number.isFinite(maxDrawdownPct) ? `${maxDrawdownPct.toFixed(2)}%` : '--'}</div>
-          <div class='futu-kpi-sub'>%</div>
+        <div class='futu-kpi-section-grid'>
+          <div class='paper-kpi-card kpi-neutral'>
+            <div class='paper-kpi-label'>Sleeve NAV</div>
+            <div class='paper-kpi-value'>${Number.isFinite(strategyNav) ? `$${strategyNav.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--'}</div>
+            <div class='futu-kpi-sub'>Strategy view</div>
+          </div>
+          <div class='paper-kpi-card ${strategyPnlMood}'>
+            <div class='paper-kpi-label'>Sleeve PnL</div>
+            <div class='paper-kpi-value ${Number.isFinite(strategyPnlUsd) && strategyPnlUsd < 0 ? 'down' : 'up'}'>${Number.isFinite(strategyPnlUsd) ? `${formatSignedMoney(strategyPnlUsd)} (${formatPct(strategyPnlPct)})` : '--'}</div>
+            <div class='futu-kpi-sub'>Strategy mark-to-market</div>
+          </div>
+          <div class='paper-kpi-card kpi-neutral'>
+            <div class='paper-kpi-label'>Cap Limit</div>
+            <div class='paper-kpi-value'>${hasCapitalLimit ? `$${capitalLimitUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'Unlimited'}</div>
+            <div class='futu-kpi-sub'>Base ${Number.isFinite(strategyBaseCapitalUsd) && strategyBaseCapitalUsd > 0 ? `$${strategyBaseCapitalUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--'}</div>
+          </div>
         </div>
-        <div class='paper-kpi-card ${winMood}'>
-          <div class='paper-kpi-label'>Win Rate</div>
-          <div class='paper-kpi-value'>${Number.isFinite(winRate) ? `${winRate.toFixed(1)}%` : '--'}</div>
-          <div class='futu-kpi-sub'>SELL fills %</div>
-        </div>
-        <div class='paper-kpi-card ${spreadMood}'>
-          <div class='paper-kpi-label'>vs Benchmark</div>
-          <div class='paper-kpi-value ${spreadClass}'>${Number.isFinite(spreadPct) ? `${spreadPct >= 0 ? '+' : ''}${spreadPct.toFixed(2)}%` : '--'}</div>
-          <div class='futu-kpi-sub'>%</div>
-        </div>
-      </div>
+      </section>
     </div>
   `;
 
@@ -2946,6 +2970,49 @@ const renderFutuConnectionKpis = (futuStatus, futuContext) => {
       badge.style.display = 'none';
     }
   }
+};
+
+const renderFutuAccountSectionPreview = (futuStatus) => {
+  const gatewayCard = document.getElementById('futuAccountPreviewGatewayCard');
+  const gatewayValue = document.getElementById('futuAccountPreviewGateway');
+  const navCard = document.getElementById('futuAccountPreviewNavCard');
+  const navValue = document.getElementById('futuAccountPreviewNav');
+  const pnlCard = document.getElementById('futuAccountPreviewPnlCard');
+  const pnlValue = document.getElementById('futuAccountPreviewPnl');
+  const sleeveCard = document.getElementById('futuAccountPreviewSleeveCard');
+  const sleeveValue = document.getElementById('futuAccountPreviewSleeve');
+  const sleevePnlCard = document.getElementById('futuAccountPreviewSleevePnlCard');
+  const sleevePnlValue = document.getElementById('futuAccountPreviewSleevePnl');
+  if (!gatewayCard || !gatewayValue || !navCard || !navValue || !pnlCard || !pnlValue || !sleeveCard || !sleeveValue || !sleevePnlCard || !sleevePnlValue) return;
+
+  const snapshot = futuStatus?.latest_snapshot;
+  const strategySnapshot = futuStatus?.latest_strategy_snapshot;
+  const totalAssets = Number(snapshot?.total_value);
+  const pnlUsd = Number(snapshot?.pnl_usd);
+  const pnlPct = Number(snapshot?.pnl_pct);
+  const strategyNav = Number(strategySnapshot?.total_value);
+  const strategyPnlUsd = Number(strategySnapshot?.pnl_usd);
+  const strategyPnlPct = Number(strategySnapshot?.pnl_pct);
+  const connected = !!futuStatus?.connected;
+
+  gatewayValue.textContent = connected ? 'Connected' : 'Offline';
+  gatewayCard.classList.toggle('is-live', connected);
+  gatewayCard.classList.toggle('is-warn', !connected);
+
+  navValue.textContent = Number.isFinite(totalAssets) ? formatCompactCurrency(totalAssets) : '--';
+
+  pnlValue.textContent = Number.isFinite(pnlUsd)
+    ? `${formatCompactCurrency(pnlUsd, { signed: true })}${Number.isFinite(pnlPct) ? ` · ${formatPct(pnlPct)}` : ''}`
+    : '--';
+  pnlCard.classList.toggle('is-positive', Number.isFinite(pnlUsd) && pnlUsd >= 0);
+  pnlCard.classList.toggle('is-negative', Number.isFinite(pnlUsd) && pnlUsd < 0);
+
+  sleeveValue.textContent = Number.isFinite(strategyNav) ? formatCompactCurrency(strategyNav) : '--';
+  sleevePnlValue.textContent = Number.isFinite(strategyPnlUsd)
+    ? `${formatCompactCurrency(strategyPnlUsd, { signed: true })}${Number.isFinite(strategyPnlPct) ? ` · ${formatPct(strategyPnlPct)}` : ''}`
+    : '--';
+  sleevePnlCard.classList.toggle('is-positive', Number.isFinite(strategyPnlUsd) && strategyPnlUsd >= 0);
+  sleevePnlCard.classList.toggle('is-negative', Number.isFinite(strategyPnlUsd) && strategyPnlUsd < 0);
 };
 
 const renderPaperRiskAlerts = (paperStatus) => {
@@ -4902,19 +4969,46 @@ const futuActivityTimeMatchesFilter = (row, keys = ['timestamp', 'create_time', 
   return tsMs >= cutoff;
 };
 
+const futuExtractTimestampMs = (row, keys = ['timestamp', 'create_time', 'updated_time', 'time']) => {
+  for (const key of keys) {
+    const raw = row?.[key];
+    if (raw === null || raw === undefined) continue;
+    const parsed = new Date(String(raw)).getTime();
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return 0;
+};
+
+const futuSortRowsByLatest = (rows, keys) => rows.slice().sort((left, right) => {
+  const leftTs = futuExtractTimestampMs(left, keys);
+  const rightTs = futuExtractTimestampMs(right, keys);
+  return rightTs - leftTs;
+});
+
+const futuResetScrollViewport = (element) => {
+  if (!element) return;
+  element.scrollTop = 0;
+  element.scrollLeft = 0;
+};
+
 const renderFutuOpenOrdersTable = (futuStatus) => {
   const tb = document.querySelector('#futuOpenOrdersTable tbody');
   if (!tb) return;
   tb.innerHTML = '';
 
-  const rows = (Array.isArray(futuStatus?.open_orders) ? futuStatus.open_orders : [])
+  const rows = futuSortRowsByLatest(
+    (Array.isArray(futuStatus?.open_orders) ? futuStatus.open_orders : [])
     .filter((row) => futuOrderLooksOpen(row))
     .filter((row) => futuSymbolMatchesFilter(futuReadField(row, ['code', 'symbol', 'ticker'], '')))
-    .filter((row) => futuActivityTimeMatchesFilter(row, ['create_time', 'updated_time', 'time']));
+    .filter((row) => futuActivityTimeMatchesFilter(row, ['create_time', 'updated_time', 'time'])),
+    ['create_time', 'updated_time', 'time']
+  );
+  const scrollShell = tb.closest('.futu-ops-table-shell');
   if (!rows.length) {
     const tr = document.createElement('tr');
     tr.innerHTML = `<td colspan='12'><div class='empty-state'><div class='empty-state-icon'>🧾</div>No open orders.<br>Pending / unfilled orders will appear here.</div></td>`;
     tb.appendChild(tr);
+    futuResetScrollViewport(scrollShell);
     return;
   }
 
@@ -4989,6 +5083,8 @@ const renderFutuOpenOrdersTable = (futuStatus) => {
     `;
     tb.appendChild(tr);
   }
+
+  futuResetScrollViewport(scrollShell);
 };
 
 const renderFutuCancelHistoryTable = (futuStatus) => {
@@ -4996,7 +5092,7 @@ const renderFutuCancelHistoryTable = (futuStatus) => {
   if (!tb) return;
   tb.innerHTML = '';
 
-  const localCancelRows = Array.isArray(futuStatus?.cancel_history) ? futuStatus.cancel_history.slice().reverse() : [];
+  const localCancelRows = Array.isArray(futuStatus?.cancel_history) ? futuStatus.cancel_history.slice() : [];
   const fallbackCancelRows = (Array.isArray(futuStatus?.history_orders) ? futuStatus.history_orders : [])
     .filter((row) => {
       const status = futuReadField(row, ['order_status', 'status', 'orderStatus'], '').toUpperCase();
@@ -5022,13 +5118,18 @@ const renderFutuCancelHistoryTable = (futuStatus) => {
     dedup.set(`${orderId}::${ts}`, row);
   }
 
-  const rows = Array.from(dedup.values())
-    .filter((row) => futuSymbolMatchesFilter(futuReadField(row, ['symbol', 'code'], '')))
-    .filter((row) => futuActivityTimeMatchesFilter(row, ['timestamp', 'updated_time', 'create_time', 'time']));
+  const rows = futuSortRowsByLatest(
+    Array.from(dedup.values())
+      .filter((row) => futuSymbolMatchesFilter(futuReadField(row, ['symbol', 'code'], '')))
+      .filter((row) => futuActivityTimeMatchesFilter(row, ['timestamp', 'updated_time', 'create_time', 'time'])),
+    ['timestamp', 'updated_time', 'create_time', 'time']
+  );
+  const scrollShell = tb.closest('.futu-ops-table-shell');
   if (!rows.length) {
     const tr = document.createElement('tr');
     tr.innerHTML = `<td colspan='9'><div class='empty-state'><div class='empty-state-icon'>🚫</div>No cancel records yet.<br>Auto-cancel events before rebalance will appear here.</div></td>`;
     tb.appendChild(tr);
+    futuResetScrollViewport(scrollShell);
     return;
   }
 
@@ -5061,6 +5162,8 @@ const renderFutuCancelHistoryTable = (futuStatus) => {
     `;
     tb.appendChild(tr);
   }
+
+  futuResetScrollViewport(scrollShell);
 };
 
 const renderFutuTradeHistory = (futuStatus) => {
@@ -5077,10 +5180,14 @@ const renderFutuTradeHistory = (futuStatus) => {
         const status = String(futuReadField(row, ['order_status', 'status'], '') || '').toUpperCase();
         return status.includes('FILLED');
       });
-  const rows = rowsRaw
-    .filter((row) => futuSymbolMatchesFilter(futuReadField(row, ['code', 'symbol', 'ticker'], '')));
+  const rows = futuSortRowsByLatest(
+    rowsRaw
+      .filter((row) => futuSymbolMatchesFilter(futuReadField(row, ['code', 'symbol', 'ticker'], ''))),
+    ['create_time', 'updated_time', 'time', 'timestamp']
+  );
   if (!rows.length) {
     box.innerHTML = `<div class='empty-state'><div class='empty-state-icon'>📒</div>No executed FUTU trades yet.<br>Filled executions will appear here.</div>`;
+    futuResetScrollViewport(box);
     return;
   }
 
@@ -5114,6 +5221,8 @@ const renderFutuTradeHistory = (futuStatus) => {
       </div>
     `;
   }).join('');
+
+  futuResetScrollViewport(box);
 };
 
 const refreshRealtimeQuotes = async () => {
@@ -5803,6 +5912,7 @@ setInterval(refreshPaper, 4000);
 
 const refreshFutu = async () => {
   try {
+    normalizeFutuTerminalSections();
     const st = await api('/api/futu/status');
     if (!latestPaperStatus || !Array.isArray(latestPaperStatus?.target_weights) || latestPaperStatus.target_weights.length === 0) {
       try {
@@ -5822,7 +5932,6 @@ const refreshFutu = async () => {
     const futuModeHeroCard = document.getElementById('futuModeHeroCard');
     const futuModeHeroTitle = document.getElementById('futuModeHeroTitle');
     const futuModeHeroText = document.getElementById('futuModeHeroText');
-    const futuModeHeroPill = document.getElementById('futuModeHeroPill');
     const futuModeSafetyCard = document.getElementById('futuModeSafetyCard');
     const futuModeSafetyTitle = document.getElementById('futuModeSafetyTitle');
     const futuModeSafetyText = document.getElementById('futuModeSafetyText');
@@ -5832,11 +5941,11 @@ const refreshFutu = async () => {
     const futuLiveGateCard = document.getElementById('futuLiveGateCard');
     const futuLiveGateTitle = document.getElementById('futuLiveGateTitle');
     const futuLiveGateText = document.getElementById('futuLiveGateText');
-    const futuLiveGatePill = document.getElementById('futuLiveGatePill');
     const futuManualOrderPanel = document.getElementById('futuManualOrderPanel');
     const futuManualGuard = document.getElementById('futuManualGuard');
     const futuExecPool = document.getElementById('futuExecPool');
     const futuConnStatus = document.getElementById('futuConnStatus');
+    const futuConnStatusCaption = document.getElementById('futuConnStatusCaption');
     const futuConnSummary = document.getElementById('futuConnSummary');
     const futuConnMarket = document.getElementById('futuConnMarket');
     const futuConnFirm = document.getElementById('futuConnFirm');
@@ -5851,6 +5960,7 @@ const refreshFutu = async () => {
     const futuAccPill = document.getElementById('futuAccPill');
     const futuAccIdBadge = document.getElementById('futuAccIdBadge');
     const futuAccountId = document.getElementById('futuAccountId');
+    const futuAccountMeta = document.getElementById('futuAccountMeta');
     const futuAccType = document.getElementById('futuAccType');
     const futuAccEnvVal = document.getElementById('futuAccEnvVal');
     const futuAccStatusVal = document.getElementById('futuAccStatusVal');
@@ -5876,6 +5986,7 @@ const refreshFutu = async () => {
       futuExecDot?.classList.add('active');
       futuConnDot?.classList.add('active');
       if (futuConnStatus) futuConnStatus.textContent = 'CONNECTED';
+      if (futuConnStatusCaption) futuConnStatusCaption.textContent = 'Gateway linked. Account balances, holdings and execution telemetry are flowing in.';
       if (futuConnSummary) futuConnSummary.textContent = 'Futu API connected · holdings syncing';
       if (futuConnCard) { futuConnCard.classList.remove('kpi-warn'); futuConnCard.classList.add('kpi-positive'); }
     } else {
@@ -5884,6 +5995,7 @@ const refreshFutu = async () => {
       futuExecDot?.classList.remove('paused');
       futuConnDot?.classList.remove('active');
       if (futuConnStatus) futuConnStatus.textContent = 'DISCONNECTED';
+      if (futuConnStatusCaption) futuConnStatusCaption.textContent = 'Gateway offline. Connect OpenD to unlock account context and live session metrics.';
       if (futuConnSummary) futuConnSummary.textContent = 'Waiting for Futu API or reconnecting';
       if (futuConnCard) { futuConnCard.classList.remove('kpi-positive'); futuConnCard.classList.add('kpi-warn'); }
     }
@@ -5933,6 +6045,7 @@ const refreshFutu = async () => {
       ? selectedAcc.trdmarket_auth.join(', ')
       : (selectedAcc?.trdmarket_auth ? String(selectedAcc.trdmarket_auth) : '--');
     if (futuAccountId) futuAccountId.textContent = String(selectedAccId);
+    if (futuAccountMeta) futuAccountMeta.textContent = `${String(selectedEnv || '--').toUpperCase()} · ${selectedAcc?.acc_type ?? '--'}`;
     if (futuAccType) futuAccType.textContent = `${selectedEnv} · ${selectedAcc?.acc_type ?? '--'}`;
     if (futuAccEnvVal) futuAccEnvVal.textContent = `Env: ${selectedEnv}`;
     if (futuAccStatusVal) futuAccStatusVal.textContent = `Status: ${selectedAcc?.acc_status ?? '--'}`;
@@ -5967,11 +6080,6 @@ const refreshFutu = async () => {
       futuModeHeroCard.classList.toggle('mode-real', isRealMode);
       futuModeHeroCard.classList.toggle('mode-sim', !isRealMode);
     }
-    if (futuModeHeroPill) {
-      futuModeHeroPill.textContent = isRealMode ? 'REAL' : 'SIM';
-      futuModeHeroPill.classList.toggle('mode-real', isRealMode);
-      futuModeHeroPill.classList.toggle('mode-sim', !isRealMode);
-    }
     if (futuModeSafetyCard) {
       futuModeSafetyCard.classList.toggle('mode-real', isRealMode);
       futuModeSafetyCard.classList.toggle('mode-sim', !isRealMode);
@@ -5985,8 +6093,8 @@ const refreshFutu = async () => {
     }
     if (futuModeHeroText) {
       futuModeHeroText.textContent = isRealMode
-        ? 'Real account selected. Execution is still gated.'
-        : 'Sandbox execution for rehearsal.';
+        ? 'Real account selected for inspection; order routing remains locked behind backend guardrails.'
+        : 'Sandbox route selected for order rehearsal and workflow dry-runs.';
     }
     if (futuModeCardSubtitle) {
       futuModeCardSubtitle.textContent = isRealMode
@@ -6017,13 +6125,8 @@ const refreshFutu = async () => {
     }
     if (futuLiveGateText) {
       futuLiveGateText.textContent = isRealMode
-        ? 'A REAL account is selected, but the backend still blocks live order placement. This page is prepared for future rollout, not yet armed for production trading.'
-        : 'FUTU is running in sandbox mode. This is the correct place to rehearse workflows before opening the live trading gate.';
-    }
-    if (futuLiveGatePill) {
-      futuLiveGatePill.textContent = isRealMode ? 'DISABLED' : 'SIM ONLY';
-      futuLiveGatePill.classList.toggle('sim', !isRealMode);
-      futuLiveGatePill.classList.toggle('real-disabled', isRealMode);
+        ? 'Backend lock active.'
+        : 'Use SIM for rehearsal.';
     }
     if (futuAccountApplyHint) futuAccountApplyHint.textContent = `Preferred account: #${preferredAccId} · Active account: #${selectedAccId}`;
     if (futuAccountSelect) {
@@ -6092,6 +6195,7 @@ const refreshFutu = async () => {
         ? `Strategy startup capital: $${strategyCap.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
         : 'Strategy startup capital: --';
     }
+    renderFutuAccountSectionPreview(st);
     if (futuLoadPathInput && st.runtime_file) {
       futuLoadPathInput.value = String(st.runtime_file);
       rememberFutuLoad(String(st.runtime_file), Array.isArray(st.snapshots) ? st.snapshots.length : 0, true);
@@ -7198,10 +7302,71 @@ const toggleFutuSection = (targetId, forceOpen = null, toggleEl = null) => {
   }
 };
 
+const normalizeFutuTerminalSections = () => {
+  const tab = document.getElementById('tab-futu');
+  const stack = tab?.querySelector('.futu-terminal-stack');
+  if (!tab || !stack) return;
+
+  const orderedNames = ['account', 'market', 'portfolio', 'workflow', 'audit'];
+  let previousSection = null;
+
+  for (const sectionName of orderedNames) {
+    const section = document.querySelector(`[data-futu-section="${sectionName}"]`);
+    if (!(section instanceof HTMLElement)) continue;
+
+    if (section.parentElement !== stack) {
+      stack.appendChild(section);
+    }
+
+    if (!previousSection) {
+      if (stack.firstElementChild !== section) {
+        stack.insertBefore(section, stack.firstElementChild);
+      }
+    } else if (previousSection.nextElementSibling !== section) {
+      stack.insertBefore(section, previousSection.nextElementSibling);
+    }
+
+    previousSection = section;
+  }
+};
+
 window.__toggleFutuSection = toggleFutuSection;
 
+const syncFutuNativeDrawerState = (drawer) => {
+  if (!(drawer instanceof HTMLElement)) return;
+  const isOpen = !!drawer.open;
+  const body = drawer.querySelector('.futu-drawer-body');
+  const toggle = drawer.querySelector('.futu-drawer-toggle');
+
+  drawer.classList.toggle('is-open', isOpen);
+  if (body instanceof HTMLElement) {
+    body.classList.toggle('open', isOpen);
+    body.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+    body.style.display = isOpen ? 'block' : 'none';
+  }
+  if (toggle instanceof HTMLElement) {
+    toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  }
+};
+
+const bindFutuNativeDrawers = () => {
+  document.querySelectorAll('#tab-futu details.futu-native-drawer').forEach((drawer) => {
+    if (!(drawer instanceof HTMLElement)) return;
+    if (drawer.dataset.futuNativeDrawerBound === '1') {
+      syncFutuNativeDrawerState(drawer);
+      return;
+    }
+
+    drawer.dataset.futuNativeDrawerBound = '1';
+    syncFutuNativeDrawerState(drawer);
+    drawer.addEventListener('toggle', () => {
+      syncFutuNativeDrawerState(drawer);
+    });
+  });
+};
+
 const bindFutuSectionToggles = () => {
-  document.querySelectorAll('#tab-futu .futu-section-toggle, #tab-futu .futu-drawer-toggle').forEach((toggle) => {
+  document.querySelectorAll('#tab-futu .futu-section-toggle').forEach((toggle) => {
     if (toggle.dataset.futuInlineToggle === '1') return;
     if (toggle.dataset.futuToggleBound === '1') return;
     toggle.dataset.futuToggleBound = '1';
@@ -7216,7 +7381,7 @@ const bindFutuSectionToggles = () => {
 };
 
 document.addEventListener('click', (event) => {
-  const toggle = event?.target?.closest?.('#tab-futu .futu-section-toggle, #tab-futu .futu-drawer-toggle');
+  const toggle = event?.target?.closest?.('#tab-futu .futu-section-toggle');
   if (!toggle) return;
   if (toggle.dataset.futuInlineToggle === '1') return;
   if (toggle.dataset.futuToggleBound === '1') return;
@@ -7226,7 +7391,9 @@ document.addEventListener('click', (event) => {
   toggleFutuSection(targetId, null, toggle);
 });
 
+normalizeFutuTerminalSections();
 bindFutuSectionToggles();
+bindFutuNativeDrawers();
 
 futuRecentLoads = loadFutuRecentLoads();
 renderFutuRecentLoads();

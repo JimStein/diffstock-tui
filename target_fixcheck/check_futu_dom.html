@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>FUTU DOM Check</title>
+</head>
+<body>
+  <pre id="out">loading</pre>
+  <iframe id="frame" style="width:1400px;height:1200px;border:0;"></iframe>
+  <script>
+    (async () => {
+      const out = document.getElementById('out');
+      const html = await fetch('http://localhost:8099/', { cache: 'no-store' }).then((r) => r.text());
+      const frame = document.getElementById('frame');
+      frame.srcdoc = html.replace('<head>', '<head><base href="http://localhost:8099/">');
+      frame.addEventListener('load', () => {
+        setTimeout(() => {
+          try {
+            const doc = frame.contentDocument;
+            const tab = doc.getElementById('tab-futu');
+            const workflow = doc.querySelector('[data-futu-section="workflow"]');
+            const audit = doc.querySelector('[data-futu-section="audit"]');
+            const portfolio = doc.querySelector('[data-futu-section="portfolio"]');
+            const lines = [];
+            lines.push('tab-futu=' + !!tab);
+            lines.push('portfolio-parent=' + (portfolio && portfolio.parentElement ? portfolio.parentElement.className : 'none'));
+            lines.push('workflow-parent=' + (workflow && workflow.parentElement ? workflow.parentElement.className : 'none'));
+            lines.push('audit-parent=' + (audit && audit.parentElement ? audit.parentElement.className : 'none'));
+            lines.push('workflow-in-tab=' + !!(workflow && workflow.closest('#tab-futu')));
+            lines.push('audit-in-tab=' + !!(audit && audit.closest('#tab-futu')));
+            lines.push('workflow-prev=' + (workflow && workflow.previousElementSibling ? workflow.previousElementSibling.getAttribute('data-futu-section') : 'none'));
+            lines.push('audit-prev=' + (audit && audit.previousElementSibling ? audit.previousElementSibling.getAttribute('data-futu-section') : 'none'));
+            out.textContent = lines.join('\n');
+          } catch (error) {
+            out.textContent = 'ERROR\n' + String(error && error.stack || error);
+          }
+        }, 3000);
+      }, { once: true });
+    })().catch((error) => {
+      document.getElementById('out').textContent = 'FETCH_ERROR\n' + String(error && error.stack || error);
+    });
+  </script>
+</body>
+</html>
