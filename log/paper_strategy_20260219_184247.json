@@ -30,19 +30,19 @@
   "targets": [
     {
       "symbol": "COPX",
-      "target_weight": 0.25391296472636266
+      "target_weight": 0.28326604889208595
     },
     {
       "symbol": "IAU",
-      "target_weight": 0.38870014375783635
+      "target_weight": 0.39958232122200893
     },
     {
       "symbol": "TLT",
-      "target_weight": 0.1888953233190562
+      "target_weight": 0.17110743427824782
     },
     {
       "symbol": "URA",
-      "target_weight": 0.14177982535588324
+      "target_weight": 0.14604419560765733
     }
   ],
   "analyses": [
@@ -2002,7 +2002,7 @@
           "quantity": 26.0,
           "price": 78.64,
           "notional": 2044.64,
-          "fee": 1.0223200000000001
+          "fee": 1.02232
         },
         {
           "timestamp": "2026-03-13T16:43:06.623306800+08:00",
@@ -2029,7 +2029,42 @@
           "quantity": 53.0,
           "price": 50.56,
           "notional": 2679.6800000000003,
-          "fee": 1.3398400000000001
+          "fee": 1.33984
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-13T17:23:12.991839100+08:00",
+      "portfolio_value_before": 77910.31253676381,
+      "portfolio_value_after": 77908.29946176382,
+      "cash_after": 1105.479461763823,
+      "trades": [
+        {
+          "timestamp": "2026-03-13T17:23:12.991839100+08:00",
+          "symbol": "COPX",
+          "side": "BUY",
+          "quantity": 29.0,
+          "price": 78.7,
+          "notional": 2282.3,
+          "fee": 1.14115
+        },
+        {
+          "timestamp": "2026-03-13T17:23:12.991839100+08:00",
+          "symbol": "TLT",
+          "side": "SELL",
+          "quantity": 16.0,
+          "price": 86.77,
+          "notional": 1388.32,
+          "fee": 0.69416
+        },
+        {
+          "timestamp": "2026-03-13T17:23:12.991839100+08:00",
+          "symbol": "URA",
+          "side": "BUY",
+          "quantity": 7.0,
+          "price": 50.79,
+          "notional": 355.53,
+          "fee": 0.17776499999999998
         }
       ]
     }
