@@ -10,7 +10,6 @@
   <style>
     /* ─── Design Tokens ─── */
     :root {
-      --bg:       #06090f;
       --bg-2:     #0a0e17;
       --panel:    #0f1420;
       --panel-2:  #151c2c;
@@ -22,7 +21,6 @@
       --muted-2:  #4a5670;
       --up:       #00d4aa;
       --up-bg:    rgba(0,212,170,.08);
-      --down:     #ff4757;
       --down-bg:  rgba(255,71,87,.08);
       --accent:   #3b82f6;
       --accent-2: #60a5fa;
@@ -35,7 +33,6 @@
       --radius-lg:14px;
       --shadow:   0 1px 3px rgba(0,0,0,.3), 0 4px 12px rgba(0,0,0,.2);
       --shadow-lg:0 4px 24px rgba(0,0,0,.4);
-      --font:     'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
       --mono:     'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace;
       --transition: .2s cubic-bezier(.4,0,.2,1);
     }
@@ -217,6 +214,7 @@
       transition: all .2s cubic-bezier(.4,0,.2,1);
       position: relative;
       margin: 1px 0;
+      overflow: hidden;
     }
     .tab-btn:hover {
       background: rgba(255,255,255,.04);
@@ -263,6 +261,7 @@
     .tab-btn.active .tab-icon { opacity: 1; filter: saturate(1.2); }
     .tab-label {
       flex: 1;
+      min-width: 0;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -294,6 +293,14 @@
       padding: 16px 20px;
       background: var(--bg);
       min-width: 0;
+      min-height: 0;
+    }
+    .content.futu-scroll-layout {
+      height: calc(100vh - 52px);
+      overflow: hidden;
+    }
+    .content.futu-scroll-layout > #tab-futu:not(.hidden) {
+      height: 100%;
     }
 
     /* ─── Panels ─── */
@@ -2322,11 +2329,39 @@
       color: #a8c7ff!important;
     }
     #futuTabBadge.mode-real {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 30px;
+      width: auto;
+      height: 18px;
+      padding: 0 6px;
+      border-radius: 999px;
+      margin-left: auto;
+      font-size: 9px;
+      line-height: 1;
+      font-weight: 800;
+      letter-spacing: .08em;
+      font-family: var(--mono);
       background: rgba(255,71,87,.16);
       border-color: rgba(255,71,87,.38);
       color: #ff9199;
     }
     #futuTabBadge.mode-sim {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 28px;
+      width: auto;
+      height: 18px;
+      padding: 0 6px;
+      border-radius: 999px;
+      margin-left: auto;
+      font-size: 9px;
+      line-height: 1;
+      font-weight: 800;
+      letter-spacing: .08em;
+      font-family: var(--mono);
       background: rgba(0,212,170,.12);
       border-color: rgba(0,212,170,.32);
       color: #87f1d4;
@@ -2338,18 +2373,633 @@
         radial-gradient(circle at left center, rgba(0,212,170,.10), transparent 34%),
         linear-gradient(180deg, rgba(11,16,26,.88) 0%, rgba(8,12,20,.94) 100%);
     }
+    #tab-futu:not(.hidden) {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      min-height: 0;
+      height: 100%;
+      overflow: hidden;
+    }
+    #tab-futu .futu-columns {
+      display: grid;
+      grid-template-columns: minmax(0, 1.72fr) minmax(380px, .86fr);
+      gap: 18px;
+      align-items: stretch;
+      min-height: 0;
+      height: 100%;
+      flex: 1 1 auto;
+      overflow: hidden;
+    }
+    #tab-futu .futu-main-column,
+    #tab-futu .futu-side-column {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      min-width: 0;
+      min-height: 0;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      padding: 0 4px 24px 0;
+      scroll-padding-bottom: 24px;
+    }
+    #tab-futu .futu-main-column::after,
+    #tab-futu .futu-side-column::after {
+      content: "";
+      display: block;
+      flex: 0 0 42px;
+      min-height: 42px;
+    }
+    #tab-futu .futu-side-column {
+      gap: 12px;
+    }
+    #tab-futu .futu-main-column::-webkit-scrollbar,
+    #tab-futu .futu-side-column::-webkit-scrollbar {
+      width: 6px;
+    }
+    #tab-futu .futu-main-column::-webkit-scrollbar-track,
+    #tab-futu .futu-side-column::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    #tab-futu .futu-main-column::-webkit-scrollbar-thumb,
+    #tab-futu .futu-side-column::-webkit-scrollbar-thumb {
+      background: rgba(255,255,255,.12);
+      border-radius: 6px;
+    }
+    #tab-futu > .futu-control-strip,
+    #tab-futu .futu-main-column > .panel,
+    #tab-futu .futu-side-column > .panel {
+      margin: 0;
+      border: 1px solid rgba(255,255,255,.06);
+      background:
+        radial-gradient(circle at top right, rgba(59,130,246,.05), transparent 34%),
+        linear-gradient(180deg, rgba(11,16,26,.88) 0%, rgba(8,12,20,.95) 100%);
+      box-shadow: 0 20px 44px rgba(0,0,0,.20);
+      overflow: visible;
+      min-width: 0;
+      flex-shrink: 0;
+    }
+    /* Tables inside FUTU panels: horizontal scroll when too wide */
+    #tab-futu .futu-main-column > .panel table,
+    #tab-futu .futu-side-column > .panel table {
+      display: block;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,.12) transparent;
+    }
+    #tab-futu .futu-main-column > .panel table::-webkit-scrollbar,
+    #tab-futu .futu-side-column > .panel table::-webkit-scrollbar {
+      height: 5px;
+    }
+    #tab-futu .futu-main-column > .panel table::-webkit-scrollbar-track,
+    #tab-futu .futu-side-column > .panel table::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    #tab-futu .futu-main-column > .panel table::-webkit-scrollbar-thumb,
+    #tab-futu .futu-side-column > .panel table::-webkit-scrollbar-thumb {
+      background: rgba(255,255,255,.12);
+      border-radius: 4px;
+    }
+    #tab-futu .futu-main-column > .panel table thead,
+    #tab-futu .futu-side-column > .panel table thead,
+    #tab-futu .futu-main-column > .panel table tbody,
+    #tab-futu .futu-side-column > .panel table tbody {
+      display: table;
+      width: 100%;
+      table-layout: auto;
+    }
+    /* Text overflow prevention for all FUTU cards */
+    #tab-futu .panel-subtitle,
+    #tab-futu .panel-title {
+      word-break: normal;
+      overflow-wrap: break-word;
+    }
+    #tab-futu .panel {
+      word-break: normal;
+      overflow-wrap: normal;
+    }
+    #tab-futu .paper-kpi-value,
+    #tab-futu .futu-conn-card-status,
+    #tab-futu .futu-conn-account-id,
+    #tab-futu .futu-conn-tag,
+    #tab-futu .futu-mode-pill,
+    #tab-futu .futu-live-gate-pill,
+    #tab-futu .legend-val,
+    #tab-futu .range-btn {
+      white-space: nowrap;
+      word-break: normal;
+      overflow-wrap: normal;
+    }
+    #tab-futu .panel-header {
+      display: grid;
+      gap: 4px;
+      align-items: start;
+      padding-bottom: 10px;
+      border-bottom: 1px solid rgba(255,255,255,.05);
+    }
+    #tab-futu .panel-title {
+      font-size: 12px;
+      line-height: 1.35;
+      font-weight: 700;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: #e6eefb;
+    }
+    #tab-futu .panel-title-icon {
+      width: 18px;
+      height: 18px;
+      font-size: 13px;
+      opacity: .88;
+      color: #8ec5ff;
+      flex: 0 0 18px;
+    }
+    #tab-futu .panel-subtitle {
+      font-size: 10.5px;
+      line-height: 1.55;
+      color: #8fa0ba;
+      max-width: 72ch;
+    }
+    #tab-futu > .futu-control-strip,
+    #tab-futu .futu-columns {
+      min-width: 0;
+    }
+    #tab-futu > .futu-control-strip .panel-header,
+    #tab-futu .futu-main-column > .panel .panel-header,
+    #tab-futu .futu-side-column > .panel .panel-header {
+      margin-bottom: 12px;
+    }
+    #tab-futu .futu-mode-panel > .panel-header,
+    #tab-futu .futu-live-gate-card > div:first-child,
+    #tab-futu .futu-chart-stage > .panel-header,
+    #tab-futu .futu-book-panel > .panel-header,
+    #tab-futu .futu-overview-panel > .panel-header,
+    #tab-futu .futu-realtime-panel > .panel-header,
+    #tab-futu .futu-filter-panel > .panel-header,
+    #tab-futu .futu-orders-panel > .panel-header,
+    #tab-futu .futu-cancel-panel > .panel-header,
+    #tab-futu .futu-trade-history-panel > .panel-header,
+    #tab-futu .futu-log-panel > .panel-header,
+    #tab-futu .futu-checklist-panel > .panel-header {
+      margin-bottom: 14px;
+    }
+    #tab-futu > .futu-control-strip {
+      flex: 0 0 auto;
+      margin-bottom: 0;
+      background:
+        radial-gradient(circle at right top, rgba(0,212,170,.08), transparent 30%),
+        linear-gradient(180deg, rgba(13,19,31,.94) 0%, rgba(9,13,22,.98) 100%);
+    }
+    #tab-futu .futu-side-column > .futu-checklist-panel {
+      display: none;
+      flex-direction: column;
+      min-height: 0;
+    }
+    #tab-futu .futu-side-column > .futu-checklist-panel.is-visible {
+      display: flex;
+    }
+    #tab-futu .futu-main-column > .futu-overview-panel,
+    #tab-futu .futu-main-column > .futu-chart-stage,
+    #tab-futu .futu-main-column > .futu-book-panel {
+      padding: 16px 18px 18px;
+    }
+    #tab-futu .futu-side-column > .futu-realtime-panel,
+    #tab-futu .futu-side-column > .futu-filter-panel,
+    #tab-futu .futu-side-column > .futu-orders-panel,
+    #tab-futu .futu-side-column > .futu-cancel-panel,
+    #tab-futu .futu-side-column > .futu-trade-history-panel,
+    #tab-futu .futu-side-column > .futu-log-panel,
+    #tab-futu .futu-side-column > .futu-checklist-panel {
+      padding: 16px 18px 18px;
+    }
+    #tab-futu .futu-main-column > .futu-overview-panel .panel-subtitle,
+    #tab-futu .futu-main-column > .futu-chart-stage .panel-subtitle,
+    #tab-futu .futu-main-column > .futu-book-panel .panel-subtitle,
+    #tab-futu .futu-side-column > .futu-realtime-panel .panel-subtitle,
+    #tab-futu .futu-side-column > .futu-filter-panel .panel-subtitle,
+    #tab-futu .futu-side-column > .futu-orders-panel .panel-subtitle,
+    #tab-futu .futu-side-column > .futu-cancel-panel .panel-subtitle,
+    #tab-futu .futu-side-column > .futu-trade-history-panel .panel-subtitle,
+    #tab-futu .futu-side-column > .futu-log-panel .panel-subtitle {
+      max-width: 60ch;
+      color: var(--muted);
+    }
+    #tab-futu .futu-main-column > .futu-chart-stage {
+      background:
+        radial-gradient(circle at 15% 12%, rgba(0,212,170,.08), transparent 28%),
+        linear-gradient(180deg, rgba(12,19,30,.92) 0%, rgba(8,12,20,.97) 100%);
+      padding: 18px 20px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    #tab-futu .futu-main-column > .futu-chart-stage .range-group {
+      background: rgba(255,255,255,.03);
+      border: 1px solid rgba(255,255,255,.05);
+      border-radius: 999px;
+      padding: 4px;
+      width: fit-content;
+      max-width: 100%;
+      overflow-x: auto;
+    }
+    #tab-futu .futu-chart-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px 12px;
+    }
+    #tab-futu .futu-chart-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(248px, 282px);
+      gap: 14px;
+      align-items: stretch;
+      padding: 12px;
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,.06);
+      background: linear-gradient(180deg, rgba(6,10,16,.42) 0%, rgba(10,14,22,.20) 100%);
+    }
+    #tab-futu .futu-chart-layout > #futuChart {
+      min-width: 0;
+      min-height: 420px;
+      height: 420px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,.06);
+      background: linear-gradient(180deg, rgba(8,12,18,.94) 0%, rgba(11,17,27,.98) 100%);
+      box-shadow: inset 0 0 32px rgba(0,0,0,.18), 0 10px 24px rgba(0,0,0,.18);
+    }
+    #tab-futu #futuLegend.chart-legend {
+      position: static;
+      left: auto;
+      top: auto;
+      min-width: 0;
+      opacity: 1;
+      pointer-events: auto;
+      display: grid;
+      align-content: start;
+      gap: 8px;
+      padding: 14px 16px;
+      background: linear-gradient(180deg, rgba(10,15,23,.92) 0%, rgba(8,12,18,.98) 100%);
+      border: 1px solid rgba(255,255,255,.06);
+      border-radius: 14px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
+    }
+    #tab-futu #futuLegend .legend-title {
+      margin-bottom: 2px;
+      font-size: 11px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: #8ea2bf;
+    }
+    #tab-futu #futuLegend .legend-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: baseline;
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(255,255,255,.05);
+    }
+    #tab-futu #futuLegend .legend-row:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+    #tab-futu #futuLegend .legend-key {
+      min-width: 0;
+      color: #9cb0ca;
+    }
+    #tab-futu #futuLegend .legend-val {
+      color: #f3f7ff;
+      font-variant-numeric: tabular-nums;
+    }
+    #tab-futu .futu-main-column > .futu-book-panel {
+      background:
+        radial-gradient(circle at 100% 0%, rgba(59,130,246,.07), transparent 26%),
+        linear-gradient(180deg, rgba(11,17,27,.90) 0%, rgba(8,12,20,.96) 100%);
+    }
+    #tab-futu .futu-mode-panel,
+    #tab-futu .futu-live-gate-card,
+    #tab-futu .futu-overview-panel,
+    #tab-futu .futu-chart-stage,
+    #tab-futu .futu-book-panel,
+    #tab-futu .futu-realtime-panel,
+    #tab-futu .futu-filter-panel,
+    #tab-futu .futu-orders-panel,
+    #tab-futu .futu-cancel-panel,
+    #tab-futu .futu-trade-history-panel,
+    #tab-futu .futu-log-panel,
+    #tab-futu .futu-checklist-panel {
+      box-shadow: 0 18px 40px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.03);
+    }
+    #tab-futu .futu-main-column > .futu-book-panel .panel-header + table,
+    #tab-futu .futu-main-column > .futu-book-panel table + .panel-header,
+    #tab-futu .futu-main-column > .futu-book-panel .futu-manual-order-panel,
+    #tab-futu .futu-main-column > .futu-book-panel #futuCapitalSummaryTable {
+      margin-top: 12px;
+    }
+    #tab-futu .futu-side-column > .futu-realtime-panel {
+      background:
+        radial-gradient(circle at top right, rgba(0,212,170,.08), transparent 24%),
+        linear-gradient(180deg, rgba(12,20,29,.90) 0%, rgba(9,14,22,.96) 100%);
+    }
+    #tab-futu .futu-side-column > .futu-log-panel,
+    #tab-futu .futu-side-column > .futu-trade-history-panel,
+    #tab-futu .futu-side-column > .futu-orders-panel,
+    #tab-futu .futu-side-column > .futu-cancel-panel {
+      background: linear-gradient(180deg, rgba(11,16,26,.90) 0%, rgba(8,12,19,.96) 100%);
+    }
+    #tab-futu .futu-side-column > .futu-filter-panel {
+      background: linear-gradient(180deg, rgba(14,18,28,.90) 0%, rgba(9,13,21,.96) 100%);
+    }
+    #tab-futu .futu-conn-main-wrap {
+      display: grid;
+      gap: 14px;
+    }
+    #tab-futu .futu-conn-main-card,
+    #tab-futu #futuOverlayPanel {
+      margin: 0;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,.07);
+      background: rgba(255,255,255,.03);
+    }
+    #tab-futu #futuOverlayPanel {
+      background:
+        radial-gradient(circle at top right, rgba(59,130,246,.08), transparent 26%),
+        linear-gradient(180deg, rgba(12,18,29,.88), rgba(8,12,20,.94));
+    }
+    #tab-futu .futu-conn-kpi-row {
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,.06);
+      padding: 14px 14px 16px;
+      background: rgba(255,255,255,.02);
+    }
+    #tab-futu .futu-conn-main-card,
+    #tab-futu .futu-conn-kpi-row,
+    #tab-futu #futuOverlayPanel {
+      border-radius: 16px;
+      padding: 16px 18px 18px;
+    }
+    #tab-futu .futu-conn-kpi-row .panel-header {
+      margin-bottom: 12px;
+    }
+    #futuConnKpiGrid.paper-kpi-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      align-items: start;
+    }
+    #futuConnKpiGrid .futu-kpi-column {
+      gap: 10px;
+      min-width: 0;
+    }
+    #futuConnKpiGrid .futu-kpi-column-header {
+      align-items: baseline;
+      padding: 0 2px;
+    }
+    #futuConnKpiGrid .futu-kpi-column-title {
+      font-size: 10.5px;
+      letter-spacing: .09em;
+    }
+    #futuConnKpiGrid .futu-kpi-column-subtitle {
+      font-size: 9.5px;
+      white-space: nowrap;
+    }
+    #futuConnKpiGrid .futu-conn-side-stack {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      min-width: 0;
+    }
+    #futuConnKpiGrid .paper-kpi-card {
+      min-height: 96px;
+      height: 100%;
+      padding: 11px 12px 12px;
+      gap: 6px;
+      justify-content: space-between;
+      border-radius: 14px;
+      border-left-width: 2px;
+      background: linear-gradient(180deg, rgba(12,18,28,.92) 0%, rgba(8,12,19,.96) 100%);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.03);
+      min-width: 0;
+    }
+    #futuConnKpiGrid .paper-kpi-label {
+      min-height: 20px;
+      line-height: 1.25;
+      font-size: 9.5px;
+      letter-spacing: .08em;
+      color: #8ea2bf;
+      text-wrap: balance;
+    }
+    #futuConnKpiGrid .paper-kpi-value {
+      min-height: 34px;
+      min-width: 0;
+      width: 100%;
+      font-size: clamp(12px, 0.45vw + 10px, 17px);
+      line-height: 1.2;
+      white-space: normal;
+      overflow: visible;
+      text-overflow: initial;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      font-variant-numeric: tabular-nums;
+      font-family: var(--mono);
+      color: #f3f7ff;
+    }
+    #futuConnKpiGrid .futu-kpi-sub {
+      margin-top: auto;
+      width: 100%;
+      min-height: 24px;
+      padding-top: 6px;
+      border-top: 1px solid rgba(255,255,255,.06);
+      font-size: 9.5px;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+    #tab-futu .futu-sleeve-strip {
+      display: grid;
+      gap: 10px;
+      padding: 12px 14px 14px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,.06);
+      background: linear-gradient(180deg, rgba(10,15,23,.92) 0%, rgba(8,12,18,.98) 100%);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.03);
+    }
+    #tab-futu .futu-sleeve-strip-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(255,255,255,.05);
+    }
+    #tab-futu .futu-sleeve-strip-title {
+      font-size: 11px;
+      line-height: 1.35;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: #dbe7f8;
+      font-family: var(--mono);
+    }
+    #tab-futu .futu-sleeve-strip-subtitle {
+      font-size: 10px;
+      line-height: 1.5;
+      color: #889ab5;
+    }
+    #tab-futu #futuOverlayMetrics.portfolio-overlay-metrics {
+      grid-template-columns: repeat(auto-fit, minmax(142px, 1fr));
+      gap: 10px;
+    }
+    #tab-futu #futuOverlayMetrics .overlay-metric-card {
+      min-height: 88px;
+      padding: 10px 12px 12px;
+      border-radius: 12px;
+      background: linear-gradient(180deg, rgba(12,18,28,.88) 0%, rgba(8,12,18,.95) 100%);
+      border: 1px solid rgba(255,255,255,.06);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.03);
+    }
+    #tab-futu #futuOverlayMetrics .overlay-metric-label {
+      font-family: var(--mono);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: #8ea2bf;
+      font-size: 9.5px;
+      line-height: 1.35;
+    }
+    #tab-futu #futuOverlayMetrics .overlay-metric-value {
+      font-family: var(--mono);
+      font-size: clamp(15px, .55vw + 12px, 18px);
+      line-height: 1.12;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: #f2f6ff;
+    }
+    #tab-futu #futuOverlayMetrics .overlay-metric-sub {
+      font-size: 10px;
+      line-height: 1.45;
+      color: #8b9db8;
+    }
+    #tab-futu .futu-side-column .panel-title {
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    #tab-futu .futu-side-column .panel-subtitle {
+      font-size: 10.5px;
+      line-height: 1.5;
+      max-width: none;
+    }
+    #tab-futu .futu-side-column .field,
+    #tab-futu .futu-side-column input,
+    #tab-futu .futu-side-column select,
+    #tab-futu .futu-side-column button {
+      min-width: 0;
+    }
+    #tab-futu .futu-conn-card-label,
+    #tab-futu .futu-mode-kicker,
+    #tab-futu .futu-mode-detail-label,
+    #tab-futu .futu-live-gate-kicker,
+    #tab-futu .legend-title,
+    #tab-futu .paper-kpi-label {
+      font-family: var(--mono);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    #tab-futu .futu-conn-card-status,
+    #tab-futu .futu-conn-account-id,
+    #tab-futu .futu-conn-tag-val,
+    #tab-futu .legend-val,
+    #tab-futu td.num,
+    #tab-futu th.num {
+      font-family: var(--mono);
+      font-variant-numeric: tabular-nums;
+    }
+    #tab-futu .futu-mode-detail-card {
+      display: grid;
+      grid-template-rows: auto auto auto;
+      gap: 6px;
+      min-height: 108px;
+      background: linear-gradient(180deg, rgba(10,16,24,.86) 0%, rgba(8,12,19,.94) 100%);
+    }
+    #tab-futu .futu-mode-detail-value {
+      white-space: normal;
+      word-break: normal;
+      overflow-wrap: break-word;
+      text-wrap: balance;
+      font-size: clamp(13px, .32vw + 11px, 15px);
+      line-height: 1.2;
+      font-weight: 700;
+      color: #edf3ff;
+      min-width: 0;
+      max-width: 18ch;
+    }
+    #tab-futu .futu-mode-detail-text {
+      font-size: 10px;
+      line-height: 1.4;
+      color: #95a6bf;
+      max-width: 24ch;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    #tab-futu .futu-mode-hero-card {
+      min-height: 108px;
+      padding: 14px 16px;
+    }
+    #tab-futu .futu-live-gate-title {
+      font-size: clamp(18px, .8vw + 12px, 22px);
+      line-height: 1.12;
+      letter-spacing: .04em;
+    }
+    #tab-futu .futu-live-gate-text,
+    #tab-futu .futu-mode-hero-text {
+      font-size: 11px;
+      line-height: 1.6;
+      color: #96a8c2;
+    }
+    #tab-futu .futu-conn-tag {
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.035);
+    }
+    #tab-futu .futu-conn-tag-val {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #tab-futu .futu-table-scroll,
+    #tab-futu .trade-history,
+    #tab-futu #futuLogBox,
+    #tab-futu .futu-checklist-grid {
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,.05);
+      background: rgba(7,10,16,.34);
+      padding: 8px;
+    }
+    #tab-futu .trade-history {
+      min-height: 280px;
+    }
+    #tab-futu .futu-table-scroll {
+      background: rgba(255,255,255,.015);
+    }
+    #tab-futu .futu-filter-strip {
+      padding-top: 4px;
+    }
+    #tab-futu .panel-title {
+      letter-spacing: .01em;
+    }
     #tab-futu .futu-mode-grid {
       display: grid;
-      grid-template-columns: minmax(280px, 1.5fr) repeat(2, minmax(220px, 1fr));
-      gap: 12px;
+      grid-template-columns: minmax(0, 1.2fr) repeat(2, minmax(0, .9fr));
+      gap: 10px;
       align-items: stretch;
     }
     #tab-futu .futu-mode-hero-card,
     #tab-futu .futu-mode-detail-card {
       border-radius: 14px;
       border: 1px solid rgba(255,255,255,.08);
-      padding: 16px 18px;
-      min-height: 128px;
+      padding: 14px 16px;
+      min-height: 108px;
+      min-width: 0;
     }
     #tab-futu .futu-mode-hero-card {
       background: linear-gradient(135deg, rgba(18,31,49,.92), rgba(12,19,30,.96));
@@ -2376,35 +3026,41 @@
     #tab-futu .futu-mode-hero-row {
       display: flex;
       justify-content: space-between;
-      gap: 14px;
+      gap: 10px;
       align-items: flex-end;
     }
+    #tab-futu .futu-mode-hero-row > div:first-child {
+      min-width: 0;
+    }
     #tab-futu .futu-mode-hero-title {
-      font-size: 28px;
-      line-height: 1;
+      font-size: clamp(16px, .6vw + 12px, 18px);
+      line-height: 1.08;
       font-weight: 800;
-      letter-spacing: .02em;
+      letter-spacing: .04em;
       color: var(--text-1);
-      margin-bottom: 8px;
+      margin-bottom: 5px;
+      text-wrap: balance;
     }
     #tab-futu .futu-mode-hero-text,
     #tab-futu .futu-mode-detail-text {
       color: var(--text-2);
-      line-height: 1.5;
-      max-width: 48ch;
+      line-height: 1.4;
+      max-width: 26ch;
     }
     #tab-futu .futu-mode-pill {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      min-width: 64px;
-      height: 34px;
-      padding: 0 14px;
+      min-width: 54px;
+      height: 28px;
+      padding: 0 10px;
       border-radius: 999px;
       font-family: var(--mono);
       font-weight: 800;
-      letter-spacing: .08em;
+      letter-spacing: .06em;
+      font-size: 11px;
       border: 1px solid transparent;
+      flex: 0 0 auto;
     }
     #tab-futu .futu-mode-pill.mode-real {
       background: rgba(255,71,87,.16);
@@ -2420,7 +3076,7 @@
       background: rgba(255,255,255,.03);
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 6px;
       justify-content: center;
     }
     #tab-futu .futu-mode-detail-card.mode-real {
@@ -2432,10 +3088,16 @@
       background: linear-gradient(180deg, rgba(0,212,170,.06), rgba(255,255,255,.02));
     }
     #tab-futu .futu-mode-detail-value {
-      font-size: 20px;
-      line-height: 1.1;
       color: var(--text-1);
       font-weight: 800;
+    }
+    @media (max-width: 1680px) {
+      #tab-futu .futu-mode-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      #tab-futu .futu-mode-hero-card {
+        grid-column: 1 / -1;
+      }
     }
     #tab-futu .futu-live-gate-card {
       border-radius: 16px;
@@ -2507,7 +3169,14 @@
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
       gap: 10px;
+      min-height: 0;
+      overflow-y: auto;
+      padding-right: 4px;
+      max-height: 320px;
     }
+    #tab-futu .futu-checklist-grid::-webkit-scrollbar { width: 5px; }
+    #tab-futu .futu-checklist-grid::-webkit-scrollbar-track { background: transparent; }
+    #tab-futu .futu-checklist-grid::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 6px; }
     #tab-futu .futu-checklist-item {
       border: 1px solid rgba(255,255,255,.06);
       border-radius: 12px;
@@ -2541,16 +3210,47 @@
       color: var(--muted);
       font-weight: 700;
     }
-    #tab-futu .futu-checklist-status {
-      font-size: 20px;
-      line-height: 1.1;
-      color: var(--text-1);
-      font-weight: 800;
+    #tab-futu .futu-checklist-pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.10);
+      background: rgba(255,255,255,.06);
+      color: #eff5ff;
+      font-family: var(--mono);
+      font-size: 9.5px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      white-space: nowrap;
+      flex: 0 0 auto;
+    }
+    #tab-futu .futu-checklist-pill.ok {
+      border-color: rgba(0,212,170,.26);
+      background: rgba(0,212,170,.12);
+      color: #8ff2d6;
+    }
+    #tab-futu .futu-checklist-pill.warn {
+      border-color: rgba(245,158,11,.26);
+      background: rgba(245,158,11,.12);
+      color: #ffd28a;
+    }
+    #tab-futu .futu-checklist-pill.fail {
+      border-color: rgba(255,71,87,.28);
+      background: rgba(255,71,87,.12);
+      color: #ffb2ba;
+    }
+    #tab-futu .futu-checklist-pill.unknown {
+      border-color: rgba(96,165,250,.24);
+      background: rgba(96,165,250,.10);
+      color: #add2ff;
     }
     #tab-futu .futu-checklist-text {
       color: var(--text-2);
       line-height: 1.45;
-      font-size: 12px;
+      font-size: 10.5px;
     }
     #tab-futu .futu-manual-order-panel.real-mode {
       border-color: rgba(255,71,87,.28);
@@ -2584,6 +3284,33 @@
       box-shadow: 0 10px 24px rgba(255,71,87,.18);
     }
     @media (max-width: 1100px) {
+      /* Reset the fixed viewport height so the whole page scrolls naturally */
+      .content.futu-scroll-layout {
+        height: auto;
+        overflow: visible;
+      }
+      .content.futu-scroll-layout > #tab-futu:not(.hidden) {
+        height: auto;
+      }
+      #tab-futu:not(.hidden) {
+        height: auto;
+        overflow: visible;
+      }
+      #tab-futu .futu-columns {
+        grid-template-columns: 1fr;
+        height: auto;
+        overflow: visible;
+      }
+      #tab-futu .futu-main-column,
+      #tab-futu .futu-side-column {
+        gap: 14px;
+        height: auto;
+        overflow: visible;
+        padding: 0 0 24px;
+      }
+      #tab-futu .futu-side-column > .futu-checklist-panel {
+        min-height: auto;
+      }
       #tab-futu .futu-mode-grid {
         grid-template-columns: 1fr;
       }
@@ -2594,6 +3321,18 @@
       #tab-futu .futu-live-gate-card {
         flex-direction: column;
         align-items: flex-start;
+      }
+      #tab-futu .futu-chart-layout {
+        grid-template-columns: 1fr;
+      }
+      #tab-futu .futu-chart-layout > #futuChart {
+        min-height: 360px;
+        height: 360px;
+      }
+      #tab-futu .futu-checklist-grid {
+        overflow: visible;
+        padding-right: 0;
+        max-height: none;
       }
     }
     .futu-kpi-sub-sep {
@@ -2619,11 +3358,17 @@
       background: rgba(6,9,15,.62);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      padding: 8px 12px;
+      padding: 8px 12px 20px;
       max-height: 240px;
       overflow-y: auto;
+      scroll-padding-bottom: 20px;
       scrollbar-width: thin;
       scrollbar-color: rgba(255,255,255,.08) transparent;
+    }
+    #futuLogBox::after {
+      content: "";
+      display: block;
+      min-height: 14px;
     }
     #futuLogBox::-webkit-scrollbar { width: 4px; }
     #futuLogBox::-webkit-scrollbar-track { background: transparent; }
@@ -2692,21 +3437,61 @@
       font-size: 12px;
       vertical-align: -5px;
     }
+    #tab-futu table {
+      border-collapse: separate;
+      border-spacing: 0;
+      width: 100%;
+      background: transparent;
+    }
     #tab-futu table thead tr th {
-      background: linear-gradient(180deg,rgba(21,28,44,.95) 0%,rgba(15,20,32,.75) 100%);
-      letter-spacing: .5px;
-      border-bottom: 1px solid rgba(0,212,170,.18);
-      padding: 9px 12px;
+      background: linear-gradient(180deg, rgba(20,28,42,.96) 0%, rgba(12,18,29,.90) 100%);
+      letter-spacing: .08em;
+      border-bottom: 1px solid rgba(0,212,170,.16);
+      border-top: 1px solid rgba(255,255,255,.04);
+      padding: 10px 12px;
       font-size: 10px;
+      line-height: 1.2;
       white-space: nowrap;
+      color: #8fa6c4;
+      font-family: var(--mono);
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+    #tab-futu table thead tr th:first-child {
+      border-top-left-radius: 10px;
+    }
+    #tab-futu table thead tr th:last-child {
+      border-top-right-radius: 10px;
     }
     #tab-futu table tbody td {
-      padding: 8px 12px;
+      padding: 10px 12px;
+      min-height: 42px;
       font-size: 12px;
+      line-height: 1.45;
+      font-variant-numeric: tabular-nums;
+      border-bottom: 1px solid rgba(255,255,255,.05);
+      background: rgba(10,14,22,.34);
+      color: #d3dceb;
+    }
+    #tab-futu table tbody tr:nth-child(even) td {
+      background: rgba(255,255,255,.018);
+    }
+    #tab-futu table tbody tr {
+      transition: transform .12s ease, background .15s ease;
+    }
+    #tab-futu table tbody tr:hover td {
+      background: rgba(0,212,170,.055);
+    }
+    #tab-futu table td.num,
+    #tab-futu table th.num {
+      text-align: right;
+      font-family: var(--mono);
       font-variant-numeric: tabular-nums;
     }
-    #tab-futu table tbody tr { transition: background .15s ease; }
-    #tab-futu table tbody tr:hover td { background: rgba(0,212,170,.035); }
+    #tab-futu table tbody td:not(.num) {
+      text-align: left;
+    }
     #tab-futu .panel {
       border-top: 1px solid rgba(0,212,170,.045);
     }
@@ -2722,12 +3507,21 @@
       scrollbar-width: thin;
       scrollbar-color: rgba(255,255,255,.10) transparent;
       border: 1px solid rgba(255,255,255,.05);
-      border-radius: 8px;
+      border-radius: 10px;
+      background: rgba(8,12,18,.42);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.03);
     }
     #tab-futu .futu-table-scroll::-webkit-scrollbar { width: 5px; }
     #tab-futu .futu-table-scroll::-webkit-scrollbar-track { background: transparent; }
     #tab-futu .futu-table-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 6px; }
     #tab-futu .futu-table-scroll table { margin: 0; }
+    #tab-futu .futu-book-panel > table,
+    #tab-futu .futu-book-panel .futu-table-scroll > table {
+      border: 1px solid rgba(255,255,255,.05);
+      border-radius: 10px;
+      overflow: hidden;
+      background: rgba(8,12,18,.36);
+    }
     #futuOpenOrdersTable { table-layout: auto; }
     #futuOpenOrdersTable td:nth-child(4),
     #futuCancelHistoryTable td:nth-child(4) {
@@ -2805,6 +3599,623 @@
     #tab-futu .futu-manual-order-panel select {
       font-family: var(--mono);
       font-variant-numeric: tabular-nums;
+    }
+
+    /* ─── Futu Single-Column Terminal Layout ─── */
+    .content.futu-scroll-layout {
+      height: auto;
+      overflow: visible;
+    }
+    .content.futu-scroll-layout > #tab-futu:not(.hidden) {
+      height: auto;
+    }
+    #tab-futu:not(.hidden) {
+      display: block;
+      height: auto;
+      overflow: visible;
+    }
+    #tab-futu .futu-terminal-stack {
+      display: grid;
+      gap: 18px;
+      min-width: 0;
+    }
+    #tab-futu .futu-terminal-section {
+      border: 1px solid rgba(255,255,255,.06);
+      border-radius: 18px;
+      background:
+        radial-gradient(circle at top right, rgba(59,130,246,.08), transparent 28%),
+        linear-gradient(180deg, rgba(11,16,26,.90) 0%, rgba(8,12,20,.96) 100%);
+      box-shadow: 0 22px 46px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.03);
+      overflow: hidden;
+    }
+    #tab-futu details.futu-terminal-section > summary,
+    #tab-futu details.futu-drawer-card > summary {
+      list-style: none;
+    }
+    #tab-futu details.futu-terminal-section > summary::-webkit-details-marker,
+    #tab-futu details.futu-drawer-card > summary::-webkit-details-marker {
+      display: none;
+    }
+    #tab-futu .futu-section-toggle {
+      width: 100%;
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(220px, auto) 24px;
+      gap: 16px;
+      align-items: center;
+      padding: 16px 18px;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+    #tab-futu .futu-section-toggle:hover {
+      background: rgba(255,255,255,.02);
+    }
+    #tab-futu .futu-section-copy {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+    #tab-futu .futu-section-kicker {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: #7f93b1;
+    }
+    #tab-futu .futu-section-title {
+      font-size: 16px;
+      line-height: 1.2;
+      font-weight: 700;
+      color: #eff5ff;
+      letter-spacing: -.01em;
+    }
+    #tab-futu .futu-section-subtitle {
+      font-size: 11px;
+      line-height: 1.55;
+      color: #90a2bf;
+      max-width: 72ch;
+    }
+    #tab-futu .futu-section-preview {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 6px;
+    }
+    #tab-futu .futu-section-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.07);
+      background: rgba(255,255,255,.04);
+      color: #b4c3d9;
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    #tab-futu .futu-section-chevron {
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.08);
+      background: rgba(255,255,255,.04);
+      position: relative;
+      transition: transform .25s ease, border-color var(--transition), background var(--transition);
+    }
+    #tab-futu .futu-section-chevron::before {
+      content: '';
+      position: absolute;
+      inset: 7px 8px 8px 7px;
+      border-right: 2px solid currentColor;
+      border-bottom: 2px solid currentColor;
+      color: #dbe7f8;
+      transform: rotate(45deg);
+      transition: transform .25s ease;
+    }
+    #tab-futu .futu-terminal-section.is-open .futu-section-chevron::before {
+      transform: rotate(-135deg) translate(-1px, 1px);
+    }
+    #tab-futu details.futu-terminal-section[open] .futu-section-chevron::before,
+    #tab-futu details.futu-drawer-card[open] .futu-section-chevron::before {
+      transform: rotate(-135deg) translate(-1px, 1px);
+    }
+    #tab-futu .futu-section-body {
+      overflow: hidden;
+      max-height: 0;
+      opacity: 0;
+      padding: 0 18px;
+      transition: max-height .45s ease, opacity .25s ease, padding .35s ease;
+    }
+    #tab-futu .futu-section-body.open {
+      max-height: 5200px;
+      opacity: 1;
+      padding: 0 18px 18px;
+    }
+    #tab-futu details.futu-terminal-section[open] > .futu-section-body {
+      max-height: 5200px;
+      opacity: 1;
+      padding: 0 18px 18px;
+      display: block !important;
+    }
+    #tab-futu .futu-zone-grid {
+      display: grid;
+      gap: 16px;
+      min-width: 0;
+    }
+    #tab-futu .futu-zone-stack {
+      display: grid;
+      gap: 16px;
+      min-width: 0;
+    }
+    #tab-futu .futu-zone-grid-account {
+      grid-template-columns: minmax(0, .98fr) minmax(0, 1.02fr);
+      align-items: start;
+    }
+    #tab-futu .futu-zone-grid-market {
+      grid-template-columns: minmax(0, 1.25fr) minmax(300px, .85fr);
+      align-items: start;
+    }
+    #tab-futu .futu-zone-grid-market > .futu-chart-stage {
+      grid-column: 1 / -1;
+    }
+    #tab-futu .futu-zone-grid-workflow {
+      grid-template-columns: 1fr;
+      align-items: start;
+    }
+    #tab-futu .futu-zone-grid-audit {
+      grid-template-columns: 1fr;
+      align-items: start;
+    }
+    #tab-futu .futu-account-stack {
+      gap: 12px;
+    }
+    #tab-futu .futu-terminal-section .panel {
+      margin: 0;
+      border: 1px solid rgba(255,255,255,.06);
+      background:
+        radial-gradient(circle at top right, rgba(59,130,246,.05), transparent 34%),
+        linear-gradient(180deg, rgba(11,16,26,.88) 0%, rgba(8,12,20,.95) 100%);
+      box-shadow: 0 18px 40px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.03);
+      overflow: visible;
+      min-width: 0;
+    }
+    #tab-futu .futu-overview-panel,
+    #tab-futu .futu-chart-stage,
+    #tab-futu .futu-book-panel,
+    #tab-futu .futu-realtime-panel,
+    #tab-futu .futu-filter-panel,
+    #tab-futu .futu-orders-panel,
+    #tab-futu .futu-cancel-panel,
+    #tab-futu .futu-trade-history-panel,
+    #tab-futu .futu-log-panel,
+    #tab-futu .futu-checklist-panel {
+      padding: 16px 18px 18px;
+    }
+    #tab-futu .futu-realtime-panel {
+      background:
+        radial-gradient(circle at top right, rgba(0,212,170,.08), transparent 24%),
+        linear-gradient(180deg, rgba(12,20,29,.90) 0%, rgba(9,14,22,.96) 100%);
+    }
+    #tab-futu .futu-trading-panel {
+      padding: 16px 18px 18px;
+      display: grid;
+      gap: 14px;
+      background:
+        radial-gradient(circle at top right, rgba(59,130,246,.08), transparent 26%),
+        linear-gradient(180deg, rgba(11,16,26,.90) 0%, rgba(8,12,20,.96) 100%);
+    }
+    #tab-futu .futu-trading-topbar {
+      display: grid;
+      grid-template-columns: minmax(0, 1.24fr) minmax(280px, .76fr);
+      gap: 12px;
+      align-items: start;
+    }
+    #tab-futu .futu-ops-header,
+    #tab-futu .futu-ops-section-header,
+    #tab-futu .futu-audit-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(255,255,255,.05);
+    }
+    #tab-futu .futu-ops-header-copy,
+    #tab-futu .futu-ops-section-copy,
+    #tab-futu .futu-audit-header-copy {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+    #tab-futu .futu-ops-title,
+    #tab-futu .futu-ops-section-title,
+    #tab-futu .futu-audit-title {
+      font-size: 12px;
+      line-height: 1.3;
+      font-weight: 700;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: #e6eefb;
+    }
+    #tab-futu .futu-ops-subtitle,
+    #tab-futu .futu-ops-section-subtitle,
+    #tab-futu .futu-audit-subtitle {
+      font-size: 10.5px;
+      line-height: 1.45;
+      color: #8fa0ba;
+      max-width: 60ch;
+    }
+    #tab-futu .futu-trading-history-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 12px;
+      min-width: 0;
+    }
+    #tab-futu .futu-panel-section,
+    #tab-futu .futu-drawer-card,
+    #tab-futu .futu-audit-shell {
+      min-width: 0;
+      border: 1px solid rgba(255,255,255,.06);
+      border-radius: 14px;
+      background: rgba(255,255,255,.025);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.03);
+    }
+    #tab-futu .futu-panel-section,
+    #tab-futu .futu-audit-shell {
+      padding: 14px;
+      display: grid;
+      gap: 10px;
+    }
+    #tab-futu .futu-ops-table-shell,
+    #tab-futu .futu-ops-stream {
+      min-width: 0;
+      border: 1px solid rgba(255,255,255,.05);
+      border-radius: 12px;
+      background: rgba(7,10,16,.30);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.03);
+    }
+    #tab-futu .futu-ops-table-shell {
+      overflow: auto;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,.12) transparent;
+    }
+    #tab-futu .futu-ops-table-shell::-webkit-scrollbar {
+      width: 5px;
+      height: 5px;
+    }
+    #tab-futu .futu-ops-table-shell::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    #tab-futu .futu-ops-table-shell::-webkit-scrollbar-thumb {
+      background: rgba(255,255,255,.12);
+      border-radius: 6px;
+    }
+    #tab-futu .futu-ops-table {
+      width: 100%;
+      min-width: 720px;
+      border-collapse: separate;
+      border-spacing: 0;
+      margin: 0;
+    }
+    #tab-futu .futu-ops-stream {
+      min-height: 240px;
+      padding: 8px;
+      overflow: auto;
+    }
+    #tab-futu .futu-ops-stream .empty-state,
+    #tab-futu .futu-ops-table-shell .empty-state,
+    #tab-futu .futu-audit-shell .empty-state {
+      padding: 18px 10px;
+      font-size: 11px;
+      color: #93a5bf;
+    }
+    #tab-futu .futu-ops-filter,
+    #tab-futu .futu-ops-orders,
+    #tab-futu .futu-ops-cancel,
+    #tab-futu .futu-ops-fills,
+    #tab-futu .futu-audit-panel {
+      min-width: 0;
+    }
+    #tab-futu .futu-ops-filter {
+      background: linear-gradient(180deg, rgba(14,18,28,.90) 0%, rgba(9,13,21,.96) 100%);
+    }
+    #tab-futu .futu-ops-orders,
+    #tab-futu .futu-ops-cancel,
+    #tab-futu .futu-ops-fills,
+    #tab-futu .futu-audit-panel {
+      background: linear-gradient(180deg, rgba(11,16,26,.90) 0%, rgba(8,12,19,.96) 100%);
+    }
+    #tab-futu .futu-drawer-card {
+      padding: 14px;
+      display: grid;
+      gap: 10px;
+      background:
+        radial-gradient(circle at top right, rgba(255,193,7,.08), transparent 26%),
+        linear-gradient(180deg, rgba(15,19,29,.92) 0%, rgba(9,13,21,.98) 100%);
+    }
+    #tab-futu .futu-checklist-summary-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(255,255,255,.05);
+    }
+    #tab-futu .futu-checklist-summary-title {
+      font-size: 12px;
+      line-height: 1.3;
+      font-weight: 700;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: #e6eefb;
+    }
+    #tab-futu .futu-checklist-summary-text {
+      font-size: 10.5px;
+      line-height: 1.5;
+      color: #8fa0ba;
+      max-width: 54ch;
+    }
+    #tab-futu .futu-checklist-summary-kicker {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: #7f93b1;
+      margin-bottom: 4px;
+    }
+    #tab-futu .futu-drawer-toggle {
+      width: 30px;
+      height: 30px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      cursor: pointer;
+      flex: 0 0 auto;
+    }
+    #tab-futu .futu-drawer-toggle .futu-section-chevron {
+      width: 30px;
+      height: 30px;
+      display: block;
+      pointer-events: none;
+    }
+    #tab-futu .futu-drawer-body {
+      overflow: hidden;
+      max-height: 0;
+      opacity: 0;
+      transition: max-height .35s ease, opacity .2s ease, padding-top .25s ease;
+      padding-top: 0;
+    }
+    #tab-futu .futu-drawer-body.open {
+      max-height: 1600px;
+      opacity: 1;
+      padding-top: 2px;
+    }
+    #tab-futu details.futu-drawer-card[open] > .futu-drawer-body {
+      max-height: 1600px;
+      opacity: 1;
+      padding-top: 2px;
+      display: block !important;
+    }
+    #tab-futu .futu-drawer-card.is-open .futu-section-chevron::before {
+      transform: rotate(-135deg) translate(-1px, 1px);
+    }
+    #tab-futu .futu-checklist-summary-row {
+      display: grid;
+      gap: 6px;
+    }
+    #tab-futu .futu-checklist-summary-badge {
+      display: inline-flex;
+      width: fit-content;
+      align-items: center;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.06);
+      border: 1px solid rgba(255,255,255,.08);
+      color: #eff5ff;
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    #tab-futu .futu-checklist-summary-meta {
+      font-size: 10.5px;
+      line-height: 1.5;
+      color: #a9b8cd;
+    }
+    #tab-futu .futu-checklist-summary-card.mode-real .futu-checklist-summary-badge {
+      background: rgba(255,71,87,.12);
+      border-color: rgba(255,71,87,.24);
+      color: #ffb0b6;
+    }
+    #tab-futu .futu-checklist-summary-card.mode-sim .futu-checklist-summary-badge {
+      background: rgba(0,212,170,.10);
+      border-color: rgba(0,212,170,.22);
+      color: #8ff2d6;
+    }
+    #tab-futu .futu-log-panel,
+    #tab-futu .futu-trade-history-panel,
+    #tab-futu .futu-orders-panel,
+    #tab-futu .futu-cancel-panel {
+      background: linear-gradient(180deg, rgba(11,16,26,.90) 0%, rgba(8,12,19,.96) 100%);
+    }
+    #tab-futu .futu-filter-panel {
+      background: linear-gradient(180deg, rgba(14,18,28,.90) 0%, rgba(9,13,21,.96) 100%);
+    }
+    #tab-futu .futu-chart-stage .range-group {
+      background: rgba(255,255,255,.03);
+      border: 1px solid rgba(255,255,255,.05);
+      border-radius: 999px;
+      padding: 4px;
+      width: fit-content;
+      max-width: 100%;
+      overflow-x: auto;
+    }
+    #tab-futu .futu-book-panel .panel-header + table,
+    #tab-futu .futu-book-panel table + .panel-header,
+    #tab-futu .futu-book-panel .futu-manual-order-panel,
+    #tab-futu .futu-book-panel #futuCapitalSummaryTable {
+      margin-top: 12px;
+    }
+    #tab-futu .futu-checklist-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      border: 0;
+      background: transparent;
+      padding: 0;
+      max-height: none;
+      overflow: visible;
+    }
+    #tab-futu .futu-checklist-cluster {
+      display: grid;
+      gap: 10px;
+      padding: 12px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,.06);
+      background:
+        radial-gradient(circle at top right, rgba(59,130,246,.07), transparent 28%),
+        linear-gradient(180deg, rgba(10,16,24,.92) 0%, rgba(8,12,18,.98) 100%);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.03);
+      min-width: 0;
+    }
+    #tab-futu .futu-checklist-cluster-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(255,255,255,.05);
+    }
+    #tab-futu .futu-checklist-cluster-title {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: #dbe7f8;
+      margin-bottom: 3px;
+    }
+    #tab-futu .futu-checklist-cluster-subtitle {
+      font-size: 10px;
+      line-height: 1.45;
+      color: #8ea2bf;
+      max-width: 28ch;
+    }
+    #tab-futu .futu-checklist-cluster-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 5px 9px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.08);
+      background: rgba(255,255,255,.05);
+      color: #eff5ff;
+      font-family: var(--mono);
+      font-size: 9.5px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    #tab-futu .futu-checklist-cluster-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    #tab-futu .futu-checklist-item {
+      min-height: 96px;
+      display: grid;
+      align-content: start;
+      gap: 8px;
+      border-radius: 12px;
+      padding: 12px 12px 13px;
+      background: linear-gradient(180deg, rgba(10,16,24,.92) 0%, rgba(8,12,18,.98) 100%);
+    }
+    #tab-futu .futu-checklist-item-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    #tab-futu .futu-live-gate-card {
+      padding: 12px 14px;
+      min-height: 0;
+      align-items: center;
+      gap: 10px;
+    }
+    #tab-futu .futu-live-gate-kicker {
+      margin-bottom: 4px;
+      font-size: 10px;
+    }
+    #tab-futu .futu-live-gate-title {
+      font-size: clamp(14px, .4vw + 12px, 16px);
+      margin-bottom: 4px;
+      line-height: 1.15;
+    }
+    #tab-futu .futu-live-gate-text {
+      font-size: 10px;
+      line-height: 1.45;
+      max-width: 40ch;
+    }
+    #tab-futu .futu-live-gate-pill {
+      min-width: 82px;
+      height: 30px;
+      padding: 0 10px;
+      font-size: 10px;
+    }
+    #tab-futu .futu-conn-main-wrap {
+      gap: 10px;
+    }
+    #tab-futu .futu-conn-main-card,
+    #tab-futu .futu-conn-kpi-row,
+    #tab-futu #futuOverlayPanel {
+      padding: 14px 16px 16px;
+    }
+    @media (max-width: 1280px) {
+      #tab-futu .futu-zone-grid-account,
+      #tab-futu .futu-zone-grid-market,
+      #tab-futu .futu-zone-grid-workflow,
+      #tab-futu .futu-zone-grid-audit {
+        grid-template-columns: 1fr;
+      }
+      #futuConnKpiGrid.paper-kpi-grid,
+      #tab-futu .futu-checklist-grid {
+        grid-template-columns: 1fr;
+      }
+      #futuConnKpiGrid .futu-conn-side-stack,
+      #tab-futu .futu-checklist-cluster-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      #tab-futu .futu-trading-topbar,
+      #tab-futu .futu-trading-history-grid {
+        grid-template-columns: 1fr;
+      }
+      #tab-futu .futu-section-toggle {
+        grid-template-columns: 1fr 24px;
+      }
+      #tab-futu .futu-section-preview {
+        display: none;
+      }
+    }
+    @media (max-width: 900px) {
+      #tab-futu .futu-section-toggle {
+        padding: 14px 16px;
+      }
+      #tab-futu .futu-section-body.open {
+        padding: 0 16px 16px;
+      }
+      #futuConnKpiGrid .futu-conn-side-stack,
+      #tab-futu .futu-checklist-cluster-grid {
+        grid-template-columns: 1fr;
+      }
+      #futuConnKpiGrid .futu-kpi-column-header,
+      #tab-futu .futu-checklist-cluster-head {
+        display: grid;
+        gap: 6px;
+      }
     }
 
     /* ─── Paper KPI & Alerts ─── */
@@ -3509,7 +4920,7 @@
 
       <!-- ══════ Paper Trading Tab ══════ -->
       <section id="tab-paper" class="tab-panel hidden">
-        <div class="panel paper-ctrl-panel">
+        <div class="panel paper-ctrl-panel futu-control-strip">
           <div class="paper-ctrl-header">
             <div class="paper-ctrl-summary">
               <span class="paper-ctrl-status">
@@ -3533,7 +4944,7 @@
           </div>
           <div id="paperRiskList" class="paper-risk-list"></div>
         </div>
-        <div class="panel">
+        <div class="panel futu-overview-panel">
           <div class="panel-header">
             <div class="panel-title"><span class="panel-title-icon">📊</span> Session KPI <span id="kpiDurationBadge" class="kpi-duration-badge" style="display:none;"></span></div>
             <div class="panel-subtitle">Live paper performance snapshot</div>
@@ -3563,7 +4974,7 @@
             </div>
           </div>
         </div>
-        <div class="panel" style="padding:12px;">
+        <div class="panel futu-chart-stage" style="padding:12px;">
           <div class="chart-summary-strip" id="chartSummaryStrip" style="display:none;"></div>
           <div class="range-group" id="paperRangeGroup">
             <button class="range-btn" data-paper-range-days="0.25">6h</button>
@@ -3587,7 +4998,7 @@
             </div>
           </div>
         </div>
-        <div class="panel">
+        <div class="panel futu-book-panel">
           <div class="panel-header">
             <div class="panel-title"><span class="panel-title-icon">&#128188;</span> Current Holdings</div>
             <div class="panel-subtitle" id="holdingsPoolBadge">Holding -- · In Pool -- · Not Held --</div>
@@ -3626,7 +5037,7 @@
             <tbody></tbody>
           </table>
         </div>
-        <div class="panel">
+        <div class="panel futu-realtime-panel">
           <div class="panel-header">
             <div class="panel-title"><span class="panel-title-icon">&#128221;</span> Trade History</div>
             <div class="panel-subtitle">Latest first · Scrollable</div>
@@ -3661,7 +5072,7 @@
 
       <!-- ══════ Futu Trade Tab ══════ -->
       <section id="tab-futu" class="tab-panel hidden">
-        <div class="panel paper-ctrl-panel">
+        <div class="panel paper-ctrl-panel futu-control-strip">
           <div class="paper-ctrl-header">
             <div class="paper-ctrl-summary">
               <span class="paper-ctrl-status">
@@ -3680,187 +5091,221 @@
             </div>
           </div>
         </div>
-        <div class="panel futu-mode-panel">
-          <div class="panel-header" style="margin-bottom:12px;">
-            <div class="panel-title"><span class="panel-title-icon">🛡</span> Trade Mode</div>
-            <div class="panel-subtitle" id="futuModeCardSubtitle">Simulation sandbox selected. This page is ready to evolve into real trading controls once live order routing is enabled.</div>
-          </div>
-          <div class="futu-mode-grid">
-            <div class="futu-mode-hero-card mode-sim" id="futuModeHeroCard">
-              <div class="futu-mode-kicker">Execution Route</div>
-              <div class="futu-mode-hero-row">
-                <div>
-                  <div class="futu-mode-hero-title" id="futuModeHeroTitle">SIMULATION SANDBOX</div>
-                  <div class="futu-mode-hero-text" id="futuModeHeroText">Orders currently target the FUTU simulate environment, suitable for dry runs and execution rehearsal.</div>
-                </div>
-                <div class="futu-mode-pill mode-sim" id="futuModeHeroPill">SIM</div>
-              </div>
-            </div>
-            <div class="futu-mode-detail-card mode-sim" id="futuModeSafetyCard">
-              <div class="futu-mode-detail-label">Order Safety</div>
-              <div class="futu-mode-detail-value" id="futuModeSafetyTitle">Simulation orders allowed</div>
-              <div class="futu-mode-detail-text" id="futuModeSafetyText">Manual orders and rebalance orders stay inside the sandbox account.</div>
-            </div>
-            <div class="futu-mode-detail-card mode-sim" id="futuModeRouteCard">
-              <div class="futu-mode-detail-label">Active Route</div>
-              <div class="futu-mode-detail-value" id="futuModeRouteTitle">Account -- · Env --</div>
-              <div class="futu-mode-detail-text" id="futuModeRouteText">Waiting for account selection and connection refresh.</div>
-            </div>
-          </div>
-        </div>
-        <div class="panel futu-live-gate-card sim" id="futuLiveGateCard">
-          <div>
-            <div class="futu-live-gate-kicker">Live Trading Gate</div>
-            <div class="futu-live-gate-title" id="futuLiveGateTitle">SIMULATION ONLY</div>
-            <div class="futu-live-gate-text" id="futuLiveGateText">FUTU is running in sandbox mode. Real-account context can be inspected later, but live order routing is not armed in this build.</div>
-          </div>
-          <div class="futu-live-gate-pill sim" id="futuLiveGatePill">SIM ONLY</div>
-        </div>
-        <div class="panel futu-checklist-panel">
-          <div class="panel-header" style="margin-bottom:12px;">
-            <div class="panel-title"><span class="panel-title-icon">✅</span> Real Trading Checklist</div>
-            <div class="panel-subtitle">Preparation matrix for moving from simulation rehearsal to a future live-trading rollout.</div>
-          </div>
-          <div class="futu-checklist-grid" id="futuChecklistGrid"></div>
-        </div>
-        <div class="panel">
-          <div class="panel-header" style="margin-bottom:14px;">
-            <div class="panel-title"><span class="panel-title-icon">🔌</span> Connection &amp; Account</div>
-            <div class="panel-subtitle" id="futuConnSummary">Waiting for FUTU trade API...</div>
-          </div>
-          <div class="futu-conn-main-wrap">
-
-            <!-- Connection status card -->
-            <div class="futu-conn-main-card kpi-warn" id="futuConnCard">
-              <!-- Banner row: status + account pill -->
-              <div class="futu-conn-status-banner">
-                <div class="futu-conn-status-left">
-                  <div class="futu-conn-card-top">
-                    <span class="chip-dot" id="futuConnDot"></span>
-                    <span class="futu-conn-card-label">OpenD Gateway</span>
-                  </div>
-                  <div class="futu-conn-status-row">
-                    <div class="futu-conn-card-status" id="futuConnStatus">DISCONNECTED</div>
-                  </div>
-                </div>
-                <div class="futu-conn-account-row">
-                  <span class="futu-conn-account-label">Account</span>
-                  <span class="futu-conn-account-id" id="futuAccountId">--</span>
-                </div>
-              </div>
-
-              <!-- Detail tags strip -->
-              <div class="futu-conn-detail-strip">
-                <div class="futu-conn-card-detail">
-                  <span class="futu-conn-tag">
-                    <span class="futu-conn-tag-icon">🌐</span>
-                    <span class="futu-conn-tag-val" id="futuConnHost">127.0.0.1:11111</span>
-                  </span>
-                  <span class="futu-conn-sep">·</span>
-                  <span class="futu-conn-tag">
-                    <span class="futu-conn-tag-icon">📊</span>
-                    <span class="futu-conn-tag-val" id="futuConnMarket">US</span>
-                  </span>
-                  <span class="futu-conn-sep">·</span>
-                  <span class="futu-conn-tag">
-                    <span class="futu-conn-tag-icon">🏢</span>
-                    <span class="futu-conn-tag-val" id="futuConnFirm">FutuSecurities</span>
-                  </span>
-                  <span class="futu-conn-tag">
-                    <span class="futu-conn-tag-icon">👤</span>
-                    <span class="futu-conn-tag-val" id="futuAccType">-- type</span>
-                  </span>
-                  <span class="futu-conn-tag">
-                    <span class="futu-conn-tag-icon">⚙️</span>
-                    <span class="futu-conn-tag-val" id="futuAccEnvVal">Env: --</span>
-                  </span>
-                  <span class="futu-conn-tag">
-                    <span class="futu-conn-tag-icon">✅</span>
-                    <span class="futu-conn-tag-val" id="futuAccStatusVal">Status: --</span>
-                  </span>
-                </div>
-              </div>
-
-              <!-- Hidden meta extras -->
-              <div class="futu-conn-meta-row">
-                <span class="futu-conn-meta-extra" id="futuAccRoleVal">Role: --</span>
-                <span class="futu-conn-meta-extra" id="futuAccSimTypeVal">Sim Type: --</span>
-                <span class="futu-conn-meta-extra" id="futuAccMarketAuthVal">Market Auth: --</span>
-                <span class="futu-conn-meta-extra" id="futuAccFirmVal">Firm: --</span>
-                <span class="futu-conn-meta-extra" id="futuAccCardVal">Card: --</span>
-                <span class="futu-conn-meta-extra" id="futuAccUniCardVal">Uni Card: --</span>
-              </div>
-
-              <div class="futu-conn-acc-pill" id="futuAccPill" style="display:none;">
-                <span id="futuAccIdBadge">--</span>
-              </div>
-            </div>
-
-            <!-- KPI cards - second row -->
-            <div class="futu-conn-kpi-row">
-              <div class="panel-header" style="margin-bottom:8px;">
-                <div class="panel-title">📊 Session KPI <span id="futuKpiDurationBadge" class="kpi-duration-badge" style="display:none;"></span></div>
-                <div class="panel-subtitle">Live FUTU trade performance snapshot</div>
-              </div>
-              <div id="futuConnKpiGrid" class="paper-kpi-grid"></div>
-            </div>
-
-            <div id="futuOverlayPanel" class="panel portfolio-overlay-panel">
-              <div class="panel-header">
-                <div class="panel-title"><span class="panel-title-icon">R</span> Regime Overlay</div>
-                <div class="panel-subtitle">FUTU 策略袖口沿用 paper 候选池优化出来的风险叠加层。</div>
-              </div>
-              <div class="portfolio-overlay-body">
-                <div class="portfolio-overlay-main">
-                  <div class="portfolio-overlay-hero">
-                    <div class="portfolio-overlay-title">
-                      <h3 id="futuRegimeTitle">等待策略分配快照</h3>
-                      <p id="futuRegimeSubtitle">最近一次候选池优化完成后，这里会同步显示 FUTU 侧使用的 regime 约束。</p>
+        <div class="futu-terminal-stack">
+          <section class="futu-terminal-section is-open" data-futu-section="account">
+            <button class="futu-section-toggle" type="button" data-futu-section-target="futuSectionAccount" data-futu-inline-toggle="1" aria-controls="futuSectionAccount" aria-expanded="true" onclick="window.__toggleFutuSection && window.__toggleFutuSection('futuSectionAccount', null, this)">
+              <span class="futu-section-copy">
+                <span class="futu-section-kicker">Account Zone</span>
+                <span class="futu-section-title">账户状态与交易上下文</span>
+                <span class="futu-section-subtitle">Trade mode, live gate, account connectivity and session KPI.</span>
+              </span>
+              <span class="futu-section-preview">
+                <span class="futu-section-chip">Mode</span>
+                <span class="futu-section-chip">Gateway</span>
+                <span class="futu-section-chip">KPI</span>
+              </span>
+              <span class="futu-section-chevron" aria-hidden="true"></span>
+            </button>
+            <div class="futu-section-body open" id="futuSectionAccount" aria-hidden="false" style="display:block;">
+              <div class="futu-zone-grid futu-zone-grid-account">
+                <div class="futu-zone-stack futu-account-stack">
+                  <div class="panel futu-mode-panel">
+                    <div class="panel-header" style="margin-bottom:12px;">
+                      <div class="panel-title"><span class="panel-title-icon">🛡</span> Trade Mode</div>
+                      <div class="panel-subtitle" id="futuModeCardSubtitle">Sim route active. Live routing stays gated.</div>
                     </div>
-                    <div id="futuRegimeBadge" class="regime-badge">Pending</div>
+                    <div class="futu-mode-grid">
+                      <div class="futu-mode-hero-card mode-sim" id="futuModeHeroCard">
+                        <div class="futu-mode-kicker">Execution Route</div>
+                        <div class="futu-mode-hero-row">
+                          <div>
+                            <div class="futu-mode-hero-title" id="futuModeHeroTitle">SIM SANDBOX</div>
+                            <div class="futu-mode-hero-text" id="futuModeHeroText">Sandbox execution for rehearsal.</div>
+                          </div>
+                          <div class="futu-mode-pill mode-sim" id="futuModeHeroPill">SIM</div>
+                        </div>
+                      </div>
+                      <div class="futu-mode-detail-card mode-sim" id="futuModeSafetyCard">
+                        <div class="futu-mode-detail-label">Order Safety</div>
+                        <div class="futu-mode-detail-value" id="futuModeSafetyTitle">SIM allowed</div>
+                        <div class="futu-mode-detail-text" id="futuModeSafetyText">Manual and rebalance orders stay in SIM.</div>
+                      </div>
+                      <div class="futu-mode-detail-card mode-sim" id="futuModeRouteCard">
+                        <div class="futu-mode-detail-label">Active Route</div>
+                        <div class="futu-mode-detail-value" id="futuModeRouteTitle">Account -- · Env --</div>
+                        <div class="futu-mode-detail-text" id="futuModeRouteText">US · 127.0.0.1:11111 · gateway waiting</div>
+                      </div>
+                    </div>
                   </div>
-                  <div id="futuOverlayMetrics" class="portfolio-overlay-metrics"></div>
-                  <div id="futuExposureWrap" class="overlay-exposure-wrap"></div>
+                  <div class="panel futu-live-gate-card sim" id="futuLiveGateCard">
+                    <div>
+                      <div class="futu-live-gate-kicker">Live Trading Gate</div>
+                      <div class="futu-live-gate-title" id="futuLiveGateTitle">SIMULATION ONLY</div>
+                      <div class="futu-live-gate-text" id="futuLiveGateText">FUTU is running in sandbox mode. Real-account context can be inspected later, but live order routing is not armed in this build.</div>
+                    </div>
+                    <div class="futu-live-gate-pill sim" id="futuLiveGatePill">SIM ONLY</div>
+                  </div>
                 </div>
-                <div class="portfolio-overlay-side">
-                  <div id="futuDiagnostics" class="overlay-diagnostics"></div>
-                  <div id="futuReasons" class="overlay-reasons"></div>
+                <div class="panel futu-overview-panel">
+                  <div class="panel-header" style="margin-bottom:14px;">
+                    <div class="panel-title"><span class="panel-title-icon">🔌</span> Connection &amp; Account</div>
+                    <div class="panel-subtitle" id="futuConnSummary">Waiting for FUTU trade API...</div>
+                  </div>
+                  <div class="futu-conn-main-wrap">
+                    <div class="futu-conn-main-card kpi-warn" id="futuConnCard">
+                      <div class="futu-conn-status-banner">
+                        <div class="futu-conn-status-left">
+                          <div class="futu-conn-card-top">
+                            <span class="chip-dot" id="futuConnDot"></span>
+                            <span class="futu-conn-card-label">OpenD Gateway</span>
+                          </div>
+                          <div class="futu-conn-status-row">
+                            <div class="futu-conn-card-status" id="futuConnStatus">DISCONNECTED</div>
+                          </div>
+                        </div>
+                        <div class="futu-conn-account-row">
+                          <span class="futu-conn-account-label">Account</span>
+                          <span class="futu-conn-account-id" id="futuAccountId">--</span>
+                        </div>
+                      </div>
+                      <div class="futu-conn-detail-strip">
+                        <div class="futu-conn-card-detail">
+                          <span class="futu-conn-tag"><span class="futu-conn-tag-icon">🌐</span><span class="futu-conn-tag-val" id="futuConnHost">127.0.0.1:11111</span></span>
+                          <span class="futu-conn-sep">·</span>
+                          <span class="futu-conn-tag"><span class="futu-conn-tag-icon">📊</span><span class="futu-conn-tag-val" id="futuConnMarket">US</span></span>
+                          <span class="futu-conn-sep">·</span>
+                          <span class="futu-conn-tag"><span class="futu-conn-tag-icon">🏢</span><span class="futu-conn-tag-val" id="futuConnFirm">FutuSecurities</span></span>
+                          <span class="futu-conn-tag"><span class="futu-conn-tag-icon">👤</span><span class="futu-conn-tag-val" id="futuAccType">-- type</span></span>
+                          <span class="futu-conn-tag"><span class="futu-conn-tag-icon">⚙️</span><span class="futu-conn-tag-val" id="futuAccEnvVal">Env: --</span></span>
+                          <span class="futu-conn-tag"><span class="futu-conn-tag-icon">✅</span><span class="futu-conn-tag-val" id="futuAccStatusVal">Status: --</span></span>
+                        </div>
+                      </div>
+                      <div class="futu-conn-meta-row">
+                        <span class="futu-conn-meta-extra" id="futuAccRoleVal">Role: --</span>
+                        <span class="futu-conn-meta-extra" id="futuAccSimTypeVal">Sim Type: --</span>
+                        <span class="futu-conn-meta-extra" id="futuAccMarketAuthVal">Market Auth: --</span>
+                        <span class="futu-conn-meta-extra" id="futuAccFirmVal">Firm: --</span>
+                        <span class="futu-conn-meta-extra" id="futuAccCardVal">Card: --</span>
+                        <span class="futu-conn-meta-extra" id="futuAccUniCardVal">Uni Card: --</span>
+                      </div>
+                      <div class="futu-conn-acc-pill" id="futuAccPill" style="display:none;">
+                        <span id="futuAccIdBadge">--</span>
+                      </div>
+                    </div>
+                    <div class="futu-conn-kpi-row">
+                      <div class="panel-header" style="margin-bottom:8px;">
+                        <div class="panel-title">📊 Session KPI <span id="futuKpiDurationBadge" class="kpi-duration-badge" style="display:none;"></span></div>
+                        <div class="panel-subtitle">Live FUTU trade performance snapshot</div>
+                      </div>
+                      <div id="futuConnKpiGrid" class="paper-kpi-grid"></div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
+          </section>
 
-          </div>
-        </div>
-
-        <div class="panel" style="padding:12px;">
-          <div class="chart-summary-strip" id="futuChartSummaryStrip" style="display:none;"></div>
-          <div class="range-group" id="futuCurveModeGroup" style="margin-bottom:8px;">
-            <button class="range-btn active" data-futu-curve-mode="account">Account Curve</button>
-            <button class="range-btn" data-futu-curve-mode="strategy">Strategy Curve</button>
-          </div>
-          <div class="range-group" id="futuRangeGroup">
-            <button class="range-btn" data-futu-range-days="0.25">6h</button>
-            <button class="range-btn active" data-futu-range-days="0.5">12h</button>
-            <button class="range-btn" data-futu-range-days="1">1d</button>
-            <button class="range-btn" data-futu-range-days="7">7d</button>
-            <button class="range-btn" data-futu-range-days="30">30d</button>
-            <button class="range-btn" data-futu-range-days="60">60d</button>
-          </div>
-          <div class="chart-wrap">
-            <div id="futuChart"></div>
-            <div class="chart-legend" id="futuLegend">
-              <div class="legend-title" id="futuLegendTitle">Futu Metrics</div>
-              <div class="legend-row"><span class="legend-key" id="futuLegendPortfolioKey">Portfolio</span><span class="legend-val" id="futuLegendPortfolio">--</span></div>
-              <div class="legend-row"><span class="legend-key" id="futuLegendPortfolioPnlKey">Portfolio PnL</span><span class="legend-val" id="futuLegendPortfolioPnl">--</span></div>
-              <div class="legend-row"><span class="legend-key">QQQ Benchmark</span><span class="legend-val" id="futuLegendBenchmark">--</span></div>
-              <div class="legend-row"><span class="legend-key">QQQ Return</span><span class="legend-val" id="futuLegendBenchmarkPnl">--</span></div>
-              <div class="legend-row"><span class="legend-key">Spread</span><span class="legend-val" id="futuLegendSpread">--</span></div>
-              <div class="legend-row"><span class="legend-key">Last Update</span><span class="legend-val" id="futuLegendUpdated">--</span></div>
+          <section class="futu-terminal-section is-open" data-futu-section="market">
+            <button class="futu-section-toggle" type="button" data-futu-section-target="futuSectionMarket" data-futu-inline-toggle="1" aria-controls="futuSectionMarket" aria-expanded="true" onclick="window.__toggleFutuSection && window.__toggleFutuSection('futuSectionMarket', null, this)">
+              <span class="futu-section-copy">
+                <span class="futu-section-kicker">Market Zone</span>
+                <span class="futu-section-title">图表、报价与策略视图</span>
+                <span class="futu-section-subtitle">Trading curve, strategy sleeve, regime overlay and realtime market context.</span>
+              </span>
+              <span class="futu-section-preview">
+                <span class="futu-section-chip">Curve</span>
+                <span class="futu-section-chip">Sleeve</span>
+                <span class="futu-section-chip">Quotes</span>
+              </span>
+              <span class="futu-section-chevron" aria-hidden="true"></span>
+            </button>
+            <div class="futu-section-body open" id="futuSectionMarket" aria-hidden="false" style="display:block;">
+              <div class="futu-zone-grid futu-zone-grid-market">
+                <div class="panel futu-chart-stage" style="padding:12px;">
+                  <div class="chart-summary-strip" id="futuChartSummaryStrip" style="display:none;"></div>
+                  <div class="futu-sleeve-strip">
+                    <div class="futu-sleeve-strip-header">
+                      <div class="futu-sleeve-strip-title">Strategy Sleeve Metrics</div>
+                      <div class="futu-sleeve-strip-subtitle">Overlay allocation metrics aligned with the current trading view</div>
+                    </div>
+                    <div id="futuOverlayMetrics" class="portfolio-overlay-metrics"></div>
+                  </div>
+                  <div class="futu-chart-toolbar">
+                    <div class="range-group" id="futuCurveModeGroup">
+                      <button class="range-btn active" data-futu-curve-mode="account">Account Curve</button>
+                      <button class="range-btn" data-futu-curve-mode="strategy">Strategy Curve</button>
+                    </div>
+                    <div class="range-group" id="futuRangeGroup">
+                      <button class="range-btn" data-futu-range-days="0.25">6h</button>
+                      <button class="range-btn active" data-futu-range-days="0.5">12h</button>
+                      <button class="range-btn" data-futu-range-days="1">1d</button>
+                      <button class="range-btn" data-futu-range-days="7">7d</button>
+                      <button class="range-btn" data-futu-range-days="30">30d</button>
+                      <button class="range-btn" data-futu-range-days="60">60d</button>
+                    </div>
+                  </div>
+                  <div class="chart-wrap futu-chart-layout">
+                    <div id="futuChart"></div>
+                    <div class="chart-legend" id="futuLegend">
+                      <div class="legend-title" id="futuLegendTitle">Futu Metrics</div>
+                      <div class="legend-row"><span class="legend-key" id="futuLegendPortfolioKey">Portfolio</span><span class="legend-val" id="futuLegendPortfolio">--</span></div>
+                      <div class="legend-row"><span class="legend-key" id="futuLegendPortfolioPnlKey">Portfolio PnL</span><span class="legend-val" id="futuLegendPortfolioPnl">--</span></div>
+                      <div class="legend-row"><span class="legend-key">QQQ Benchmark</span><span class="legend-val" id="futuLegendBenchmark">--</span></div>
+                      <div class="legend-row"><span class="legend-key">QQQ Return</span><span class="legend-val" id="futuLegendBenchmarkPnl">--</span></div>
+                      <div class="legend-row"><span class="legend-key">Spread</span><span class="legend-val" id="futuLegendSpread">--</span></div>
+                      <div class="legend-row"><span class="legend-key">Last Update</span><span class="legend-val" id="futuLegendUpdated">--</span></div>
+                    </div>
+                  </div>
+                </div>
+                <div id="futuOverlayPanel" class="panel portfolio-overlay-panel">
+                  <div class="panel-header">
+                    <div class="panel-title"><span class="panel-title-icon">R</span> Regime Overlay</div>
+                    <div class="panel-subtitle">FUTU 策略袖口沿用 paper 候选池优化出来的风险叠加层。</div>
+                  </div>
+                  <div class="portfolio-overlay-body">
+                    <div class="portfolio-overlay-main">
+                      <div class="portfolio-overlay-hero">
+                        <div class="portfolio-overlay-title">
+                          <h3 id="futuRegimeTitle">等待策略分配快照</h3>
+                          <p id="futuRegimeSubtitle">最近一次候选池优化完成后，这里会同步显示 FUTU 侧使用的 regime 约束。</p>
+                        </div>
+                        <div id="futuRegimeBadge" class="regime-badge">Pending</div>
+                      </div>
+                      <div id="futuExposureWrap" class="overlay-exposure-wrap"></div>
+                    </div>
+                    <div class="portfolio-overlay-side">
+                      <div id="futuDiagnostics" class="overlay-diagnostics"></div>
+                      <div id="futuReasons" class="overlay-reasons"></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="panel futu-realtime-panel">
+                  <div class="panel-header">
+                    <div class="panel-title"><span class="panel-title-icon">📡</span> Realtime Market</div>
+                    <div class="panel-subtitle">Shared quote engine with Paper Trading</div>
+                  </div>
+                  <div id="futuRtMarketGrid" class="rt-market-grid"></div>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
+          </section>
 
-        <div class="panel">
+          <section class="futu-terminal-section is-open" data-futu-section="portfolio">
+            <button class="futu-section-toggle" type="button" data-futu-section-target="futuSectionPortfolio" data-futu-inline-toggle="1" aria-controls="futuSectionPortfolio" aria-expanded="true" onclick="window.__toggleFutuSection && window.__toggleFutuSection('futuSectionPortfolio', null, this)">
+              <span class="futu-section-copy">
+                <span class="futu-section-kicker">Portfolio Zone</span>
+                <span class="futu-section-title">持仓、资金与再平衡</span>
+                <span class="futu-section-subtitle">Holdings, capital summary and manual rebalance workflow.</span>
+              </span>
+              <span class="futu-section-preview">
+                <span class="futu-section-chip">Holdings</span>
+                <span class="futu-section-chip">Capital</span>
+                <span class="futu-section-chip">Rebalance</span>
+              </span>
+              <span class="futu-section-chevron" aria-hidden="true"></span>
+            </button>
+            <div class="futu-section-body open" id="futuSectionPortfolio" aria-hidden="false" style="display:block;">
+              <div class="panel futu-book-panel">
           <div class="panel-header">
             <div class="panel-title"><span class="panel-title-icon">💼</span> Futu Holdings</div>
             <div class="panel-subtitle" id="futuHoldingsPoolBadge">Holding -- · In Pool -- · Not Held --</div>
@@ -3973,105 +5418,179 @@
             <tbody></tbody>
           </table>
         </div>
-
-        <div class="panel">
-          <div class="panel-header">
-            <div class="panel-title"><span class="panel-title-icon">📡</span> Realtime Market</div>
-            <div class="panel-subtitle">Shared quote engine with Paper Trading</div>
-          </div>
-          <div id="futuRtMarketGrid" class="rt-market-grid"></div>
-        </div>
-
-        <div class="panel" style="padding: 12px 16px;">
-          <div class="panel-header" style="margin-bottom:10px;">
-            <div class="panel-title"><span class="panel-title-icon">🔍</span> Activity Filter</div>
-            <div class="panel-subtitle">Applies to Open Orders · Cancel History · Trade History</div>
-          </div>
-          <div class="futu-filter-strip">
-            <div class="field" style="min-width:220px; flex:1 1 220px; max-width:360px;">
-              <label class="field-label">Symbol</label>
-              <input id="futuActivityFilterInput" placeholder="e.g. AAPL or US.AAPL" style="width:100%;" />
+              </div>
             </div>
-            <div class="field" style="min-width:160px;">
-              <label class="field-label">Time Range</label>
-              <select id="futuActivityRangeSelect" style="width:160px;">
-                <option value="1">Last 1 Day</option>
-                <option value="7">Last 7 Days</option>
-                <option value="30" selected>Last 30 Days</option>
-                <option value="90">Last 90 Days</option>
-                <option value="0">All</option>
-              </select>
+          </section>
+
+          <details class="futu-terminal-section futu-native-section" data-futu-section="workflow" open>
+            <summary class="futu-section-toggle" aria-controls="futuSectionWorkflow" aria-expanded="true">
+              <span class="futu-section-copy">
+                <span class="futu-section-kicker">Workflow Zone</span>
+                <span class="futu-section-title">订单工作流与执行入口</span>
+                <span class="futu-section-subtitle">Unified trading operations workspace with filters, orders, fills and readiness summary.</span>
+              </span>
+              <span class="futu-section-preview">
+                <span class="futu-section-chip">Filter</span>
+                <span class="futu-section-chip">Orders</span>
+                <span class="futu-section-chip">Fills</span>
+                <span class="futu-section-chip">Checklist</span>
+              </span>
+              <span class="futu-section-chevron" aria-hidden="true"></span>
+            </summary>
+            <div class="futu-section-body open" id="futuSectionWorkflow" aria-hidden="false" style="display:block;">
+              <div class="futu-zone-grid futu-zone-grid-workflow">
+                <div class="panel futu-trading-panel">
+                  <div class="futu-ops-header">
+                    <div class="futu-ops-header-copy">
+                      <div class="futu-ops-title">Trading Operations</div>
+                      <div class="futu-ops-subtitle">Activity filter, open orders, cancels and fills in one execution workspace.</div>
+                    </div>
+                  </div>
+                  <div class="futu-trading-topbar">
+                    <div class="futu-panel-section futu-ops-filter">
+                      <div class="futu-ops-section-header">
+                        <div class="futu-ops-section-copy">
+                          <div class="futu-ops-section-title">Activity Filter</div>
+                          <div class="futu-ops-section-subtitle">Applies to open orders, cancel history and trade history.</div>
+                        </div>
+                      </div>
+                      <div class="futu-filter-strip">
+                        <div class="field" style="min-width:220px; flex:1 1 220px; max-width:360px;">
+                          <label class="field-label">Symbol</label>
+                          <input id="futuActivityFilterInput" placeholder="e.g. AAPL or US.AAPL" style="width:100%;" />
+                        </div>
+                        <div class="field" style="min-width:160px;">
+                          <label class="field-label">Time Range</label>
+                          <select id="futuActivityRangeSelect" style="width:160px;">
+                            <option value="1">Last 1 Day</option>
+                            <option value="7">Last 7 Days</option>
+                            <option value="30" selected>Last 30 Days</option>
+                            <option value="90">Last 90 Days</option>
+                            <option value="0">All</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                    <details class="futu-drawer-card futu-checklist-summary-card futu-native-drawer mode-sim" id="futuChecklistSummaryCard" open>
+                      <summary class="futu-checklist-summary-head">
+                        <div>
+                          <div class="futu-checklist-summary-kicker">Readiness Gate</div>
+                          <div class="futu-checklist-summary-title">Real Trading Checklist</div>
+                          <div class="futu-checklist-summary-text" id="futuChecklistSummaryText">SIM rehearsal active. Expand to review live readiness gates.</div>
+                        </div>
+                        <span class="futu-drawer-toggle" aria-controls="futuChecklistDrawer" aria-expanded="true">
+                          <span class="futu-section-chevron" aria-hidden="true"></span>
+                        </span>
+                      </summary>
+                      <div class="futu-checklist-summary-row">
+                        <span class="futu-checklist-summary-badge" id="futuChecklistSummaryStatus">Waiting</span>
+                        <span class="futu-checklist-summary-meta" id="futuChecklistSummaryMeta">Checklist summary will appear after FUTU context refresh.</span>
+                      </div>
+                      <div class="futu-drawer-body open" id="futuChecklistDrawer" aria-hidden="false" style="display:block;">
+                        <div class="futu-checklist-grid" id="futuChecklistGrid"></div>
+                      </div>
+                    </details>
+                  </div>
+                  <div class="futu-panel-section futu-ops-orders">
+                    <div class="futu-ops-section-header">
+                      <div class="futu-ops-section-copy">
+                        <div class="futu-ops-section-title">Open Orders</div>
+                        <div class="futu-ops-section-subtitle">Latest uncompleted FUTU orders with full parameters.</div>
+                      </div>
+                    </div>
+                    <div class="futu-ops-table-shell">
+                      <table id="futuOpenOrdersTable" class="futu-ops-table">
+                        <thead>
+                          <tr>
+                            <th>Created</th>
+                            <th>Order ID</th>
+                            <th>Symbol</th>
+                            <th>Side</th>
+                            <th class="num">Qty</th>
+                            <th class="num">Price</th>
+                            <th class="num">Dealt Qty</th>
+                            <th class="num">Dealt Avg</th>
+                            <th>Type</th>
+                            <th>Status</th>
+                            <th>Params</th>
+                            <th>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody></tbody>
+                      </table>
+                    </div>
+                  </div>
+                  <div class="futu-trading-history-grid">
+                    <div class="futu-panel-section futu-ops-cancel">
+                      <div class="futu-ops-section-header">
+                        <div class="futu-ops-section-copy">
+                          <div class="futu-ops-section-title">Cancel History</div>
+                          <div class="futu-ops-section-subtitle">Canceled orders generated by the FUTU rebalance flow.</div>
+                        </div>
+                      </div>
+                      <div class="futu-ops-table-shell">
+                        <table id="futuCancelHistoryTable" class="futu-ops-table">
+                          <thead>
+                            <tr>
+                              <th>Time</th>
+                              <th>Order ID</th>
+                              <th>Symbol</th>
+                              <th>Side</th>
+                              <th class="num">Qty</th>
+                              <th class="num">Price</th>
+                              <th>Status</th>
+                              <th>Reason</th>
+                              <th>Signal</th>
+                            </tr>
+                          </thead>
+                          <tbody></tbody>
+                        </table>
+                      </div>
+                    </div>
+                    <div class="futu-panel-section futu-ops-fills">
+                      <div class="futu-ops-section-header">
+                        <div class="futu-ops-section-copy">
+                          <div class="futu-ops-section-title">Trade History</div>
+                          <div class="futu-ops-section-subtitle">Executed trades from FUTU API, shown in terminal stream form.</div>
+                        </div>
+                      </div>
+                      <div id="futuTradeHistory" class="futu-ops-stream"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
+          </details>
 
-        <div class="panel">
-          <div class="panel-header">
-            <div class="panel-title"><span class="panel-title-icon">🧾</span> Open Orders (Unfilled / Pending)</div>
-            <div class="panel-subtitle">Latest uncompleted FUTU orders with full parameters</div>
-          </div>
-          <div class="futu-table-scroll">
-            <table id="futuOpenOrdersTable">
-              <thead>
-                <tr>
-                  <th>Created</th>
-                  <th>Order ID</th>
-                  <th>Symbol</th>
-                  <th>Side</th>
-                  <th class="num">Qty</th>
-                  <th class="num">Price</th>
-                  <th class="num">Dealt Qty</th>
-                  <th class="num">Dealt Avg</th>
-                  <th>Type</th>
-                  <th>Status</th>
-                  <th>Params</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </div>
-
-        <div class="panel">
-          <div class="panel-header">
-            <div class="panel-title"><span class="panel-title-icon">🚫</span> Cancel History</div>
-            <div class="panel-subtitle">Canceled orders generated by FUTU rebalance flow</div>
-          </div>
-          <div class="futu-table-scroll">
-            <table id="futuCancelHistoryTable">
-              <thead>
-                <tr>
-                  <th>Time</th>
-                  <th>Order ID</th>
-                  <th>Symbol</th>
-                  <th>Side</th>
-                  <th class="num">Qty</th>
-                  <th class="num">Price</th>
-                  <th>Status</th>
-                  <th>Reason</th>
-                  <th>Signal</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </div>
-
-        <div class="panel">
-          <div class="panel-header">
-            <div class="panel-title"><span class="panel-title-icon">📒</span> FUTU Trade History</div>
-            <div class="panel-subtitle">Executed trades from FUTU API (similar to Paper Trading trade history)</div>
-          </div>
-          <div id="futuTradeHistory" class="trade-history"></div>
-        </div>
-
-        <div class="panel">
-          <div class="panel-header">
-            <div class="panel-title"><span class="panel-title-icon">📜</span> Runtime Logs</div>
-            <div class="panel-subtitle">Futu execution · holdings sync · latest 20 entries</div>
-          </div>
-          <div id="futuLogBox"></div>
+          <details class="futu-terminal-section futu-native-section" data-futu-section="audit" open>
+            <summary class="futu-section-toggle" aria-controls="futuSectionAudit" aria-expanded="true">
+              <span class="futu-section-copy">
+                <span class="futu-section-kicker">Audit Zone</span>
+                <span class="futu-section-title">运行日志与审计轨迹</span>
+                <span class="futu-section-subtitle">Dedicated runtime audit stream for execution and holdings synchronization.</span>
+              </span>
+              <span class="futu-section-preview">
+                <span class="futu-section-chip">Logs</span>
+                <span class="futu-section-chip">Runtime</span>
+              </span>
+              <span class="futu-section-chevron" aria-hidden="true"></span>
+            </summary>
+            <div class="futu-section-body open" id="futuSectionAudit" aria-hidden="false" style="display:block;">
+              <div class="futu-zone-grid futu-zone-grid-audit">
+                <div class="panel futu-audit-panel">
+                  <div class="futu-audit-shell">
+                    <div class="futu-audit-header">
+                      <div class="futu-audit-header-copy">
+                        <div class="futu-audit-title">Runtime Logs</div>
+                        <div class="futu-audit-subtitle">Futu execution · holdings sync · latest 20 entries</div>
+                      </div>
+                    </div>
+                    <div id="futuLogBox"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </details>
         </div>
       </section>
 
@@ -4244,6 +5763,6 @@
   </div>
 
   <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
-  <script src="/app.js?v=20260312b"></script>
+  <script src="/app.js?v=20260312d"></script>
 </body>
 </html>

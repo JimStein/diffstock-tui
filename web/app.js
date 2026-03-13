@@ -69,11 +69,18 @@ const applyRuntimeChips = (state) => {
 };
 
 const switchTabByName = (tabName) => {
+  const content = document.querySelector('.content');
   for (const b of tabs) b.classList.remove('active');
   const targetBtn = Array.from(tabs).find(b => b.dataset.tab === tabName);
   if (targetBtn) targetBtn.classList.add('active');
   for (const p of panels) p.classList.add('hidden');
   document.getElementById(`tab-${tabName}`)?.classList.remove('hidden');
+  content?.classList.toggle('futu-scroll-layout', tabName === 'futu');
+  if (content) {
+    content.scrollTop = 0;
+    content.scrollLeft = 0;
+  }
+  window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
 
   if (tabName === 'forecast') {
     fChart.resize();
@@ -2857,7 +2864,7 @@ const renderFutuConnectionKpis = (futuStatus, futuContext) => {
     <div class='futu-kpi-column'>
       <div class='futu-kpi-column-header'>
         <div class='futu-kpi-column-title'>Account</div>
-        <div class='futu-kpi-column-subtitle'>Broker account view</div>
+        <div class='futu-kpi-column-subtitle'>Broker view</div>
       </div>
       <div class='futu-conn-side-stack'>
         <div class='paper-kpi-card kpi-neutral'>
@@ -2876,7 +2883,7 @@ const renderFutuConnectionKpis = (futuStatus, futuContext) => {
           <div class='futu-kpi-sub'>USD</div>
         </div>
         <div class='paper-kpi-card ${investedMood}'>
-          <div class='paper-kpi-label'>Account Open Risk</div>
+          <div class='paper-kpi-label'>Open Risk</div>
           <div class='paper-kpi-value ${investedClass}'>${Number.isFinite(investedPct) ? `${investedPct.toFixed(1)}%` : '--'}</div>
           <div class='futu-kpi-sub'>%</div>
         </div>
@@ -2885,37 +2892,37 @@ const renderFutuConnectionKpis = (futuStatus, futuContext) => {
     <div class='futu-kpi-column'>
       <div class='futu-kpi-column-header'>
         <div class='futu-kpi-column-title'>Strategy Sleeve</div>
-        <div class='futu-kpi-column-subtitle'>Candidate-pool view</div>
+        <div class='futu-kpi-column-subtitle'>Strategy view</div>
       </div>
       <div class='futu-conn-side-stack'>
         <div class='paper-kpi-card kpi-neutral'>
-          <div class='paper-kpi-label'>Strategy Sleeve NAV</div>
+          <div class='paper-kpi-label'>Sleeve NAV</div>
           <div class='paper-kpi-value'>${Number.isFinite(strategyNav) ? `$${strategyNav.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--'}</div>
           <div class='futu-kpi-sub'>USD</div>
         </div>
         <div class='paper-kpi-card ${strategyPnlMood}'>
-          <div class='paper-kpi-label'>Strategy Sleeve PnL</div>
+          <div class='paper-kpi-label'>Sleeve PnL</div>
           <div class='paper-kpi-value ${Number.isFinite(strategyPnlUsd) && strategyPnlUsd < 0 ? 'down' : 'up'}'>${Number.isFinite(strategyPnlUsd) ? `${formatSignedMoney(strategyPnlUsd)} (${formatPct(strategyPnlPct)})` : '--'}</div>
           <div class='futu-kpi-sub'>USD</div>
         </div>
         <div class='paper-kpi-card kpi-neutral'>
-          <div class='paper-kpi-label'>Rebalance Capital Limit</div>
+          <div class='paper-kpi-label'>Cap Limit</div>
           <div class='paper-kpi-value'>${hasCapitalLimit ? `$${capitalLimitUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'Unlimited'}</div>
           <div class='futu-kpi-sub'>Applied to rebalance sizing</div>
           <div class='futu-kpi-sub'>Startup base ${Number.isFinite(strategyBaseCapitalUsd) && strategyBaseCapitalUsd > 0 ? `$${strategyBaseCapitalUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--'}</div>
         </div>
         <div class='paper-kpi-card ${ddMood}'>
-          <div class='paper-kpi-label'>Sleeve Max Drawdown</div>
+          <div class='paper-kpi-label'>Max Drawdown</div>
           <div class='paper-kpi-value ${Number.isFinite(maxDrawdownPct) && maxDrawdownPct < 0 ? 'down' : ''}'>${Number.isFinite(maxDrawdownPct) ? `${maxDrawdownPct.toFixed(2)}%` : '--'}</div>
           <div class='futu-kpi-sub'>%</div>
         </div>
         <div class='paper-kpi-card ${winMood}'>
-          <div class='paper-kpi-label'>Sleeve Win Rate</div>
+          <div class='paper-kpi-label'>Win Rate</div>
           <div class='paper-kpi-value'>${Number.isFinite(winRate) ? `${winRate.toFixed(1)}%` : '--'}</div>
           <div class='futu-kpi-sub'>SELL fills %</div>
         </div>
         <div class='paper-kpi-card ${spreadMood}'>
-          <div class='paper-kpi-label'>Sleeve vs Benchmark</div>
+          <div class='paper-kpi-label'>vs Benchmark</div>
           <div class='paper-kpi-value ${spreadClass}'>${Number.isFinite(spreadPct) ? `${spreadPct >= 0 ? '+' : ''}${spreadPct.toFixed(2)}%` : '--'}</div>
           <div class='futu-kpi-sub'>%</div>
         </div>
@@ -4556,6 +4563,10 @@ const setFutuManualOrderHint = (text, mode = '') => {
 const renderFutuTradingChecklist = (context) => {
   const grid = document.getElementById('futuChecklistGrid');
   if (!grid) return;
+  const summaryCard = document.getElementById('futuChecklistSummaryCard');
+  const summaryStatus = document.getElementById('futuChecklistSummaryStatus');
+  const summaryMeta = document.getElementById('futuChecklistSummaryMeta');
+  const summaryText = document.getElementById('futuChecklistSummaryText');
 
   const items = [
     {
@@ -4622,13 +4633,82 @@ const renderFutuTradingChecklist = (context) => {
     },
   ];
 
-  grid.innerHTML = items.map((item) => `
-    <div class='futu-checklist-item ${item.tone}'>
-      <div class='futu-checklist-label'>${escapeHtmlText(item.label)}</div>
-      <div class='futu-checklist-status'>${escapeHtmlText(item.status)}</div>
-      <div class='futu-checklist-text'>${escapeHtmlText(item.text)}</div>
-    </div>
-  `).join('');
+  const readyCount = items.filter((item) => item.tone === 'ok').length;
+  const attentionCount = items.length - readyCount;
+
+  summaryCard?.classList.toggle('mode-real', !!context.isRealMode);
+  summaryCard?.classList.toggle('mode-sim', !context.isRealMode);
+  if (summaryStatus) summaryStatus.textContent = `${readyCount}/${items.length} Ready`;
+  if (summaryMeta) {
+    summaryMeta.textContent = `${attentionCount} attention · ${context.isRealMode ? 'REAL context visible' : 'SIM context active'}`;
+  }
+  if (summaryText) {
+    summaryText.textContent = context.isRealMode
+      ? 'Real account context detected. Expand to inspect safety and readiness gates.'
+      : 'SIM rehearsal active. Expand to review the live-readiness checklist.';
+  }
+
+  const checklistGroups = [
+    {
+      title: 'Access Gate',
+      subtitle: 'Broker identity and routing context.',
+      itemIndexes: [0, 1, 6],
+    },
+    {
+      title: 'Connectivity',
+      subtitle: 'Gateway and data-plane readiness.',
+      itemIndexes: [2, 4],
+    },
+    {
+      title: 'Execution Path',
+      subtitle: 'Executor and order submission safeguards.',
+      itemIndexes: [3, 7],
+    },
+    {
+      title: 'Risk Controls',
+      subtitle: 'Allocation overlay and trade guardrails.',
+      itemIndexes: [5],
+    },
+  ];
+
+  const renderChecklistItem = (item) => {
+    const pillToneStyles = {
+      ok: 'border-color:rgba(0,212,170,.26);background:rgba(0,212,170,.12);color:#8ff2d6;',
+      warn: 'border-color:rgba(245,158,11,.26);background:rgba(245,158,11,.12);color:#ffd28a;',
+      fail: 'border-color:rgba(255,71,87,.28);background:rgba(255,71,87,.12);color:#ffb2ba;',
+      unknown: 'border-color:rgba(96,165,250,.24);background:rgba(96,165,250,.10);color:#add2ff;',
+    };
+    return `
+      <article class='futu-checklist-item ${item.tone}' style='display:grid;align-content:start;gap:8px;min-height:96px;padding:12px;border-radius:12px;border:1px solid rgba(255,255,255,.06);background:linear-gradient(180deg, rgba(10,16,24,.92) 0%, rgba(8,12,18,.98) 100%);box-shadow:inset 0 1px 0 rgba(255,255,255,.03);'>
+        <div class='futu-checklist-item-top' style='display:flex;align-items:flex-start;justify-content:space-between;gap:10px;'>
+          <div class='futu-checklist-label' style='font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#8ea2bf;'>${escapeHtmlText(item.label)}</div>
+          <span class='futu-checklist-pill ${item.tone}' style='display:inline-flex;align-items:center;justify-content:center;padding:4px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.10);font-family:var(--mono);font-size:9.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;${pillToneStyles[item.tone] || ''}'>${escapeHtmlText(item.status)}</span>
+        </div>
+        <div class='futu-checklist-text' style='font-size:10.5px;line-height:1.45;color:#d3dceb;'>${escapeHtmlText(item.text)}</div>
+      </article>
+    `;
+  };
+
+  grid.innerHTML = checklistGroups.map((group) => {
+    const groupItems = group.itemIndexes
+      .map((index) => items[index])
+      .filter(Boolean);
+    const okCount = groupItems.filter((item) => item.tone === 'ok').length;
+    return `
+      <section class='futu-checklist-cluster' style='display:grid;gap:10px;padding:12px;border-radius:14px;border:1px solid rgba(255,255,255,.06);background:radial-gradient(circle at top right, rgba(59,130,246,.07), transparent 28%), linear-gradient(180deg, rgba(10,16,24,.92) 0%, rgba(8,12,18,.98) 100%);box-shadow:inset 0 1px 0 rgba(255,255,255,.03);'>
+        <div class='futu-checklist-cluster-head' style='display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,.05);'>
+          <div>
+            <div class='futu-checklist-cluster-title' style='font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#dbe7f8;margin-bottom:3px;'>${escapeHtmlText(group.title)}</div>
+            <div class='futu-checklist-cluster-subtitle' style='font-size:10px;line-height:1.45;color:#8ea2bf;max-width:28ch;'>${escapeHtmlText(group.subtitle)}</div>
+          </div>
+          <span class='futu-checklist-cluster-badge' style='display:inline-flex;align-items:center;justify-content:center;padding:5px 9px;border-radius:999px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.05);color:#eff5ff;font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;'>${okCount}/${groupItems.length} Ready</span>
+        </div>
+        <div class='futu-checklist-cluster-grid' style='display:grid;grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));gap:10px;'>
+          ${groupItems.map(renderChecklistItem).join('')}
+        </div>
+      </section>
+    `;
+  }).join('');
 };
 
 const submitFutuManualOrder = async () => {
@@ -5901,32 +5981,32 @@ const refreshFutu = async () => {
       futuModeRouteCard.classList.toggle('mode-sim', !isRealMode);
     }
     if (futuModeHeroTitle) {
-      futuModeHeroTitle.textContent = isRealMode ? 'REAL ACCOUNT ROUTE' : 'SIMULATION SANDBOX';
+      futuModeHeroTitle.textContent = isRealMode ? 'REAL ROUTE' : 'SIM SANDBOX';
     }
     if (futuModeHeroText) {
       futuModeHeroText.textContent = isRealMode
-        ? 'A REAL trading environment is selected. Live order placement remains safety-blocked until the backend explicitly enables real execution.'
-        : 'Orders currently target the FUTU simulate environment, suitable for dry runs and execution rehearsal.';
+        ? 'Real account selected. Execution is still gated.'
+        : 'Sandbox execution for rehearsal.';
     }
     if (futuModeCardSubtitle) {
       futuModeCardSubtitle.textContent = isRealMode
-        ? 'Real account context is visible now so this page can evolve into a true live-trading console later. At the moment, real order submission is still intentionally blocked.'
-        : 'Simulation sandbox selected. This page is ready to evolve into real trading controls once live order routing is enabled.';
+        ? 'Real account visible. Live routing stays blocked.'
+        : 'Sim route active. Live routing stays gated.';
     }
     if (futuModeSafetyTitle) {
-      futuModeSafetyTitle.textContent = isRealMode ? 'Live orders blocked for safety' : 'Simulation orders allowed';
+      futuModeSafetyTitle.textContent = isRealMode ? 'Live blocked' : 'SIM allowed';
     }
     if (futuModeSafetyText) {
       futuModeSafetyText.textContent = isRealMode
-        ? 'The account can be inspected in REAL mode, but order placement stays in placeholder mode until the real-trading gate is opened deliberately.'
-        : 'Manual orders and rebalance orders stay inside the sandbox account, which is the safest rehearsal path before real deployment.';
+        ? 'Inspection only until the live gate opens.'
+        : 'Manual and rebalance orders stay in SIM.';
     }
     if (futuModeRouteTitle) {
       futuModeRouteTitle.textContent = `Account #${selectedAccId} · ${String(selectedEnv || '--').toUpperCase()}`;
     }
     if (futuModeRouteText) {
       const connState = st.connected ? 'gateway connected' : 'gateway waiting';
-      futuModeRouteText.textContent = `${selectedMarket} market · ${connHostPort} · ${connState}${st.running ? ' · executor armed' : ' · executor idle'}`;
+      futuModeRouteText.textContent = `${selectedMarket} · ${connHostPort} · ${connState}`;
     }
     if (futuLiveGateCard) {
       futuLiveGateCard.classList.toggle('sim', !isRealMode);
@@ -7089,6 +7169,64 @@ const toggleFutuCtrl = () => {
 };
 document.getElementById('futuCtrlSummary')?.addEventListener('click', toggleFutuCtrl);
 futuCtrlChevron?.addEventListener('click', toggleFutuCtrl);
+
+const toggleFutuSection = (targetId, forceOpen = null, toggleEl = null) => {
+  if (!targetId) return;
+  const body = document.getElementById(targetId);
+  if (!body) return;
+  const container = body.closest('.futu-terminal-section, .futu-drawer-card');
+  const toggle = toggleEl || container?.querySelector(`[data-futu-section-target="${targetId}"]`);
+  const willOpen = forceOpen == null ? !body.classList.contains('open') : !!forceOpen;
+
+  body.classList.toggle('open', willOpen);
+  body.setAttribute('aria-hidden', willOpen ? 'false' : 'true');
+  body.style.display = willOpen ? 'block' : 'none';
+  container?.classList.toggle('is-open', willOpen);
+  toggle?.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+
+  if (willOpen && body.querySelector('#futuChart')) {
+    window.setTimeout(() => {
+      try {
+        futuChart.resize();
+        futuChart.fit();
+        renderFutuChartFromCurrentContext();
+        renderFutuChartSummaryStrip();
+      } catch (_) {
+        // UI-only enhancement; ignore layout timing issues while the section opens.
+      }
+    }, 260);
+  }
+};
+
+window.__toggleFutuSection = toggleFutuSection;
+
+const bindFutuSectionToggles = () => {
+  document.querySelectorAll('#tab-futu .futu-section-toggle, #tab-futu .futu-drawer-toggle').forEach((toggle) => {
+    if (toggle.dataset.futuInlineToggle === '1') return;
+    if (toggle.dataset.futuToggleBound === '1') return;
+    toggle.dataset.futuToggleBound = '1';
+    toggle.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const targetId = String(toggle.getAttribute('data-futu-section-target') || '').trim();
+      if (!targetId) return;
+      toggleFutuSection(targetId, null, toggle);
+    });
+  });
+};
+
+document.addEventListener('click', (event) => {
+  const toggle = event?.target?.closest?.('#tab-futu .futu-section-toggle, #tab-futu .futu-drawer-toggle');
+  if (!toggle) return;
+  if (toggle.dataset.futuInlineToggle === '1') return;
+  if (toggle.dataset.futuToggleBound === '1') return;
+  event.preventDefault();
+  const targetId = String(toggle.getAttribute('data-futu-section-target') || '').trim();
+  if (!targetId) return;
+  toggleFutuSection(targetId, null, toggle);
+});
+
+bindFutuSectionToggles();
 
 futuRecentLoads = loadFutuRecentLoads();
 renderFutuRecentLoads();
