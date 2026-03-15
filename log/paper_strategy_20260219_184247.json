@@ -30,19 +30,19 @@
   "targets": [
     {
       "symbol": "COPX",
-      "target_weight": 0.25630093426704925
+      "target_weight": 0.22616458949078833
     },
     {
       "symbol": "IAU",
-      "target_weight": 0.3987948663289763
+      "target_weight": 0.36178265648781016
     },
     {
       "symbol": "TLT",
-      "target_weight": 0.248108830830518
+      "target_weight": 0.1289623010188052
     },
     {
       "symbol": "URA",
-      "target_weight": 0.09679536857345636
+      "target_weight": 0.18801640226223507
     }
   ],
   "analyses": [
@@ -2081,7 +2081,7 @@
           "quantity": 26.0,
           "price": 78.7,
           "notional": 2046.2,
-          "fee": 1.0231000000000001
+          "fee": 1.0231
         },
         {
           "timestamp": "2026-03-13T17:31:54.145640900+08:00",
@@ -2108,9 +2108,156 @@
           "quantity": 76.0,
           "price": 50.9,
           "notional": 3868.4,
-          "fee": 1.9342000000000001
+          "fee": 1.9342
         }
       ]
+    },
+    {
+      "timestamp": "2026-03-13T23:03:17.203420+08:00",
+      "portfolio_value_before": 77695.55349176381,
+      "portfolio_value_after": 77692.28447676383,
+      "cash_after": 4780.144476763822,
+      "trades": [
+        {
+          "timestamp": "2026-03-13T23:03:17.203420+08:00",
+          "symbol": "COPX",
+          "side": "SELL",
+          "quantity": 23.0,
+          "price": 78.27,
+          "notional": 1800.2099999999998,
+          "fee": 0.9001049999999999
+        },
+        {
+          "timestamp": "2026-03-13T23:03:17.203420+08:00",
+          "symbol": "IAU",
+          "side": "SELL",
+          "quantity": 20.0,
+          "price": 95.57,
+          "notional": 1911.3999999999999,
+          "fee": 0.9557
+        },
+        {
+          "timestamp": "2026-03-13T23:03:17.203420+08:00",
+          "symbol": "TLT",
+          "side": "BUY",
+          "quantity": 18.0,
+          "price": 86.94,
+          "notional": 1564.92,
+          "fee": 0.78246
+        },
+        {
+          "timestamp": "2026-03-13T23:03:17.203420+08:00",
+          "symbol": "URA",
+          "side": "BUY",
+          "quantity": 25.0,
+          "price": 50.46,
+          "notional": 1261.5,
+          "fee": 0.63075
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-13T23:30:17.217938100+08:00",
+      "portfolio_value_before": 77524.04947676382,
+      "portfolio_value_after": 77524.02426676382,
+      "cash_after": 4830.5392667638225,
+      "trades": [
+        {
+          "timestamp": "2026-03-13T23:30:17.217938100+08:00",
+          "symbol": "URA",
+          "side": "SELL",
+          "quantity": 1.0,
+          "price": 50.42,
+          "notional": 50.42,
+          "fee": 0.02521
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-14T02:30:27.325141300+08:00",
+      "portfolio_value_before": 76918.98046676381,
+      "portfolio_value_after": 76918.76753216382,
+      "cash_after": 4750.6555321638225,
+      "trades": [
+        {
+          "timestamp": "2026-03-14T02:30:27.325141300+08:00",
+          "symbol": "COPX",
+          "side": "BUY",
+          "quantity": 2.0,
+          "price": 76.835,
+          "notional": 153.67,
+          "fee": 0.076835
+        },
+        {
+          "timestamp": "2026-03-14T02:30:27.325141300+08:00",
+          "symbol": "TLT",
+          "side": "SELL",
+          "quantity": 2.0,
+          "price": 86.5496,
+          "notional": 173.0992,
+          "fee": 0.0865496
+        },
+        {
+          "timestamp": "2026-03-14T02:30:27.325141300+08:00",
+          "symbol": "URA",
+          "side": "BUY",
+          "quantity": 2.0,
+          "price": 49.55,
+          "notional": 99.1,
+          "fee": 0.04955
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-14T23:30:22.165077800+08:00",
+      "portfolio_value_before": 76659.30613216382,
+      "portfolio_value_after": 76652.17855146382,
+      "cash_after": 7361.316951463822,
+      "trades": [
+        {
+          "timestamp": "2026-03-14T23:30:22.165077800+08:00",
+          "symbol": "COPX",
+          "side": "SELL",
+          "quantity": 5.0,
+          "price": 76.37,
+          "notional": 381.85,
+          "fee": 0.190925
+        },
+        {
+          "timestamp": "2026-03-14T23:30:22.165077800+08:00",
+          "symbol": "IAU",
+          "side": "SELL",
+          "quantity": 11.0,
+          "price": 94.48,
+          "notional": 1039.28,
+          "fee": 0.51964
+        },
+        {
+          "timestamp": "2026-03-14T23:30:22.165077800+08:00",
+          "symbol": "TLT",
+          "side": "SELL",
+          "quantity": 81.0,
+          "price": 86.6092,
+          "notional": 7015.3452,
+          "fee": 3.5076726
+        },
+        {
+          "timestamp": "2026-03-14T23:30:22.165077800+08:00",
+          "symbol": "URA",
+          "side": "BUY",
+          "quantity": 118.0,
+          "price": 49.3109,
+          "notional": 5818.686199999999,
+          "fee": 2.9093430999999996
+        }
+      ]
+    },
+    {
+      "timestamp": "2026-03-15T02:30:17.540444400+08:00",
+      "portfolio_value_before": 76652.17855146382,
+      "portfolio_value_after": 76652.17855146382,
+      "cash_after": 7361.316951463822,
+      "trades": []
     }
   ]
 }

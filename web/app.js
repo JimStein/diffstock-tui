@@ -1562,6 +1562,66 @@ const clampUnit = (value) => {
   return Math.max(0, Math.min(1, num));
 };
 
+const getHoldingSignalTone = (value, fallback = 'flat') => {
+  if (value === 'up' || value === 'down' || value === 'flat') return value;
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  if (num > 0) return 'up';
+  if (num < 0) return 'down';
+  return 'flat';
+};
+
+const getHoldingSignalWidth = (pct) => {
+  const num = Math.abs(Number(pct));
+  if (!Number.isFinite(num) || num === 0) return 0;
+  return Math.max(10, clampUnit(num / 12) * 100);
+};
+
+const renderHoldingSignalBar = (pct, tone, trackClass = 'holding-signal-track') => {
+  const width = getHoldingSignalWidth(pct);
+  const toneClass = getHoldingSignalTone(tone);
+  const title = Number.isFinite(Number(pct)) ? formatPct(Number(pct)) : '--';
+  return `<div class='${trackClass}' aria-hidden='true' title='${escapeHtmlText(title)}'>${width > 0 ? `<span class='${trackClass === 'holding-signal-track' ? 'holding-signal-fill' : 'pnl-mini-bar'} ${trackClass === 'holding-signal-track' ? toneClass : `bar-${toneClass}`}' style='width:${width.toFixed(1)}%'></span>` : ''}</div>`;
+};
+
+const renderHoldingSymbolCell = (symbol, pct, tone) => {
+  const toneClass = getHoldingSignalTone(tone);
+  const title = Number.isFinite(Number(pct)) ? `${symbol} ${formatPct(Number(pct))}` : symbol;
+  return `
+    <div class='holding-signal-wrap'>
+      <span class='holding-signal-badge ${toneClass}' title='${escapeHtmlText(title)}'>${escapeHtmlText(symbol)}</span>
+      ${renderHoldingSignalBar(pct, toneClass, 'holding-signal-track')}
+    </div>
+  `;
+};
+
+const renderHoldingPnlCell = (text, pct, tone) => {
+  if (text === '--') return '--';
+  const toneClass = getHoldingSignalTone(tone);
+  return `
+    <div class='pnl-cell-wrap ${toneClass}'>
+      <span class='pnl-cell-value'>${escapeHtmlText(text)}</span>
+      ${renderHoldingSignalBar(pct, toneClass, 'pnl-mini-track')}
+    </div>
+  `;
+};
+
+const renderCapitalSummaryItemCell = (label, pct, tone) => {
+  const toneClass = getHoldingSignalTone(tone);
+  const title = Number.isFinite(Number(pct)) ? `${label} ${formatPct(Number(pct))}` : label;
+  return `
+    <div class='capital-signal-wrap'>
+      <span class='capital-signal-badge ${toneClass}' title='${escapeHtmlText(title)}'>${escapeHtmlText(label)}</span>
+      ${renderHoldingSignalBar(pct, toneClass, 'holding-signal-track')}
+    </div>
+  `;
+};
+
+const renderCapitalStatusPill = (label, tone) => {
+  const toneClass = getHoldingSignalTone(tone);
+  return `<span class='capital-status-pill ${toneClass}'>${escapeHtmlText(label)}</span>`;
+};
+
 const formatWeightPct = (value, digits = 1) => {
   if (!Number.isFinite(value)) return '--';
   return `${(value * 100).toFixed(digits)}%`;
@@ -4003,29 +4063,24 @@ const fillHoldingsTable = (paperStatus) => {
 
     let unrealizedText = '--';
     let unrealizedClass = '';
+    let unrealizedPct = null;
     if (quantity != null && currentPrice != null && avgCost != null && quantity > 0) {
       const unrealizedUsd = (currentPrice - avgCost) * quantity;
-      const unrealizedPct = avgCost !== 0 ? ((currentPrice - avgCost) / avgCost) * 100 : 0;
+      unrealizedPct = avgCost !== 0 ? ((currentPrice - avgCost) / avgCost) * 100 : 0;
       unrealizedText = `${formatSignedMoney(unrealizedUsd)} (${unrealizedPct >= 0 ? '+' : ''}${unrealizedPct.toFixed(2)}%)`;
       unrealizedClass = unrealizedUsd >= 0 ? 'up' : 'down';
     }
 
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${sym}</td>
+      <td class='holding-symbol-cell'>${renderHoldingSymbolCell(sym, unrealizedPct, unrealizedClass)}</td>
       <td class='up'>Holding</td>
       <td class='num'>${quantity == null ? '--' : quantity.toFixed(2)}</td>
       <td class='num'>${priceCell}</td>
       <td class='num'>${avgCost == null ? '--' : '$' + avgCost.toFixed(2)}</td>
       <td class='num'>${assetValue == null ? '--' : '$' + assetValue.toFixed(2)}</td>
       <td class='num'>${targetWeight == null ? '--' : `${(targetWeight * 100).toFixed(2)}%`}</td>
-      <td class='num ${unrealizedClass}'>${(() => {
-        if (unrealizedText === '--') return '--';
-        const uPct = avgCost !== 0 && quantity > 0 ? Math.abs(((currentPrice - avgCost) / avgCost) * 100) : 0;
-        const barW = Math.min(uPct * 2, 100);
-        const barCls = unrealizedClass === 'up' ? 'bar-up' : 'bar-down';
-        return `<div class='pnl-cell-wrap'><span>${unrealizedText}</span><div class='pnl-mini-bar ${barCls}' style='width:${barW}%'></div></div>`;
-      })()}</td>
+      <td class='num ${unrealizedClass}'>${renderHoldingPnlCell(unrealizedText, unrealizedPct, unrealizedClass)}</td>
     `;
     tb.appendChild(tr);
   }
@@ -4060,8 +4115,8 @@ const fillCapitalSummaryTable = (paperStatus) => {
 
   const cashTr = document.createElement('tr');
   cashTr.innerHTML = `
-    <td><strong>ACCOUNT CASH</strong></td>
-    <td>Account</td>
+    <td>${renderCapitalSummaryItemCell('ACCOUNT CASH', cashWeightPct, 'flat')}</td>
+    <td>${renderCapitalStatusPill('Account', 'flat')}</td>
     <td class='num'>${safeTotal > 0 ? `${cashWeightPct.toFixed(2)}%` : '--'}</td>
     <td class='num'>${Number.isFinite(cashUsd) ? '$' + cashUsd.toFixed(2) : '--'}</td>
     <td class='num'>${safeTotal > 0 ? `$${investedValue.toFixed(2)} (${investedWeightPct.toFixed(2)}%)` : '--'}</td>
@@ -4130,8 +4185,8 @@ const fillFutuCapitalSummaryTable = (futuStatus) => {
 
   const cashTr = document.createElement('tr');
   cashTr.innerHTML = `
-    <td><strong>ACCOUNT CASH</strong></td>
-    <td>Account</td>
+    <td>${renderCapitalSummaryItemCell('ACCOUNT CASH', cashWeightPct, 'flat')}</td>
+    <td>${renderCapitalStatusPill('Account', 'flat')}</td>
     <td class='num'>${safeTotal > 0 ? `${cashWeightPct.toFixed(2)}%` : '--'}</td>
     <td class='num'>${Number.isFinite(cashUsd) ? '$' + cashUsd.toFixed(2) : '--'}</td>
     <td class='num'>${safeTotal > 0 ? `$${investedValue.toFixed(2)} (${investedWeightPct.toFixed(2)}%)` : '--'}</td>
@@ -4158,14 +4213,14 @@ const fillFutuCapitalSummaryTable = (futuStatus) => {
 
   const totalTr = document.createElement('tr');
   totalTr.innerHTML = `
-    <td><strong>ACCOUNT NAV</strong></td>
-    <td>Account</td>
+    <td>${renderCapitalSummaryItemCell('ACCOUNT NAV', totalPnlPct, totalPnlClass)}</td>
+    <td>${renderCapitalStatusPill('Account', totalPnlClass)}</td>
     <td class='num'>${safeTotal > 0 ? `${cashWeightPct.toFixed(2)}% cash` : '--'}</td>
     <td class='num'>${Number.isFinite(cashUsd) ? '$' + cashUsd.toFixed(2) : '--'}</td>
     <td class='num'>${safeTotal > 0 ? `$${investedValue.toFixed(2)} (${investedWeightPct.toFixed(2)}%)` : '--'}</td>
     <td class='num'>${Number.isFinite(totalAssets) ? '$' + totalAssets.toFixed(2) : '--'}</td>
-    <td class='num ${totalPnlClass} ${returnBgClass}'>${returnText}</td>
-    <td class='num ${totalPnlClass} ${returnBgClass}'>${pnlText}</td>
+    <td class='num ${totalPnlClass} ${returnBgClass} capital-pnl-cell'>${renderHoldingPnlCell(returnText, totalPnlPct, totalPnlClass)}</td>
+    <td class='num ${totalPnlClass} ${returnBgClass} capital-pnl-cell'>${renderHoldingPnlCell(pnlText, totalPnlPct, totalPnlClass)}</td>
   `;
   tb.appendChild(totalTr);
 
@@ -4191,16 +4246,16 @@ const fillFutuCapitalSummaryTable = (futuStatus) => {
 
   const strategyTr = document.createElement('tr');
   strategyTr.innerHTML = `
-    <td><strong>STRATEGY SLEEVE FT</strong></td>
-    <td>Pool Snapshot</td>
+    <td>${renderCapitalSummaryItemCell('STRATEGY SLEEVE FT', strategyPnlPct, strategyPnlClass)}</td>
+    <td>${renderCapitalStatusPill('Pool Snapshot', strategyPnlClass)}</td>
     <td class='num'>${Number.isFinite(strategyCashWeightPct) ? `${strategyCashWeightPct.toFixed(2)}%` : '--'}</td>
     <td class='num'>${Number.isFinite(strategyCash) ? '$' + strategyCash.toFixed(2) : '--'}</td>
     <td class='num'>${Number.isFinite(strategyInvested) && Number.isFinite(strategyTotal) && strategyTotal > 0
       ? `$${strategyInvested.toFixed(2)} (${((strategyInvested / strategyTotal) * 100).toFixed(2)}%)`
       : (Number.isFinite(strategyInvested) ? '$' + strategyInvested.toFixed(2) : '--')}</td>
     <td class='num'>${Number.isFinite(strategyTotal) ? '$' + strategyTotal.toFixed(2) : '--'}</td>
-    <td class='num ${strategyPnlClass} ${strategyBgClass}'>${strategyReturnText}</td>
-    <td class='num ${strategyPnlClass} ${strategyBgClass}'>${strategyPnlText}</td>
+    <td class='num ${strategyPnlClass} ${strategyBgClass} capital-pnl-cell'>${renderHoldingPnlCell(strategyReturnText, strategyPnlPct, strategyPnlClass)}</td>
+    <td class='num ${strategyPnlClass} ${strategyBgClass} capital-pnl-cell'>${renderHoldingPnlCell(strategyPnlText, strategyPnlPct, strategyPnlClass)}</td>
   `;
   tb.appendChild(strategyTr);
 
@@ -4226,16 +4281,16 @@ const fillFutuCapitalSummaryTable = (futuStatus) => {
 
   const strategyRtTr = document.createElement('tr');
   strategyRtTr.innerHTML = `
-    <td><strong>STRATEGY SLEEVE RT</strong></td>
-    <td>Pool Realtime</td>
+    <td>${renderCapitalSummaryItemCell('STRATEGY SLEEVE RT', rtPnlPct, rtPnlClass)}</td>
+    <td>${renderCapitalStatusPill('Pool Realtime', rtPnlClass)}</td>
     <td class='num'>${Number.isFinite(rtCashWeightPct) ? `${rtCashWeightPct.toFixed(2)}%` : '--'}</td>
     <td class='num'>${Number.isFinite(rtCash) ? '$' + rtCash.toFixed(2) : '--'}</td>
     <td class='num'>${Number.isFinite(rtInvested) && Number.isFinite(rtTotal) && rtTotal > 0
       ? `$${rtInvested.toFixed(2)} (${((rtInvested / rtTotal) * 100).toFixed(2)}%)`
       : (Number.isFinite(rtInvested) ? '$' + rtInvested.toFixed(2) : '--')}</td>
     <td class='num'>${Number.isFinite(rtTotal) ? '$' + rtTotal.toFixed(2) : '--'}</td>
-    <td class='num ${rtPnlClass} ${rtBgClass}'>${rtReturnText}</td>
-    <td class='num ${rtPnlClass} ${rtBgClass}'>${rtPnlText}</td>
+    <td class='num ${rtPnlClass} ${rtBgClass} capital-pnl-cell'>${renderHoldingPnlCell(rtReturnText, rtPnlPct, rtPnlClass)}</td>
+    <td class='num ${rtPnlClass} ${rtBgClass} capital-pnl-cell'>${renderHoldingPnlCell(rtPnlText, rtPnlPct, rtPnlClass)}</td>
   `;
   tb.appendChild(strategyRtTr);
 
@@ -4522,9 +4577,10 @@ const fillFutuHoldingsTable = (futuStatus) => {
 
     let unrealizedText = '--';
     let unrealizedClass = '';
+    let unrealizedPct = null;
     if (quantity != null && currentPrice != null && validAvgCost != null && quantity > 0) {
       const unrealizedUsd = (currentPrice - validAvgCost) * quantity;
-      const unrealizedPct = validAvgCost !== 0 ? ((currentPrice - validAvgCost) / validAvgCost) * 100 : 0;
+      unrealizedPct = validAvgCost !== 0 ? ((currentPrice - validAvgCost) / validAvgCost) * 100 : 0;
       unrealizedText = `${formatSignedMoney(unrealizedUsd)} (${unrealizedPct >= 0 ? '+' : ''}${unrealizedPct.toFixed(2)}%)`;
       unrealizedClass = unrealizedUsd >= 0 ? 'up' : 'down';
     }
@@ -4534,6 +4590,7 @@ const fillFutuHoldingsTable = (futuStatus) => {
       const plValValid = String(rawRow?.pl_val_valid).toLowerCase() !== 'false';
       const plVal = plValValid ? toNum(rawRow?.pl_val) : null;
       if (ratioAny != null) {
+        unrealizedPct = ratioAny;
         const ratioText = `${ratioAny >= 0 ? '+' : ''}${ratioAny.toFixed(2)}%`;
         if (plVal != null) {
           unrealizedText = `${formatSignedMoney(plVal)} (${ratioText})`;
@@ -4557,6 +4614,7 @@ const fillFutuHoldingsTable = (futuStatus) => {
       targetWeight,
       unrealizedText,
       unrealizedClass,
+      unrealizedPct,
       isCandidate: isFutuCandidateSymbol(sym, candidateSet, futuStatus),
     };
 
@@ -4583,14 +4641,14 @@ const fillFutuHoldingsTable = (futuStatus) => {
   for (const row of poolRows) {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td style='font-weight:600;letter-spacing:.2px;'>${row.symbol}</td>
+      <td class='holding-symbol-cell'>${renderHoldingSymbolCell(row.symbol, row.unrealizedPct, row.unrealizedClass)}</td>
       <td class='up' style='font-weight:600;font-size:11px;font-family:var(--mono);'>Pool</td>
       <td class='num'>${row.quantity == null ? '--' : row.quantity.toFixed(2)}</td>
       <td class='num'>${row.currentPrice == null ? '--' : '$' + row.currentPrice.toFixed(2)}</td>
       <td class='num'>${row.validAvgCost == null ? '--' : '$' + row.validAvgCost.toFixed(2)}</td>
       <td class='num'>${row.assetValue == null ? '--' : '$' + row.assetValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
       <td class='num'>${Number.isFinite(row.targetWeight) ? `${(row.targetWeight * 100).toFixed(2)}%` : '--'}</td>
-      <td class='num ${row.unrealizedClass}' style='font-weight:600;'>${row.unrealizedText}</td>
+      <td class='num ${row.unrealizedClass}' style='font-weight:600;'>${renderHoldingPnlCell(row.unrealizedText, row.unrealizedPct, row.unrealizedClass)}</td>
       <td><button class='ghost futu-manual-fill-btn' data-symbol='${row.symbol}' data-price='${row.currentPrice == null ? '' : row.currentPrice.toFixed(4)}'>Prefill</button></td>
     `;
     tb.appendChild(tr);
@@ -4605,13 +4663,13 @@ const fillFutuHoldingsTable = (futuStatus) => {
       for (const row of nonPoolRows) {
         const tr = document.createElement('tr');
         tr.innerHTML = `
-          <td style='font-weight:600;letter-spacing:.2px;'>${row.symbol}</td>
+          <td class='holding-symbol-cell'>${renderHoldingSymbolCell(row.symbol, row.unrealizedPct, row.unrealizedClass)}</td>
           <td class='flat' style='font-weight:600;font-size:11px;font-family:var(--mono);'>Excluded</td>
           <td class='num'>${row.quantity == null ? '--' : row.quantity.toFixed(2)}</td>
           <td class='num'>${row.currentPrice == null ? '--' : '$' + row.currentPrice.toFixed(2)}</td>
           <td class='num'>${row.validAvgCost == null ? '--' : '$' + row.validAvgCost.toFixed(2)}</td>
           <td class='num'>${row.assetValue == null ? '--' : '$' + row.assetValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-          <td class='num ${row.unrealizedClass}' style='font-weight:600;'>${row.unrealizedText}</td>
+          <td class='num ${row.unrealizedClass}' style='font-weight:600;'>${renderHoldingPnlCell(row.unrealizedText, row.unrealizedPct, row.unrealizedClass)}</td>
         `;
         nonPoolTb.appendChild(tr);
       }
